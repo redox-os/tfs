@@ -1,0 +1,13 @@
+[package]
+name = "plru"
+version = "0.1.0"
+authors = ["ticki <Ticki@users.noreply.github.com>"]
+description = "Implementation of concurrent (lockless) pseudo-LRU cache replacement policy."
+repository = "https://github.com/ticki/tfs"
+documentation = "https://docs.rs/plru"
+license = "MIT"
+keywords = ["cache", "lru", "pseudolru", "page", "concurrent"]
+exclude = ["target", "CHANGELOG.md", "Cargo.lock"]
+
+[features]
+no_std = []
