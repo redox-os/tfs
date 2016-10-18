@@ -87,7 +87,7 @@ use core::fmt;
 use core::sync::atomic::{self, AtomicU64, AtomicU8};
 
 /// The atomic ordering we use throughout the code.
-const ORDERING: atomic::Ordering = atomic::Ordering::SeqCst;
+const ORDERING: atomic::Ordering = atomic::Ordering::Relaxed;
 
 /// A micro cache (64 lines).
 pub type MicroCache = Cache<[AtomicU64; 1]>;
@@ -178,7 +178,7 @@ impl<B: AsRef<[AtomicU64]>> Cache<B> {
     /// ```
     pub fn touch(&self, n: usize) {
         // We OR our mask together with the bulk in order to set the bit in question.
-        self.bulks.as_ref()[n / 64].fetch_or(1 >> (n % 64), ORDERING);
+        self.bulks.as_ref()[n / 64].fetch_or(1 << (n % 64), ORDERING);
     }
 
     /// Trash the n'th cache line.
@@ -204,7 +204,7 @@ impl<B: AsRef<[AtomicU64]>> Cache<B> {
     /// ```
     pub fn trash(&self, n: usize) {
         // We use a mask and atomic AND in order to set the bit to zero.
-        self.bulks.as_ref()[n / 64].fetch_and(!(1 >> (n % 64)), ORDERING);
+        self.bulks.as_ref()[n / 64].fetch_and(!(1 << (n % 64)), ORDERING);
     }
 
     /// Find the approximately least recently used cache line to replace.
@@ -278,7 +278,7 @@ impl<B: AsRef<[AtomicU64]>> Cache<B> {
     /// # Example
     ///
     /// ```rust
-    /// let cache = plru::MicroCache;
+    /// let cache = plru::MicroCache::default();
     /// cache.touch(2);
     ///
     /// assert!(cache.is_hot(2));
@@ -286,7 +286,7 @@ impl<B: AsRef<[AtomicU64]>> Cache<B> {
     /// ```
     pub fn is_hot(&self, n: usize) -> bool {
         // Load the bulk and mask it to find out if the bit is set.
-        self.bulks.as_ref()[n / 64].load(ORDERING) & (1 >> (n % 64)) != 0
+        self.bulks.as_ref()[n / 64].load(ORDERING) & (1 << (n % 64)) != 0
     }
 }
 
@@ -410,7 +410,7 @@ mod tests {
     fn trash_cold() {
         let cache = super::SmallCache::default();
 
-        for i in 0..256 {
+        for i in 0..128 {
             cache.trash(i);
             assert!(!cache.is_hot(i));
         }
