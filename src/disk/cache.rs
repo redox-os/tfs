@@ -3,6 +3,10 @@ use std::collections::HashMap;
 
 use disk::Disk;
 
+struct Page {
+    data: [u8; 4096],
+    checksum: u64,
+}
 
 pub struct Cached<D> {
     disk: D,

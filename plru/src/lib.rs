@@ -129,7 +129,7 @@ pub fn create(lines: usize) -> Cache<Box<[AtomicU64]>> {
 /// can touch cache lines (mark usage) and efficiently find a cache line which can be replaced
 /// (unlikely to be used in the near future).
 #[derive(Default)]
-pub struct Cache<B: AsRef<[AtomicU64]>> {
+pub struct Cache<B> {
     /// The LRU bit flags representing the "recently used" lines.
     ///
     /// The bits are broken down into 64-bit "bulks", which allows us to handle them efficiently
