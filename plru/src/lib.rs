@@ -293,7 +293,7 @@ impl<B: AsRef<[AtomicU64]>> Cache<B> {
 impl<B: AsRef<[AtomicU64]>> fmt::Debug for Cache<B> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for i in self.bulks.as_ref() {
-            try!(write!(f, "{:b},", i.load(ORDERING)));
+            write!(f, "{:b},", i.load(ORDERING))?;
         }
 
         Ok(())

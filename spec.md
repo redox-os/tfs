@@ -1,6 +1,6 @@
 # Endianness
 
-Every integer is stored in big-endian, unless otherwise specified.
+Every integer is stored in little-endian, unless otherwise specified.
 
 # Typed pointers
 
