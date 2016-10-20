@@ -7,6 +7,7 @@ It was originally designed for Redox OS, but will work on Linux and BSD too.
 In contrary to ZFS, which TFS takes a lot inspiration from, TFS fixes certain flaws ZFS had:
 
 - TFS is not monolithic: It is based on a stack of disk drivers, each making up disjoint components. This makes it easy to maintain and implement.
+- TFS is disk-centric: TFS puts a lot of effort into handling as much of the raw bytes without semantic information as possible. This gives great performance and simple code.
 - TFS puts greater emphasis on memory caching: This can improve performance significantly.
 - TFS has much improved file monitoring: inotify and friends are all hacks. TFS provides a integrated solution to file monitoring.
 - TFS puts even more emphasis on compression: TFS has built in random-access compression.
@@ -16,11 +17,14 @@ WIP
 ## Terminology
 
 - **Disk driver**: A particular component in the Disk I/O pipeline, which modifies the data stream. A lot of the functionality of TFS is implemented as disk drivers.
-- **Page**: A 4096 byte block. These are the smallest atomic unit in TFS.
+- **Cache driver**: The disk driver which has to job to memory cache the active parts of the disk.
+- **Post-cache driver**: A disk driver, which is below the cache (the I/O stream is produces will not go through the cache driver).
+- **Pre-cache driver**: A disk driver, whose stream is cached (pass through the cache driver).
+- **Page**: A 4096 byte block. These are the smallest atomic unit in TFS (known as cluster size or allocation units in other file systems).
 - **Superpage**: A page storing the state of the file system. The superpage cannot be restored.
-- **Page pointer**: A 16 byte integer defining the address of a particular page or subpage.
+- **Page pointer**: A 16 byte integer defining the address of a particular page.
 - **Cache line**: An entry containing a cached page in the cache structure.
-- **Page and subpage freelist**: A linked list of pages or subpages of entries considered free and ready for use.
+- **Page freelist**: A linked list of pages of entries considered free and ready for use.
 - **File**: The unit of storage exposed to the user.
 - **Snapshot**: A restorable state of the file system.
 - **Zone**: A substate representing some subset of the file system.
@@ -33,6 +37,7 @@ WIP
 - **COW semantics**: The idea that no pages are mutated directly, but rather a new page is allocated, which the content is written to, and the old page is thrown away.
 - **Checksum**: A small number checking the integrity of the data.
 - **Atomicity**: The idea that the file system should never enter an inconsistent (invalid) state naturally (i.e. not hardware faults).
+- **wqueue**: Certain drivers cannot be entirely atomic and hence use write queues to back them up. Especially for post-cache drivers this is common.
 
 ## Disk drivers
 
