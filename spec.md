@@ -8,6 +8,10 @@ We use the term "typed pointers" to talk about pointers which are represented as
 
 All pointers are 0-based unless otherwise specified.
 
+# Nil pointers
+
+We purposefully avoid the phrase "null pointers" because a null pointer in TFS might be valid. Instead, we make use of "nil pointers", i.e. the highest 128-bit integer value or 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF.
+
 # Disk drivers and virtual disks
 
 A disk driver modifies the I/O stream in accordance to some rules and forwards it to the next virtual disk.
@@ -26,7 +30,7 @@ The checksum driver considers the disk in chunks of 16 KiB. Each chunk is assign
 
 For every 2048 chunk, a 16 KiB chunk containing the checksums of the next 2048 chunks, stored sequentially from lower to higher, is injected.
 
-The first 128 bits of the virtual disk is a typed pointer to the dirty chunk (a chunk whose checksum has not been updated yet). Before a chunk is written, this number must be set to the chunk's number, in order to make sure the state can be restored if it crashed. When the checksum is written this number is set to 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF. On startup, the number is read and the respective chunk's checksum is updated.
+The first 128 bits of the virtual disk is a typed pointer to the dirty chunk (a chunk whose checksum has not been updated yet). Before a chunk is written, this number must be set to the chunk's number, in order to make sure the state can be restored if it crashed. When the checksum is written this number is set to the nil pointer. On startup, the number is read and the respective chunk's checksum is updated.
 
 ### Checksum algorithm
 
@@ -36,22 +40,24 @@ The checksum is byte-based reverse Rabin-Karp rolling hash with modulo _m=0xFFFF
 
 Encryption is done in accordance to the user-chosen algorithm defined by the first 64 bytes in the virtual disk. All zero bytes defines unencrypted disk. First byte 1 and rest zero defines twofish.
 
-## Page allocator
+## Data block allocator
 
-Pages are of size 4 KiB.
+Data blocks are of size 128 KiB.
 
-The page allocator driver uses the first 16 bytes as a typed pointer to the head of the page freelist, i.e. the first page in a sequence of linked pages. The list is terminated by pointer 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF.
+The page allocator driver uses the first 16 bytes as a typed pointer to the head of the block freelist, i.e. the first page in a sequence of linked pages. The pointer to the next data block is defined as the first 128 bits in the data block. The list is terminated by the nil pointer.
 
-Initially, every page on the disk is linked together and the head pointer is set to 0x0.
+Initially, every data block on the disk is linked together and the head pointer is set to 0x0.
 
 ## Error correction and redundancy
 
-The disk is split into 128 KiB data blocks. The error correction driver injects 1 KiB of metadata before each of the data block. The metadata block contains a sequence of leader pointers. These are typed pointers to leader data blocks. Whenever a bit is flipped on the data block, the same bit is flipped on the leader block(s).
+The disk is split into data blocks. The error correction driver injects 1 KiB of metadata before each of the data block. The metadata block contains a sequence of 64 leader pointers. These are typed pointers to leader data blocks. Whenever a bit is flipped on the data block, the same bit is flipped on the leader block(s).
 
 The leader blocks uses the metadata to store its child blocks, i.e. the blocks having it as leader.
 
 Leader blocks is the XOR of its children.
 
+If not all 64 pointers are used, it can be terminated by the nil pointer. The values following this terminator can be used as the implementation wants.
+
 Errors can be corrected by applying Gauss elimination to solve this linear system of equations.
 
-To preserve atomicity, the first 128 bits of the virtual disk is spend on keeping track of the data block with pending. This is set to 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF when the leaders are updated. If the system crashed, the leader must be recalculated in terms of its children.
+To preserve atomicity, the first 128 bits of the virtual disk is spend on keeping track of the data block with pending. This is a typed pointer to the block which is was updated. When the leader update is finished, this is set to the nil pointer. If the system crashed, the leader must be recalculated in terms of its children.
