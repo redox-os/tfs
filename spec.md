@@ -12,41 +12,45 @@ All pointers are 0-based unless otherwise specified.
 
 We purposefully avoid the phrase "null pointers" because a null pointer in TFS might be valid. Instead, we make use of "nil pointers", i.e. the highest 128-bit integer value or 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF.
 
+# Restriction on size
+
+The address space can never exceed _2^112_.
+
 # Disk drivers and virtual disks
 
 A disk driver modifies the I/O stream in accordance to some rules and forwards it to the next virtual disk.
 
 Formally, the set of virtual disks can be seen as a category under disk drivers as morphisms. This section will describe these morphisms such that the TFS I/O stack is defined as the function composite of all. They're mentioned in the same order as they're morphism composited.
 
-## Introducer
+### Introducer
 
 The introduction sequence is a 32 byte long sequence, put in the start of the storage medium (e.g. partition). The first 64-bit contains the magic number, 0x5446532064617461. The rest of the introducing bytes are unused in current standard.
 
 The introducer will shift all reads or writes 32 bytes up, such that the introduction sequence is never changed.
 
-## Checksum
+## Page disk driver
 
-The checksum driver considers the disk in chunks of 16 KiB. Each chunk is assigned a 64-bit checksum.
+A page disk driver reads the virtual disk in terms of pages, 4 KiB chunks. Furthermore, it is able to allocate and deallocate pages.
 
-For every 2048 chunk, a 16 KiB chunk containing the checksums of the next 2048 chunks, stored sequentially from lower to higher, is injected.
+Page disk drivers can redefine the page size.
 
-The first 128 bits of the virtual disk is a typed pointer to the dirty chunk (a chunk whose checksum has not been updated yet). Before a chunk is written, this number must be set to the chunk's number, in order to make sure the state can be restored if it crashed. When the checksum is written this number is set to the nil pointer. On startup, the number is read and the respective chunk's checksum is updated.
+## Page allocator
 
-### Checksum algorithm
+The page allocator uses the first 16 bytes as a typed pointer to the head of the block freelist, i.e. the first page in a sequence of linked pages. The pointer to the next data block is defined as the first 128 bits in the data block. The list is terminated by the nil pointer.
 
-The checksum is byte-based reverse Rabin-Karp rolling hash with modulo _m=0xFFFFFFFFFFFFFFFF_ and base _p=0xFFFFFFFFFFFFFFC5_. In particular, if the hash of a sequence is _H_, and a byte _b_ is appended, the updated hash is _H' = (pH + b) % m_.
+Initially, every data block on the disk is linked together and the head pointer is set to 0x0.
 
 ## Encryption
 
-Encryption is done in accordance to the user-chosen algorithm defined by the first 64 bytes in the virtual disk. All zero bytes defines unencrypted disk. First byte 1 and rest zero defines twofish.
+Encryption is done in accordance to the user-chosen algorithm defined by the first page of the virtual disk. A zero page defines unencrypted disk. Setting the last byte in the page to 0xFF defines an implementation defined encryption method.
 
-## Data block allocator
+# Checksums
 
-Data blocks are of size 128 KiB.
+We introduce a new kind of pointer, _checked page pointers_. These are simply typed pointers to a page. Each paged block is assigned a 2 byte checksum stored in the 16 highest bits in of the checked page pointer.
 
-The page allocator driver uses the first 16 bytes as a typed pointer to the head of the block freelist, i.e. the first page in a sequence of linked pages. The pointer to the next data block is defined as the first 128 bits in the data block. The list is terminated by the nil pointer.
+## Checksum algorithm
 
-Initially, every data block on the disk is linked together and the head pointer is set to 0x0.
+The checksum is byte-based reverse Rabin-Karp rolling hash with modulo _m=0xFFFF_ and base _p=0x7FED_. In particular, if the hash of a sequence is _H_, and a byte _b_ is appended, the updated hash is _H' = (pH + b) % m_.
 
 ## Error correction and redundancy
 
