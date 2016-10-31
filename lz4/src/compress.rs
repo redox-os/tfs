@@ -115,7 +115,6 @@ impl<'a> Encoder<'a> {
     fn find_duplicate(&self) -> Option<Duplicate> {
         // If there is no remaining batch, we return none.
         if !self.remaining_batch() {
-            println!("No remaining batches.");
             return None;
         }
 
