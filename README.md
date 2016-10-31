@@ -1,4 +1,6 @@
-<img src="./icon.png" height="500" />
+<p align="center">
+<img src="./icon.png" height="300" />
+</p>
 
 # TFS: A next-gen file system
 
