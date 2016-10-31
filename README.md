@@ -1,4 +1,4 @@
-![Icon](./icon.png)
+<img src="./icon.png" height="500" />
 
 # TFS: A next-gen file system
 
