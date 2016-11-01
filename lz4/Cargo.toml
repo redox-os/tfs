@@ -1,5 +1,5 @@
 [package]
-name = "lz4"
+name = "lz4-compress"
 version = "0.1.0"
 authors = ["ticki <ticki@users.noreply.github.com>"]
 
