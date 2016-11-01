@@ -121,14 +121,19 @@ impl<'a> Encoder<'a> {
         // Find a candidate in the dictionary by hashing the current four bytes.
         let candidate = self.dict[self.get_cur_hash()];
 
-        // We need to ensure two things:
-        // - We should not return a position which is merely a hash collision, so we need to check
-        //   that the candidate actually matches what we search for.
+        // Two requirements to the candidate exists:
+        // - We should not return a position which is merely a hash collision, so w that the
+        //   candidate actually matches what we search for.
         // - We can address up to 16-bit offset, hence we are only able to address the candidate if
         //   its offset is less than or equals to 0xFFFF.
         if self.get_batch(candidate) == self.get_batch_at_cursor() && self.cur - candidate <= 0xFFFF {
-            // Calculate the "extension bytes", i.e. the duplicate bytes beyond the batch.
-            let ext = self.input[self.cur + 4..].iter().zip(&self.input[candidate + 4..]).count();
+            // Calculate the "extension bytes", i.e. the duplicate bytes beyond the batch. These
+            // are the number of prefix bytes shared between the match and needle.
+            let ext = self.input[self.cur + 4..]
+                .iter()
+                .zip(&self.input[candidate + 4..])
+                .filter(|&(a, b)| a == b)
+                .count();
 
             Some(Duplicate {
                 offset: (self.cur - candidate) as u16,
