@@ -26,3 +26,8 @@ fn totally_not_antifa_propaganda() {
 fn not_compressible() {
     inverse("as6yhol.;jrew5tyuikbfewedfyjltre22459ba");
 }
+
+#[test]
+fn empty_string() {
+    inverse("");
+}

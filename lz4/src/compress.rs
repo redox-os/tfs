@@ -16,6 +16,7 @@ const DICTIONARY_SIZE: usize = 4096;
 ///
 /// This defines a single compression "unit", consisting of two parts, a number of raw literals,
 /// and possibly a pointer to the already encoded buffer from which to copy.
+#[derive(Debug)]
 struct Block {
     /// The length (in bytes) of the literals section.
     lit_len: usize,
@@ -26,7 +27,7 @@ struct Block {
 }
 
 /// A consecutive sequence of bytes found in already encoded part of the input.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 struct Duplicate {
     /// The number of bytes before our cursor, where the duplicate starts.
     offset: u16,
@@ -121,12 +122,17 @@ impl<'a> Encoder<'a> {
         // Find a candidate in the dictionary by hashing the current four bytes.
         let candidate = self.dict[self.get_cur_hash()];
 
-        // Two requirements to the candidate exists:
+        println!("candidate = {}", candidate);
+
+        // Three requirements to the candidate exists:
+        // - The candidate is not the trap value (0xFFFFFFFF), which represents an empty bucket.
         // - We should not return a position which is merely a hash collision, so w that the
         //   candidate actually matches what we search for.
         // - We can address up to 16-bit offset, hence we are only able to address the candidate if
         //   its offset is less than or equals to 0xFFFF.
-        if self.get_batch(candidate) == self.get_batch_at_cursor() && self.cur - candidate <= 0xFFFF {
+        if candidate != !0
+           && self.get_batch(candidate) == self.get_batch_at_cursor()
+           && self.cur - candidate <= 0xFFFF {
             // Calculate the "extension bytes", i.e. the duplicate bytes beyond the batch. These
             // are the number of prefix bytes shared between the match and needle.
             let ext = self.input[self.cur + 4..]
@@ -134,6 +140,8 @@ impl<'a> Encoder<'a> {
                 .zip(&self.input[candidate + 4..])
                 .filter(|&(a, b)| a == b)
                 .count();
+
+            println!("ext = {}", ext);
 
             Some(Duplicate {
                 offset: (self.cur - candidate) as u16,
@@ -144,8 +152,10 @@ impl<'a> Encoder<'a> {
 
     /// Write an integer to the output in LSIC format.
     fn write_integer(&mut self, mut n: usize) {
+        println!("n = {}", n);
+
         // Write the 0xFF bytes as long as the integer is higher than said value.
-        while n > 0xFF {
+        while n >= 0xFF {
             n -= 0xFF;
             self.output.push(0xFF);
         }
@@ -198,6 +208,8 @@ impl<'a> Encoder<'a> {
             // Read the next block into two sections, the literals and the duplicates.
             let block = self.pop_block();
 
+            println!("block = {:?}", block);
+
             // Generate the higher half of the token.
             let mut token = if block.lit_len < 0xF {
                 // Since we can fit the literals length into it, there is no need for saturation.
@@ -219,6 +231,8 @@ impl<'a> Encoder<'a> {
                 0xF
             };
 
+            println!("token = 0x{:x}", token);
+
             // Push the token to the output stream.
             self.output.push(token);
 
@@ -230,9 +244,12 @@ impl<'a> Encoder<'a> {
 
             // Now, write the actual literals.
             self.output.extend_from_slice(&self.input[start..start + block.lit_len]);
+            println!("cur = {}", self.cur);
 
             if let Some(Duplicate { offset, .. }) = block.dup {
                 // Wait! There's more. Now, we encode the duplicates section.
+
+                println!("offset = {}", offset);
 
                 // Push the offset in little endian.
                 self.output.push(offset as u8);
@@ -247,6 +264,7 @@ impl<'a> Encoder<'a> {
                 break;
             }
         }
+        println!("output = [{}]", self.output.iter().map(|x| format!("0x{:x}, ", x)).collect::<String>());
     }
 }
 
@@ -259,7 +277,7 @@ pub fn compress(input: &[u8]) -> Vec<u8> {
         input: input,
         output: &mut vec,
         cur: 0,
-        dict: [0; DICTIONARY_SIZE],
+        dict: [!0; DICTIONARY_SIZE],
     }.complete();
 
     vec
