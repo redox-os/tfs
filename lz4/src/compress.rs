@@ -63,14 +63,14 @@ impl<'a> Encoder<'a> {
     fn go_forward(&mut self, steps: usize) -> bool {
         // Go over all the bytes we are skipping and update the cursor and dictionary.
         for _ in 0..steps {
-            // Increment the cursor.
-            self.cur += 1;
             // Insert the cursor position into the dictionary.
             self.insert_cursor();
+            // Increment the cursor.
+            self.cur += 1;
         }
 
         // Return `true` if there's more to read.
-        self.cur < self.input.len()
+        self.cur <= self.input.len()
     }
 
     /// Insert the batch under the cursor into the dictionary.
@@ -122,8 +122,6 @@ impl<'a> Encoder<'a> {
         // Find a candidate in the dictionary by hashing the current four bytes.
         let candidate = self.dict[self.get_cur_hash()];
 
-        println!("candidate = {}", candidate);
-
         // Three requirements to the candidate exists:
         // - The candidate is not the trap value (0xFFFFFFFF), which represents an empty bucket.
         // - We should not return a position which is merely a hash collision, so w that the
@@ -138,10 +136,8 @@ impl<'a> Encoder<'a> {
             let ext = self.input[self.cur + 4..]
                 .iter()
                 .zip(&self.input[candidate + 4..])
-                .filter(|&(a, b)| a == b)
+                .take_while(|&(a, b)| a == b)
                 .count();
-
-            println!("ext = {}", ext);
 
             Some(Duplicate {
                 offset: (self.cur - candidate) as u16,
@@ -152,8 +148,6 @@ impl<'a> Encoder<'a> {
 
     /// Write an integer to the output in LSIC format.
     fn write_integer(&mut self, mut n: usize) {
-        println!("n = {}", n);
-
         // Write the 0xFF bytes as long as the integer is higher than said value.
         while n >= 0xFF {
             n -= 0xFF;
@@ -208,8 +202,6 @@ impl<'a> Encoder<'a> {
             // Read the next block into two sections, the literals and the duplicates.
             let block = self.pop_block();
 
-            println!("block = {:?}", block);
-
             // Generate the higher half of the token.
             let mut token = if block.lit_len < 0xF {
                 // Since we can fit the literals length into it, there is no need for saturation.
@@ -231,8 +223,6 @@ impl<'a> Encoder<'a> {
                 0xF
             };
 
-            println!("token = 0x{:x}", token);
-
             // Push the token to the output stream.
             self.output.push(token);
 
@@ -244,12 +234,9 @@ impl<'a> Encoder<'a> {
 
             // Now, write the actual literals.
             self.output.extend_from_slice(&self.input[start..start + block.lit_len]);
-            println!("cur = {}", self.cur);
 
             if let Some(Duplicate { offset, .. }) = block.dup {
                 // Wait! There's more. Now, we encode the duplicates section.
-
-                println!("offset = {}", offset);
 
                 // Push the offset in little endian.
                 self.output.push(offset as u8);
@@ -264,7 +251,6 @@ impl<'a> Encoder<'a> {
                 break;
             }
         }
-        println!("output = [{}]", self.output.iter().map(|x| format!("0x{:x}, ", x)).collect::<String>());
     }
 }
 

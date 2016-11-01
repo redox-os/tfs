@@ -68,7 +68,7 @@ impl<'a> Decoder<'a> {
         }
     }
 
-    /// Read an integer LSIC encoded.
+    /// Read an integer LSIC (linear small integer code) encoded.
     ///
     /// In LZ4, we encode small integers in a way that we can have an arbitrary number of bytes. In
     /// particular, we add the bytes repeatedly until we hit a non-0xFF byte. When we do, we add

@@ -1,10 +1,14 @@
+use std::str;
+
 use {decompress, compress};
 
 /// Test that the compressed string decompresses to the original string.
 fn inverse(s: &str) {
     let compressed = compress(s.as_bytes());
     println!("Compressed '{}' into {:?}", s, compressed);
-    assert_eq!(decompress(&compressed).unwrap(), s.as_bytes());
+    let decompressed = decompress(&compressed).unwrap();
+    println!("Decompressed it into {:?}", str::from_utf8(&decompressed).unwrap());
+    assert_eq!(decompressed, s.as_bytes());
 }
 
 #[test]
@@ -25,6 +29,11 @@ fn totally_not_antifa_propaganda() {
 #[test]
 fn not_compressible() {
     inverse("as6yhol.;jrew5tyuikbfewedfyjltre22459ba");
+}
+
+#[test]
+fn short() {
+    inverse("ahhd");
 }
 
 #[test]
