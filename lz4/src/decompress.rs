@@ -156,7 +156,7 @@ impl<'a> Decoder<'a> {
         // initial length is derived from the second part of the token (the lower nibble), we read
         // earlier. Since having a match length of less than 4 would mean negative compression
         // ratio, we start at 4.
-        let mut match_length = (4 + self.token & 0xF) as usize;
+        let mut match_length = (4 + (self.token & 0xF)) as usize;
 
         // The intial match length can maximally be 19. As with the literal length, this indicates
         // that there are more bytes to read.
