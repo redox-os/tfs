@@ -1,3 +1,5 @@
+//! Tests.
+
 use std::str;
 
 use {decompress, compress};
