@@ -1,3 +1,7 @@
+.. image:: icon.png
+  :align: center
+  :height: 300
+
 ================================
 TFS: Next-generation file system
 ================================
@@ -22,6 +26,9 @@ TFS is not related to the file system of the same name by *terminalcloud*.
     :alt: MIT/X11 permissive license.
 .. image:: https://img.shields.io/github/stars/ticki/tfs.svg?style=social&label=Star
     :alt: GitHub Stars
+
+Design goals
+------------
 
 TFS is designed with the following goals in mind:
 
