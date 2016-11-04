@@ -1,6 +1,6 @@
-.. image:: icon.png
-  :align: center
-  :height: 300
+.. image:: icon_small.png
+    :alt: The TFS icon.
+    :align: center
 
 ================================
 TFS: Next-generation file system
