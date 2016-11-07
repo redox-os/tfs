@@ -1,0 +1,10 @@
+[package]
+name = "seahash"
+version = "0.1.0"
+authors = ["ticki <ticki@users.noreply.github.com>"]
+description = "A blazingly fast, portable hash function with proven statistical guarantees."
+repository = "https://github.com/ticki/tfs"
+documentation = "https://docs.rs/seahash"
+license = "MIT"
+keywords = ["hash", "hashing", "checksum", "checsumming", "portable"]
+exclude = ["target", "Cargo.lock"]
