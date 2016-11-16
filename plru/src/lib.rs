@@ -80,6 +80,7 @@
 
 #![cfg_attr(features = "no_std", no_std)]
 #![feature(integer_atomics)]
+#![warn(missing_docs)]
 
 extern crate core;
 

@@ -63,6 +63,7 @@
 //! ```
 
 #![no_std]
+#![warn(missing_docs)]
 
 use core::num::Wrapping as W;
 
