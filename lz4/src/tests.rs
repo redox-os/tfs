@@ -17,12 +17,15 @@ fn inverse(s: &str) {
 fn shakespear() {
     inverse("to live or not to live");
     inverse("Love is a wonderful terrible thing");
+    inverse("There is nothing either good or bad, but thinking makes it so.");
+    inverse("I burn, I pine, I perish.");
 }
 
 #[test]
 fn totally_not_antifa_propaganda() {
     inverse("The only good fascist is a dead fascist.");
     inverse("bash the fash");
+    inverse("the fash deserves no bash, only smash");
     inverse("Dead fascists can't vote.");
     inverse("Good night, white pride.");
     inverse("Some say fascism started with gas chambers. I say that's where it ends.");
@@ -31,16 +34,28 @@ fn totally_not_antifa_propaganda() {
 #[test]
 fn not_compressible() {
     inverse("as6yhol.;jrew5tyuikbfewedfyjltre22459ba");
+    inverse("jhflkdjshaf9p8u89ybkvjsdbfkhvg4ut08yfrr");
 }
 
 #[test]
 fn short() {
     inverse("ahhd");
+    inverse("ahd");
+    inverse("x-29");
+    inverse("x");
+    inverse("k");
+    inverse(".");
+    inverse("ajsdh");
 }
 
 #[test]
 fn empty_string() {
     inverse("");
+}
+
+#[test]
+fn nulls() {
+    inverse("\0\0\0\0\0\0\0\0\0\0\0\0\0");
 }
 
 #[test]
