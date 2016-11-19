@@ -120,6 +120,12 @@
         is stored in. The last 3 bits defines the index of the page in the
         cluster.
 
+        Allocation is done by inspecting the head of the freelist before
+        popping it, to see if it has a sister cluster, where the page can be
+        fit in. If it cannot, the freelist is popped. The way such clusters are
+        paired is implementation defined\footnote{Bijective maps are
+        recommended for optimal performance.}.
+
         \subsection{Cluster freelist}
         \label{cluster:freelist}
         Free clusters has a separate format. It contains a single 64-bit
