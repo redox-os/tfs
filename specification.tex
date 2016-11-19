@@ -1,0 +1,197 @@
+\documentclass[11pt,a4paper]{report}
+
+\usepackage{amsmath,amsfonts,amssymb}
+
+\title{Specification of the On-Disk Format of The TFS File System}
+\author{TFS team}
+\date{\today}
+
+% Specify the version number for this revision.
+\newcommand{\versionnumber}{0}
+
+\begin{document}
+    \maketitle
+    \begin{abstract}
+        We give a complete specification of the on-disk representation of the
+        TFS file system. Certain implementation details are covered.
+    \end{abstract}
+
+    \chapter{Disk IO}
+
+    \section{Disk header}
+        The first 4096 bytes are reserved for the ``disk header'' which
+        contains configuration and information about the state.
+
+        \subsection{Magic number (0-8)}
+        The first 8 bytes are reserved for a magic number, which is used for
+        determining if it does indeed store TFS. It is specified to store
+
+        $$5446532064617461_{16}$$
+
+        in little-endian.
+
+        \subsection{Version number (8-12)}
+        Byte 8 to 12 stores a version number, in little-endian. By this
+        revision, said number is \versionnumber.
+
+        \subsection{Checksum algorithm (32-34)}
+        \label{config:checksum}
+        Byte 32 to 34 stores a number in little-endian defining checksum
+        algorithm in use.
+
+        \begin{description}
+            \item [$0$] The SeaHash algorithm as described in
+                ~\ref{checksum:seahash}
+            \item [$\geq 2^{15}$] Implementation defined.
+        \end{description}
+
+        \subsection{Compression algorithm (34-36)}
+        \label{config:compression}
+        Byte 34 to 36 stores a number in little-endian defining compression
+        algorithm in use.
+
+        \begin{description}
+            \item [$0$] The LZ4 compressor as described in
+                ~\ref{compression:lz4}.
+            \item [$\geq 2^{15}$] Implementation defined.
+        \end{description}
+
+        \subsection{Implementation defined (36-512)}
+        Byte 36 to 512 are implementation defined configuration values.
+
+        \subsection{Head freelist pointer (512-520)}
+        Byte 512 to 520 stores some number (in little endian), which takes
+        values
+
+        \begin{description}
+            \item [$n = 0$]    no free, allocatable cluster.
+            \item [$n \neq 0$] the $n$'th cluster is free and conforms to
+                ~\ref{cluster:freelist}.
+        \end{description}
+
+        \subsection{Super-page pointer (520-528)}
+        Byte 520 to 528 stores some number (in little endian), which takes
+        values
+
+        \begin{description}
+            \item [$n = 0$]    super-page uninitialized.
+            \item [$n \neq 0$] the $n$'th page is the super-page as defined in
+                ~\ref{fs:superpage}.
+        \end{description}
+
+        \subsection{Implementation defined (1024-2048)}
+        Byte 1024 to 2048 are implementation defined state values.
+
+        \subsection{Redundant duplicate (2048-4096)}
+        The last half of the disk header stores a byte-by-byte duplicate of the
+        first half.
+
+    \section{Clusters and pages}
+        The disk is divided into clusters of 5000 bytes each.
+
+        \subsection{Cluster format}
+        Each cluster has a header of 5 bytes:
+
+        \begin{description}
+            \item [31 bit checksum] This is the 31 last bits of the checksum of
+                the cluster (algorithm chosen in ~\ref{config:checksum}). The
+                first 4 bytes are not included in the checksum.
+            \item [1 bit of implementation defined usage] This is left to the
+                implementation \footnote{Our implementation uses it as garbage
+                collection flag for mark-and-sweep.}
+            \item [1 byte page flags] Defines which pages the cluster contains.
+                If a bit flag is set, the respective page is contained (as
+                compressed) in the cluster. If no flags are set, the cluster is
+                uncompressed (i.e. represents the page without any special
+                representation).
+        \end{description}
+
+        This is followed by the number of set page flags in pages compressed.
+        The pages (which are 4096 byte buffers) are concatenated and compressed
+        by the algorithm defined by ~\ref{config:compression}.
+
+        The $n$'th page in some cluster is found by counting the number of set
+        flags in the first $n$ bits of the page flags. Call this value $p$,
+        then the page is defined as the bytes from $4096p$ to $4096(p + 1)$ of
+        the decompressed cluster.
+
+        A cluster can contain up to 8 pages, and the pages are enumerated
+        similarly to clusters. The first 61 bits defines what cluster the page
+        is stored in. The last 3 bits defines the index of the page in the
+        cluster.
+
+        \subsection{Cluster freelist}
+        \label{cluster:freelist}
+        Free clusters has a separate format. It contains a single 64-bit
+        little-endian integer, defining the next free cluster. This integer is
+        repeated once again to ensure integrity.
+
+        The end of the list is marked by a null pointer (the disk header isn't
+        a valid cluster).
+
+        Although not a requirement, it is generally recommended that the
+        freelist is kept as monotone as possible \footnote{That is,
+        sequential allocations should be local as often as possible in order
+        to improve compression ratio.}.
+
+    \section{Checksums}
+        \subsection{SeaHash}
+        \label{checksum:seahash}
+        SeaHash's initial state is
+
+        \begin{align*}
+            a &= \texttt{16f11fe89b0d677c}_{16} \\
+            b &= \texttt{b480a793d8e6c86c}_{16} \\
+            c &= \texttt{6fe2e5aaf078ebc9}_{16} \\
+            d &= \texttt{14f994a4c5259381}_{16}
+        \end{align*}
+
+        The input is broken into chunks of 32 bytes, or 4 64-bit little-endian
+        integers. Call these integers $(p, q, r, s)$ respectively. Then
+        updating state is defined by
+
+        \begin{align*}
+            a' &\equiv f(a + p) \pmod{2^{64}} \\
+            b' &\equiv f(b + q) \pmod{2^{64}} \\
+            c' &\equiv f(c + r) \pmod{2^{64}} \\
+            d' &\equiv f(d + s) \pmod{2^{64}}
+        \end{align*}
+
+        with $f(n)$ defined by
+
+        \begin{align*}
+            k      &=      \texttt{7ed0e9fa0d94a33}_{16} \\
+            f_1(n) &=      n \oplus (x \gg 32) \\
+            f_2(n) &\equiv kn \pmod{2^{64}} \\
+            f(n)   &=      f_1(f_2(f_1(f_2(f_1(n)))))
+        \end{align*}
+
+        The final hash value is then produced by
+
+        $$h \equiv a + f(b) + f(c + f(d)) \pmod{2^{64}}$$
+
+    \section{Compression algorithms}
+        \subsection{LZ4}
+        \label{compression:lz4}
+        LZ4 compressed data is a series of blocks, subject to following format:
+
+        \begin{description}
+            \item [1 byte token] Call the higher 4 bits $t_1$ and the lower $t_2$.
+            \item [$n_1$ 255s (skip if $t_1 \neq 15$)]
+            \item [1 byte (skip if $t_1 \neq 15$)] Call this value $e_1$.
+            \item [$t_1 + 256n_1 + e_1$ bytes] This (called the literals
+                section) is copied directly to the output buffer without any
+                pre processing.
+            \item [16-bit little-endian integer] Call this value $o$.
+            \item [$n_2$ 255s (skip if $t_2 \neq 15$)]
+            \item [1 byte (skip if $t_2 \neq 15$)] Call this value $e_1$.
+        \end{description}
+
+        After the literals section has been copied to the output buffer, assume
+        that the output buffer is now of length $l$ bytes. Then, the bytes from
+        $l - O$ to $l - O + t_2 + 256n_2 + e_2$ in the decoded buffer is
+        appended to the output stream itself.
+
+        The last block in a stream can be ended after $L$, such that no
+        duplicates part is needed.
+\end{document}
