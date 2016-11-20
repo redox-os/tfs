@@ -3,12 +3,12 @@
 //! SeaHash is a hash function with performance similar (within around ±7% difference) to XXHash
 //! and MetroHash, but with stronger guarantees.
 //!
-//! This implementation only allows hashing buffers of 4096 bytes, but the algorithm itself can
-//! relatively simply be extended for arbitrary length buffers.
-//!
 //! SeaHash is a portable hash function, meaning that the output is not dependent on the hosting
 //! architecture, and makes no assumptions on endianness or the alike. This stable layout allows it
 //! to be used for on-disk/permanent storage (e.g. checksums).
+//!
+//! SeaHash beats xxHash by 3-10% depending on the architecture in use. SeaHash has better quality
+//! guarantees as well.
 //!
 //! # Achieving the performance
 //!
@@ -61,6 +61,9 @@
 //! ```notest
 //! h = a + diffuse(b) + diffuse(c + diffuse(d))
 //! ```
+//!
+//! In case that there is excessive bytes, each are added to the hash value, and then it's diffused
+//! until all bytes are read.
 
 #![no_std]
 #![warn(missing_docs)]
@@ -82,8 +85,8 @@ fn diffuse(mut x: W<u64>) -> W<u64> {
     x
 }
 
-/// Hash a 4 KiB buffer.
-pub fn hash(buf: &[u8; 4096]) -> u64 {
+/// Hash some buffer.
+pub fn hash(buf: &[u8]) -> u64 {
     // We use 4 different registers to store seperate hash states, because this allows us to update
     // them seperately, and consequently exploiting ILP to update the states in parallel.
     let mut a = W(0x16f11fe89b0d677c);
@@ -91,10 +94,17 @@ pub fn hash(buf: &[u8; 4096]) -> u64 {
     let mut c = W(0x6fe2e5aaf078ebc9);
     let mut d = W(0x14f994a4c5259381);
 
+    // We fetch this in order to avoid aliasing things later on and thus breaking certain
+    // optimizations.
+    let len = buf.len() as isize;
+    // We round down to a multiple of 32.
+    let mut written_len = len & !0x1F;
+    // We pre-fetch the pointer to the buffer to avoid too many cache misses.
+    let buf_ptr = buf.as_ptr();
     // The pointer to the current bytes.
-    let mut ptr = unsafe { buf.as_ptr().offset(4096) } as *const u64;
+    let mut ptr = unsafe { buf_ptr.offset(written_len) } as *const u64;
 
-    while (buf.as_ptr() as usize) < ptr as usize {
+    while (buf_ptr as usize) < ptr as usize {
         unsafe {
             // Read and diffuse the next 4 64-bit little-endian integers from their bytes. Note
             // that we on purpose not use `+=` and co., because it aliases the lvalue, making it
@@ -131,7 +141,20 @@ pub fn hash(buf: &[u8; 4096]) -> u64 {
     c = c + diffuse(d);
 
     // Diffuse `a` and `c`.
-    (a + diffuse(c)).0
+    let mut ret = a + diffuse(c);
+
+    // Handle the excessive bytes.
+    while written_len < len {
+        // Increment the written bytes counter.
+        written_len = written_len + 1;
+
+        unsafe {
+            // Update the return value by adding the excessive byte and then diffusing.
+            ret = diffuse(ret + W(*buf_ptr.offset(written_len) as u64));
+        }
+    }
+
+    ret.0
 }
 
 #[cfg(test)]
@@ -154,15 +177,26 @@ mod tests {
 
     #[test]
     fn position_depedent() {
-        let mut buf1 = [0; 4096];
-        for i in 0..4096 {
+        let mut buf1 = [0; 4098];
+        for i in 0..4098 {
             buf1[i] = i as u8;
         }
-        let mut buf2 = [0; 4096];
-        for i in 0..4096 {
+        let mut buf2 = [0; 4098];
+        for i in 0..4098 {
             buf2[i] = i as u8 ^ 1;
         }
 
         assert!(hash(&buf1) != hash(&buf2));
+    }
+
+    #[test]
+    fn shakespear() {
+        assert_eq!(hash(b"to be or not to be"), 11897643864797330044);
+    }
+
+    #[test]
+    fn not_equal() {
+        assert_ne!(hash(b"to be or not to be "), hash(b"to be or not to be"));
+        assert_ne!(hash(b"jkjke"), hash(b"jkjk"));
     }
 }
