@@ -1,8 +1,11 @@
 \documentclass[11pt,a4paper]{report}
 
-\usepackage{amsmath,amsfonts,amssymb,hyperref}
+\usepackage{amsmath,amsfonts,amssymb,hyperref,graphicx}
 
-\title{Specification of the On-Disk Format of The TFS File System}
+\title{
+    \centering{\includegraphics[scale=0.2]{icon.png}}\\
+    Specification of the On-Disk Format of The TFS File System
+}
 \author{TFS team}
 \date{\today}
 
@@ -35,11 +38,16 @@
         Byte 8 to 12 stores a version number, in little-endian. By this
         revision, said number is \versionnumber.
 
+        Breaking changes will increment the higher half of this number.
+
         \subsection{Implementation ID (12-20)}
         Byte 12 to 20 stores some UTF-8 sequence specifying what implementation
         it was last read/written with. By setting this field, the
         implementation explicitly states that it was capable of fully or
         partially reading the image.
+
+        The recommended format is the original author's name truncated
+        followed by the year of the initial release.
 
         \subsection{Implementation defined (12-32)}
         Byte 12 to 32 are implementation defined introduction values.
