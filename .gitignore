@@ -3,3 +3,4 @@ Cargo.lock
 *.aux
 *.pdf
 *.log
+*.out

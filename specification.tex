@@ -1,13 +1,15 @@
 \documentclass[11pt,a4paper]{report}
 
-\usepackage{amsmath,amsfonts,amssymb}
+\usepackage{amsmath,amsfonts,amssymb,hyperref}
 
 \title{Specification of the On-Disk Format of The TFS File System}
 \author{TFS team}
 \date{\today}
 
-% Specify the version number for this revision.
-\newcommand{\versionnumber}{0}
+% Constants
+\newcommand{\versionnumber}{0 }
+\newcommand{\clustersize}{4104 }
+\newcommand{\pagesize}{4096 }
 
 \begin{document}
     \maketitle
@@ -19,20 +21,26 @@
     \chapter{Disk IO}
 
     \section{Disk header}
-        The first 4096 bytes are reserved for the ``disk header'' which
+        The first \clustersize bytes are reserved for the ``disk header'' which
         contains configuration and information about the state.
 
         \subsection{Magic number (0-8)}
         The first 8 bytes are reserved for a magic number, which is used for
-        determining if it does indeed store TFS. It is specified to store
+        determining if it does indeed store TFS. It is specified to store the
+        string ``\texttt{TFS fmt }'' (note the space) in ASCII.
 
-        $$5446532064617461_{16}$$
-
-        in little-endian.
+        If the format does only partially conform to this specification, the
+        string ``\texttt{\textasciitilde TFS fmt}'' is used instead.
 
         \subsection{Version number (8-12)}
         Byte 8 to 12 stores a version number, in little-endian. By this
         revision, said number is \versionnumber.
+
+        \subsection{Implementation ID (12-20)}
+        Byte 12 to 20 stores some UTF-8 sequence specifying what implementation
+        it was last read/written with. By setting this field, the
+        implementation explicitly states that it was capable of fully or
+        partially reading the image.
 
         \subsection{Checksum algorithm (32-34)}
         \label{config:checksum}
@@ -40,7 +48,9 @@
         algorithm in use.
 
         \begin{description}
-            \item [$0$] The SeaHash algorithm as described in
+            \item [$0$] No checksum (calculated checksum always 0).
+            \item [$1$] Fixed checksum as described ~\ref{checksum:fixed}.
+            \item [$2$] The SeaHash algorithm as described in
                 ~\ref{checksum:seahash}
             \item [$\geq 2^{15}$] Implementation defined.
         \end{description}
@@ -51,13 +61,27 @@
         algorithm in use.
 
         \begin{description}
-            \item [$0$] The LZ4 compressor as described in
-                ~\ref{compression:lz4}.
+            \item [$0$] No compression (identity function).
+            \item [$1$] The LZ4 compressor as described in ~\ref{compression:lz4}.
             \item [$\geq 2^{15}$] Implementation defined.
         \end{description}
 
-        \subsection{Implementation defined (36-512)}
-        Byte 36 to 512 are implementation defined configuration values.
+        \subsection{Encryption algorithm (36-40)}
+        \label{config:encryption}
+        Byte 36 to 40 stores a number in little-endian defining encryption
+        algorithm in use.
+
+        \begin{description}
+            \item [$0$] No encryption (identity function).
+            \item [$1$] ChaCha20/Poly1305 as described in
+                \href{https://tools.ietf.org/html/rfc4253}{RFC \#4253}.
+            \item [$\geq 2^{15}$] Implementation defined.
+        \end{description}
+
+        The exact semantics of encryption is described in ~\ref{encryption}
+
+        \subsection{Implementation defined (256-512)}
+        Byte 256 to 512 are implementation defined configuration values.
 
         \subsection{Head freelist pointer (512-520)}
         Byte 512 to 520 stores some number (in little endian), which takes
@@ -83,37 +107,42 @@
         Byte 1024 to 2048 are implementation defined state values.
 
         \subsection{Redundant duplicate (2048-4096)}
-        The last half of the disk header stores a byte-by-byte duplicate of the
-        first half.
+        Byte 2048-4096 of the disk header stores a copy of byte 0-2048 of the
+        header.
+
+        \subsection{Padding (4096-\clustersize)}
+        Byte 4096 to \clustersize is used as padding to achieve the cluster
+        size. It is specified to be zeros.
 
     \section{Clusters and pages}
-        The disk is divided into clusters of 4101 bytes each.
+        The disk is divided into clusters of \clustersize bytes each.
 
         \subsection{Cluster format}
-        Each cluster has a header of 5 bytes:
+        Each cluster has a header of 8 bytes:
 
         \begin{description}
-            \item [31 bit checksum] This is the 31 last bits of the checksum of
-                the cluster (algorithm chosen in ~\ref{config:checksum}). The
-                first 4 bytes are not included in the checksum.
-            \item [1 bit of implementation defined usage] This is left to the
-                implementation \footnote{Our implementation uses it as garbage
-                collection flag for mark-and-sweep.}
+            \item [32-bit checksum] This is the 32 last bits of the
+                little-endian checksum of the cluster (algorithm chosen in
+                ~\ref{config:checksum}). The first 4 bytes of the cluster are
+                not included in the checksum.
             \item [1 byte page flags] Defines which pages the cluster contains.
                 If a bit flag is set, the respective page is contained (as
                 compressed) in the cluster. If no flags are set, the cluster is
                 uncompressed (i.e. represents the page without any special
                 representation).
+            \item [3 bytes for implementation defined usage] This is
+                left to the implementation\footnote{Our implementation
+                uses it as garbage collection flag for mark-and-sweep.}.
         \end{description}
 
         This is followed by the number of set page flags in pages compressed.
-        The pages (which are 4096 byte buffers) are concatenated and compressed
-        by the algorithm defined by ~\ref{config:compression}.
+        The pages (which are \pagesize byte buffers) are concatenated and
+        compressed by the algorithm defined by ~\ref{config:compression}.
 
         The $n$'th page in some cluster is found by counting the number of set
         flags in the first $n$ bits of the page flags. Call this value $p$,
-        then the page is defined as the bytes from $4096p$ to $4096(p + 1)$ of
-        the decompressed cluster.
+        then the page is defined as the bytes from $\pagesize p$ to $\pagesize
+        (p + 1)$ of the decompressed cluster.
 
         A cluster can contain up to 8 pages, and the pages are enumerated
         similarly to clusters. The first 61 bits defines what cluster the page
@@ -135,12 +164,18 @@
         The end of the list is marked by a null pointer (the disk header isn't
         a valid cluster).
 
-        Although not a requirement, it is generally recommended that the
-        freelist is kept as monotone as possible \footnote{That is,
-        sequential allocations should be local as often as possible in order
-        to improve compression ratio.}.
+        Although not a requirement, it is generally recommended that
+        the freelist is kept as monotone as possible\footnote{That is,
+        sequential allocations should be local as often as possible in
+        order to improve compression ratio.}.
 
     \section{Checksums}
+        \subsection{Fixed}
+        \label{checksum:fixed}
+        Fixed checksums are independent of the data stored. Instead, the write
+        the number of the cluster it is stored in. If data is corrupted, the
+        checksum is often invalidated as well, and will thus mismatch.
+
         \subsection{SeaHash}
         \label{checksum:seahash}
         SeaHash's initial state is
@@ -178,7 +213,9 @@
 
         If a byte, $e$, is excessive (i.e. the length is not divisible by 32), it is included through
 
-        $$h' = f(h + e)$$
+        $$h' \equiv f(h + e) \pmod{2^{64}}$$
+
+        This process is repeated, until no more excessive bytes are left.
 
     \section{Compression algorithms}
         \subsection{LZ4}
@@ -202,6 +239,17 @@
         $l - O$ to $l - O + t_2 + 256n_2 + e_2$ in the decoded buffer is
         appended to the output stream itself.
 
-        The last block in a stream can be ended after $L$, such that no
-        duplicates part is needed.
+        The last block in a stream can be ended after literals
+        section, such that no duplicates part is needed.
+
+    \section{Encryption}
+    \label{encryption}
+        If enabled (see ~\ref{config:encryption}), every cluster is encrypted
+        separately.
+
+        Encrypting cluster $n$ is done by obtaining a
+        key\footnote{Equivalently, prepending the 64-bit integer defining which
+        cluster is being encrypted, to some user-specified key.} $k' = 2^{64}k
+        + n$ and encrypting the cluster with said key by the algorithm given in
+        ~\ref{config:encryption}.
 \end{document}
