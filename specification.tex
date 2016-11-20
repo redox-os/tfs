@@ -111,7 +111,7 @@
         \begin{description}
             \item [$n = 0$]    no free, allocatable cluster.
             \item [$n \neq 0$] the $n$'th cluster is free and conforms
-                to~\ref{cluster:freelist}.
+                to~\ref{cluster:metacluster}.
         \end{description}
 
         \subsection{Super-page pointer (520-528)}
@@ -173,25 +173,46 @@
         is stored in. The last 3 bits defines the index of the page in the
         cluster.
 
-        Allocation is done by inspecting the head of the freelist before
-        popping it, to see if it has a sister cluster, where the page can be
-        fit in. If it cannot, the freelist is popped. The way such clusters are
-        paired is implementation defined\footnote{Bijective maps are
-        recommended for optimal performance.}.
+        \subsection{Meta-clusters}
+        \label{cluster:metacluster}
+        The head of the freelist is a metacluster, which itself is a collection
+        of other free clusters. Similarly to used clusters, metaclusters
+        contain a 8 byte header:
 
-        \subsection{Cluster freelist}
-        \label{cluster:freelist}
-        Free clusters has a separate format. It contains a single 64-bit
-        little-endian integer, defining the next free cluster. This integer is
-        repeated once again to ensure integrity.
+        \begin{description}
+            \item [32-bit checksum] This is the 32 last bits of the
+                little-endian checksum of the metacluster (algorithm chosen
+                in~\ref{config:checksum}). The first 4 bytes of the cluster are
+                not included in the checksum.
+            \item [16-bit cluster counter] This 16-bit little-endian integer
+                defines the number of free clusters stored in the data section.
+                Call this value $n$.
+            \item [2 bytes for implementation defined usage] This is
+                left to the implementation.
+        \end{description}
 
-        The end of the list is marked by a null pointer (the disk header isn't
-        a valid cluster).
+        This is followed by $n$ 64-bit little-endian pointers to other free
+        clusters.
+
+        The first pointer is either a null pointer, meaning that there are no
+        more free clusters, or non-null, in which case it points to another
+        metacluster\footnote{Popping a cluster is often done by decrementing
+        $n$ and returning the respective pointer, unless $n = 0$, which means
+        that the head pointer is set to the next metacluster and the current
+        metacluster is returned.}.
 
         Although not a requirement, it is generally recommended that
         the freelist is kept as monotone as possible\footnote{That is,
         sequential allocations should be local as often as possible in
         order to improve compression ratio.}.
+
+        \subsection{Allocation and deallocation}
+        The algorithm for allocation and deallocation is implementation
+        defined\footnote{It is generally done by inspecting the head of the
+            freelist before popping it, to see if it has a sister cluster,
+            where the page can be fit in. If it cannot, the freelist is popped.
+            The way such clusters are paired is up to the implementation.
+            Bijective maps are recommended for optimal performance.}.
 
     \section{Checksums}
         \subsection{Fixed}
@@ -235,7 +256,8 @@
 
         $$h \equiv a + f(b) + f(c + f(d)) \pmod{2^{64}}$$
 
-        If a byte, $e$, is excessive (i.e.\ the length is not divisible by 32), it is included through
+        If a byte, $e$, is excessive (i.e.\ the length is not divisible by 32),
+        it is included through
 
         $$h' \equiv f(h + e) \pmod{2^{64}}$$
 
