@@ -18,12 +18,11 @@
         TFS file system. Certain implementation details are covered.
     \end{abstract}
 
-    \chapter{Disk IO}
+    \chapter{Disk header}
+    The first \clustersize bytes are reserved for the ``disk header'' which
+    contains configuration and information about the state.
 
-    \section{Disk header}
-        The first \clustersize bytes are reserved for the ``disk header'' which
-        contains configuration and information about the state.
-
+    \section{Introducer}
         \subsection{Magic number (0-8)}
         The first 8 bytes are reserved for a magic number, which is used for
         determining if it does indeed store TFS. It is specified to store the
@@ -42,34 +41,16 @@
         implementation explicitly states that it was capable of fully or
         partially reading the image.
 
-        \subsection{Checksum algorithm (32-34)}
-        \label{config:checksum}
-        Byte 32 to 34 stores a number in little-endian defining checksum
-        algorithm in use.
+        \subsection{Implementation defined (12-32)}
+        Byte 12 to 32 are implementation defined introduction values.
 
-        \begin{description}
-            \item [$0$] No checksum (calculated checksum always 0).
-            \item [$1$] Fixed checksum as described ~\ref{checksum:fixed}.
-            \item [$2$] The SeaHash algorithm as described in
-                ~\ref{checksum:seahash}
-            \item [$\geq 2^{15}$] Implementation defined.
-        \end{description}
-
-        \subsection{Compression algorithm (34-36)}
-        \label{config:compression}
-        Byte 34 to 36 stores a number in little-endian defining compression
-        algorithm in use.
-
-        \begin{description}
-            \item [$0$] No compression (identity function).
-            \item [$1$] The LZ4 compressor as described in ~\ref{compression:lz4}.
-            \item [$\geq 2^{15}$] Implementation defined.
-        \end{description}
-
-        \subsection{Encryption algorithm (36-40)}
+    \section{Encryption}
+        The encryption options are read separately, because they are needed to
+        correctly read the following bytes in the header.
+        \subsection{Encryption algorithm (32-34)}
         \label{config:encryption}
         Byte 36 to 40 stores a number in little-endian defining encryption
-        algorithm in use.
+        algorithm in use. It takes following values
 
         \begin{description}
             \item [$0$] No encryption (identity function).
@@ -78,19 +59,51 @@
             \item [$\geq 2^{15}$] Implementation defined.
         \end{description}
 
-        The exact semantics of encryption is described in ~\ref{encryption}
+        The remaining part of the header is encrypted respective to this
+        method.
+
+    \section{Options}
+        \subsection{Checksum algorithm (34-36)}
+        \label{config:checksum}
+        Byte 32 to 34 stores a number in little-endian defining checksum
+        algorithm in use.
+
+        \begin{description}
+            \item [$0$] No checksum (calculated checksum always 0).
+            \item [$1$] Fixed checksum as described~\ref{checksum:fixed}.
+            \item [$2$] The SeaHash algorithm
+                as described
+                in~\ref{checksum:seahash}
+            \item [$\geq 2^{15}$] Implementation defined.
+        \end{description}
+
+        \subsection{Compression algorithm (36-38)}
+        \label{config:compression}
+        Byte 34 to 36 stores a number in little-endian defining compression
+        algorithm in use.
+
+        \begin{description}
+            \item [$0$] No compression (identity function).
+            \item [$1$] The LZ4 compressor as
+                described
+                in~\ref{compression:lz4}.
+            \item [$\geq 2^{15}$] Implementation defined.
+        \end{description}
+
+        The exact semantics of encryption is described in~\ref{encryption}
 
         \subsection{Implementation defined (256-512)}
         Byte 256 to 512 are implementation defined configuration values.
 
+    \section{State}
         \subsection{Head freelist pointer (512-520)}
         Byte 512 to 520 stores some number (in little endian), which takes
         values
 
         \begin{description}
             \item [$n = 0$]    no free, allocatable cluster.
-            \item [$n \neq 0$] the $n$'th cluster is free and conforms to
-                ~\ref{cluster:freelist}.
+            \item [$n \neq 0$] the $n$'th cluster is free and conforms
+                to~\ref{cluster:freelist}.
         \end{description}
 
         \subsection{Super-page pointer (520-528)}
@@ -99,20 +112,23 @@
 
         \begin{description}
             \item [$n = 0$]    super-page uninitialized.
-            \item [$n \neq 0$] the $n$'th page is the super-page as defined in
-                ~\ref{fs:superpage}.
+            \item [$n \neq 0$] the $n$'th page is the super-page as
+                defined in~\ref{fs:superpage}.
         \end{description}
 
         \subsection{Implementation defined (1024-2048)}
         Byte 1024 to 2048 are implementation defined state values.
 
-        \subsection{Redundant duplicate (2048-4096)}
-        Byte 2048-4096 of the disk header stores a copy of byte 0-2048 of the
-        header.
+    \section{Redundancy}
+    \label{section:redundant}
+        \subsection{Redundant duplicate}
+        The header is then repeated once (in byte 2048 to 4096).
 
-        \subsection{Padding (4096-\clustersize)}
+        \subsection{Padding}
         Byte 4096 to \clustersize is used as padding to achieve the cluster
         size. It is specified to be zeros.
+
+    \chapter{Disk IO}
 
     \section{Clusters and pages}
         The disk is divided into clusters of \clustersize bytes each.
@@ -122,13 +138,13 @@
 
         \begin{description}
             \item [32-bit checksum] This is the 32 last bits of the
-                little-endian checksum of the cluster (algorithm chosen in
-                ~\ref{config:checksum}). The first 4 bytes of the cluster are
-                not included in the checksum.
+                little-endian checksum of the cluster (algorithm
+                chosen in~\ref{config:checksum}). The first 4 bytes of
+                the cluster are not included in the checksum.
             \item [1 byte page flags] Defines which pages the cluster contains.
                 If a bit flag is set, the respective page is contained (as
                 compressed) in the cluster. If no flags are set, the cluster is
-                uncompressed (i.e. represents the page without any special
+                uncompressed (i.e.\ represents the page without any special
                 representation).
             \item [3 bytes for implementation defined usage] This is
                 left to the implementation\footnote{Our implementation
@@ -137,7 +153,7 @@
 
         This is followed by the number of set page flags in pages compressed.
         The pages (which are \pagesize byte buffers) are concatenated and
-        compressed by the algorithm defined by ~\ref{config:compression}.
+        compressed by the algorithm defined by~\ref{config:compression}.
 
         The $n$'th page in some cluster is found by counting the number of set
         flags in the first $n$ bits of the page flags. Call this value $p$,
@@ -211,7 +227,7 @@
 
         $$h \equiv a + f(b) + f(c + f(d)) \pmod{2^{64}}$$
 
-        If a byte, $e$, is excessive (i.e. the length is not divisible by 32), it is included through
+        If a byte, $e$, is excessive (i.e.\ the length is not divisible by 32), it is included through
 
         $$h' \equiv f(h + e) \pmod{2^{64}}$$
 
@@ -244,12 +260,11 @@
 
     \section{Encryption}
     \label{encryption}
-        If enabled (see ~\ref{config:encryption}), every cluster is encrypted
-        separately.
+        If enabled (see~\ref{config:encryption}), every cluster is encrypted.
 
         Encrypting cluster $n$ is done by obtaining a
         key\footnote{Equivalently, prepending the 64-bit integer defining which
         cluster is being encrypted, to some user-specified key.} $k' = 2^{64}k
-        + n$ and encrypting the cluster with said key by the algorithm given in
-        ~\ref{config:encryption}.
+        + n$ and encrypting the cluster with said key by the algorithm given
+        in~\ref{config:encryption}.
 \end{document}
