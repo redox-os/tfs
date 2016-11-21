@@ -52,9 +52,7 @@
         \subsection{Implementation defined (12-32)}
         Byte 12 to 32 are implementation defined introduction values.
 
-    \section{Encryption}
-        The encryption options are read separately, because they are needed to
-        correctly read the following bytes in the header.
+    \section{Options}
         \subsection{Encryption algorithm (32-34)}
         \label{config:encryption}
         Byte 36 to 40 stores a number in little-endian defining encryption
@@ -67,20 +65,15 @@
             \item [$\geq 2^{15}$] Implementation defined.
         \end{description}
 
-        The remaining part of the header is encrypted respective to this
-        method.
-
-    \section{Options}
         \subsection{Checksum algorithm (34-36)}
         \label{config:checksum}
         Byte 32 to 34 stores a number in little-endian defining checksum
         algorithm in use.
 
         \begin{description}
-            \item [$0$] No checksum (calculated checksum always 0).
-            \item [$1$] Fixed checksum as described~\ref{checksum:fixed}.
-            \item [$2$] The SeaHash algorithm
-                as described
+            \item [$0$] Constant checksum as described
+                in~\ref{checksum:constant}.
+            \item [$1$] The SeaHash algorithm as described
                 in~\ref{checksum:seahash}
             \item [$\geq 2^{15}$] Implementation defined.
         \end{description}
@@ -92,8 +85,7 @@
 
         \begin{description}
             \item [$0$] No compression (identity function).
-            \item [$1$] The LZ4 compressor as
-                described
+            \item [$1$] The LZ4 compressor as described
                 in~\ref{compression:lz4}.
             \item [$\geq 2^{15}$] Implementation defined.
         \end{description}
@@ -153,7 +145,8 @@
                 If a bit flag is set, the respective page is contained (as
                 compressed) in the cluster. If no flags are set, the cluster is
                 uncompressed (i.e.\ represents the page without any special
-                representation).
+                representation). The first page flag is the least-significant
+                digit and counting up.
             \item [3 bytes for implementation defined usage] This is
                 left to the implementation\footnote{Our implementation
                 uses it as garbage collection flag for mark-and-sweep.}.
@@ -172,6 +165,9 @@
         similarly to clusters. The first 61 bits defines what cluster the page
         is stored in. The last 3 bits defines the index of the page in the
         cluster.
+
+        The whole cluster is encrypted by the algorithm specified
+        in~\ref{config:encryption}.
 
         \subsection{Meta-clusters}
         \label{cluster:metacluster}
@@ -215,11 +211,14 @@
             Bijective maps are recommended for optimal performance.}.
 
     \section{Checksums}
-        \subsection{Fixed}
-        \label{checksum:fixed}
-        Fixed checksums are independent of the data stored. Instead, the write
-        the number of the cluster it is stored in. If data is corrupted, the
-        checksum is often invalidated as well, and will thus mismatch.
+        \subsection{Constant checksum}
+        \label{checksum:seahash}
+        Constant checksum is independent of the input\footnote{This is used as
+        an alternative to storing no checksum, which would make implementation
+        harder. Instead, this allows some -- but weak -- protection against failure
+        with virtually no effort.}, yielding a constant value,
+
+        $$c = 2^{32} - 1$$
 
         \subsection{SeaHash}
         \label{checksum:seahash}
