@@ -127,7 +127,7 @@
         \subsection{Password fingerprint, repeated (byte 40-44)}
         Repetition of~\ref{header:fingerprint}.
 
-    \chapter{Configuration and state}
+    \chapter{State segment}
     Following the header, a \clustersize bytes segment containing the
     configuration and state is stored, and is stored encrypted with the
     encryption method specified in~\ref{header:encryption}.
@@ -182,6 +182,12 @@
             \item [$n \neq 0$] the $n$'th page is the super-page as
                 defined in~\ref{fs:superpage}.
         \end{description}
+
+    \section{Integrity checking}
+        \subsection{Checksum (byte 40-44)}
+        This field stores a little-endian integer equal to the checksum of the
+        state segment (excluding this field), calculated by the algorithm
+        specified in~\ref{config:checksum}.
 
     \chapter{Disk IO}
 
