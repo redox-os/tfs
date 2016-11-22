@@ -22,6 +22,35 @@
         TFS file system. Certain implementation details are covered.
     \end{abstract}
 
+    \chapter{Introduction}
+    This specification should detail the TFS file system such that it can be
+    implemented without ambiguity. As such, it should bridge various
+    implementation under one united on-disk format.
+
+    It will not, however, provide the algorithms used to manipulate this format
+    efficiently. It will only specify it's static, disk format.
+
+    \section{Assumptions and guarantees}
+        TFS provides following guarantees:
+
+        \begin{itemize}
+            \item Unless data corruption happens, the disk should never be in
+                an inconsistent state. Poweroff and the alike should not affect
+                the system such that it enters an invalid or inconsistent
+                state.
+        \end{itemize}
+
+        Provided that following premises hold:
+
+        \begin{itemize}
+            \item Up to 16 bytes can be written atomically, i.e.\ that it is
+                never partially written, and interrupting the write will never
+                render the disk in a state in which it not already is written
+                or retaining the old data.
+        \end{itemize}
+
+
+
     \chapter{Disk header}
     The first \diskheadersize bytes are reserved for the ``disk header'' which
     contains unencrypted configuration and information about the state.
