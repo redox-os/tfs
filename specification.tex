@@ -27,7 +27,7 @@
     contains unencrypted configuration and information about the state.
 
     \section{Introducer}
-        \subsection{Magic number (0-8)}
+        \subsection{Magic number (byte 0-8)}
         The first 8 bytes are reserved for a magic number, which is used for
         determining if it does indeed store TFS. It is specified to store the
         string ``\texttt{TFS fmt }'' (note the space) in ASCII.
@@ -35,25 +35,33 @@
         If the format does only partially conform to this specification, the
         string ``\texttt{\textasciitilde TFS fmt}'' is used instead.
 
-        \subsection{Version number (8-12)}
-        Byte 8 to 12 stores a version number, in little-endian. By this
-        revision, said number is \versionnumber.
+        \subsection{Version number (byte 8-12)}
+        \label{header:versionnumber}
+        This field stores a version number, in little-endian. By this revision,
+        said number is \versionnumber.
 
         Breaking changes will increment the higher half of this number.
 
-        \subsection{Implementation ID (12-20)}
-        Byte 12 to 20 stores some UTF-8 sequence specifying what implementation
-        it was last read/written with. By setting this field, the
-        implementation explicitly states that it was capable of fully or
-        partially reading the image.
+        \subsection{Version number, repeated (byte 12-16)}
+        Repetition of~\ref{header:versionnumber}.
+
+        \subsection{Implementation ID (byte 16-24)}
+        \label{header:implementationid}
+        This field stores some UTF-8 sequence specifying what implementation it
+        was last read/written with. By setting this field, the implementation
+        explicitly states that it was capable of fully or partially reading the
+        image.
 
         The recommended format is the original author's name truncated
         followed by the year of the initial release.
 
+        \subsection{Implementation ID, repeated (byte 24-32)}
+        Repetition of~\ref{header:implementationid}.
+
     \section{Encryption}
-        \subsection{Encryption algorithm (32-34)}
+        \subsection{Encryption algorithm (byte 32-34)}
         \label{header:encryption}
-        Byte 20 to 22 stores a number in little-endian defining encryption
+        This field stores a number in little-endian defining encryption
         algorithm in use. It takes following values
 
         \begin{description}
@@ -75,7 +83,10 @@
 
         $$f_k : \{0,1\}^k \to \{0,1\}^{32}$$
 
-        \subsection{Password fingerprint (34-38)}
+        \subsection{Encryption algorithm, repeated (byte 34-36)}
+        Repetition of~\ref{header:encryption}.
+
+        \subsection{Password fingerprint (byte 36-40)}
         \label{header:fingerprint}
         This field stores a little-endian integer whose value is dependent on
         the key and the encryption algorithm that is used
@@ -83,6 +94,9 @@
         specify a function to derive a 4 byte number from an arbitrary string.
         If this string matches the password, the number stored in this field
         should match. Its purpose is to be able to detect wrong passwords.
+
+        \subsection{Password fingerprint, repeated (byte 40-44)}
+        Repetition of~\ref{header:fingerprint}.
 
     \chapter{Configuration and state}
     Following the header, a \clustersize bytes segment containing the
@@ -94,10 +108,10 @@
     such, any address is considered relative to this.
 
     \section{Configuration}
-        \subsection{Checksum algorithm (0-2)}
+        \subsection{Checksum algorithm (byte 0-2)}
         \label{config:checksum}
-        Byte 0 to 2 stores a number in little-endian defining checksum
-        algorithm in use.
+        This field stores a number in little-endian defining checksum algorithm
+        in use.
 
         \begin{description}
             \item [$0$] Constant checksum as described
@@ -107,9 +121,9 @@
             \item [$\geq 2^{15}$] Implementation defined.
         \end{description}
 
-        \subsection{Compression algorithm (2-4)}
+        \subsection{Compression algorithm (byte 2-4)}
         \label{config:compression}
-        Byte 2 to 4 stores a number in little-endian defining compression
+        This field stores a number in little-endian defining compression
         algorithm in use.
 
         \begin{description}
@@ -122,8 +136,8 @@
         The exact semantics of encryption is described in~\ref{encryption}
 
     \section{State}
-        \subsection{Head freelist pointer (32-40)}
-        Byte 32 to 40 stores some number (in little endian), which takes values
+        \subsection{Head freelist pointer (byte 32-40)}
+        This field stores some number (in little endian), which takes values
 
         \begin{description}
             \item [$n = 0$]    no free, allocatable cluster.
@@ -131,8 +145,8 @@
                 to~\ref{cluster:metacluster}.
         \end{description}
 
-        \subsection{Super-page pointer (40-48)}
-        Byte 40 to 48 stores some number (in little endian), which takes values
+        \subsection{Super-page pointer (byte 40-48)}
+        This field stores some number (in little endian), which takes values
 
         \begin{description}
             \item [$n = 0$]    super-page uninitialized.
