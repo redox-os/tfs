@@ -13,6 +13,7 @@
 \newcommand{\versionnumber}{0 }
 \newcommand{\clustersize}{4104 }
 \newcommand{\pagesize}{4096 }
+\newcommand{\diskheadersize}{64 }
 
 \begin{document}
     \maketitle
@@ -22,8 +23,8 @@
     \end{abstract}
 
     \chapter{Disk header}
-    The first \clustersize bytes are reserved for the ``disk header'' which
-    contains configuration and information about the state.
+    The first \diskheadersize bytes are reserved for the ``disk header'' which
+    contains unencrypted configuration and information about the state.
 
     \section{Introducer}
         \subsection{Magic number (0-8)}
@@ -49,25 +50,53 @@
         The recommended format is the original author's name truncated
         followed by the year of the initial release.
 
-        \subsection{Implementation defined (12-32)}
-        Byte 12 to 32 are implementation defined introduction values.
-
-    \section{Options}
+    \section{Encryption}
         \subsection{Encryption algorithm (32-34)}
-        \label{config:encryption}
-        Byte 36 to 40 stores a number in little-endian defining encryption
+        \label{header:encryption}
+        Byte 20 to 22 stores a number in little-endian defining encryption
         algorithm in use. It takes following values
 
         \begin{description}
             \item [$0$] No encryption (identity function).
-            \item [$1$] ChaCha20/Poly1305 as described in
-                \href{https://tools.ietf.org/html/rfc4253}{RFC \#4253}.
+            \item [$1$] SPECK-256/BLAKE2s key stretching and fingerprint.
+                See~\ref{crypto:speck}.
             \item [$\geq 2^{15}$] Implementation defined.
         \end{description}
 
-        \subsection{Checksum algorithm (34-36)}
+        Every encryption algorithm must have two components in it. A class of
+        cipher functions,
+
+        \begin{align*}
+            c_{b, k}      &: \{0, 1\}^b \times \{0, 1\}^k \to \{0, 1\}^b \\
+            c_{b, k}^{-1} &: \{0, 1\}^b \times \{0, 1\}^k \to \{0, 1\}^b
+        \end{align*}
+
+        and a class of password fingerprint functions (see~\ref{header:fingerprint}):
+
+        $$f_k : \{0,1\}^k \to \{0,1\}^{32}$$
+
+        \subsection{Password fingerprint (34-38)}
+        \label{header:fingerprint}
+        This field stores a little-endian integer whose value is dependent on
+        the key and the encryption algorithm that is used
+        (see~\ref{header:encryption}). In particular, the algorithm must
+        specify a function to derive a 4 byte number from an arbitrary string.
+        If this string matches the password, the number stored in this field
+        should match. Its purpose is to be able to detect wrong passwords.
+
+    \chapter{Configuration and state}
+    Following the header, a \clustersize bytes segment containing the
+    configuration and state is stored, and is stored encrypted with the
+    encryption method specified in~\ref{header:encryption}.
+
+    For convenience, from now on, we will enumerate the bytes with $0$ mapping
+    to the start of this segment (in absolute values, byte \diskheadersize). As
+    such, any address is considered relative to this.
+
+    \section{Configuration}
+        \subsection{Checksum algorithm (0-2)}
         \label{config:checksum}
-        Byte 32 to 34 stores a number in little-endian defining checksum
+        Byte 0 to 2 stores a number in little-endian defining checksum
         algorithm in use.
 
         \begin{description}
@@ -78,9 +107,9 @@
             \item [$\geq 2^{15}$] Implementation defined.
         \end{description}
 
-        \subsection{Compression algorithm (36-38)}
+        \subsection{Compression algorithm (2-4)}
         \label{config:compression}
-        Byte 34 to 36 stores a number in little-endian defining compression
+        Byte 2 to 4 stores a number in little-endian defining compression
         algorithm in use.
 
         \begin{description}
@@ -92,13 +121,9 @@
 
         The exact semantics of encryption is described in~\ref{encryption}
 
-        \subsection{Implementation defined (256-512)}
-        Byte 256 to 512 are implementation defined configuration values.
-
     \section{State}
-        \subsection{Head freelist pointer (512-520)}
-        Byte 512 to 520 stores some number (in little endian), which takes
-        values
+        \subsection{Head freelist pointer (32-40)}
+        Byte 32 to 40 stores some number (in little endian), which takes values
 
         \begin{description}
             \item [$n = 0$]    no free, allocatable cluster.
@@ -106,27 +131,14 @@
                 to~\ref{cluster:metacluster}.
         \end{description}
 
-        \subsection{Super-page pointer (520-528)}
-        Byte 520 to 528 stores some number (in little endian), which takes
-        values
+        \subsection{Super-page pointer (40-48)}
+        Byte 40 to 48 stores some number (in little endian), which takes values
 
         \begin{description}
             \item [$n = 0$]    super-page uninitialized.
             \item [$n \neq 0$] the $n$'th page is the super-page as
                 defined in~\ref{fs:superpage}.
         \end{description}
-
-        \subsection{Implementation defined (1024-2048)}
-        Byte 1024 to 2048 are implementation defined state values.
-
-    \section{Redundancy}
-    \label{section:redundant}
-        \subsection{Redundant duplicate}
-        The header is then repeated once (in byte 2048 to 4096).
-
-        \subsection{Padding}
-        Byte 4096 to \clustersize is used as padding to achieve the cluster
-        size. It is specified to be zeros.
 
     \chapter{Disk IO}
 
@@ -165,9 +177,6 @@
         similarly to clusters. The first 61 bits defines what cluster the page
         is stored in. The last 3 bits defines the index of the page in the
         cluster.
-
-        The whole cluster is encrypted by the algorithm specified
-        in~\ref{config:encryption}.
 
         \subsection{Meta-clusters}
         \label{cluster:metacluster}
@@ -286,14 +295,4 @@
 
         The last block in a stream can be ended after literals
         section, such that no duplicates part is needed.
-
-    \section{Encryption}
-    \label{encryption}
-        If enabled (see~\ref{config:encryption}), every cluster is encrypted.
-
-        Encrypting cluster $n$ is done by obtaining a
-        key\footnote{Equivalently, prepending the 64-bit integer defining which
-        cluster is being encrypted, to some user-specified key.} $k' = 2^{64}k
-        + n$ and encrypting the cluster with said key by the algorithm given
-        in~\ref{config:encryption}.
 \end{document}
