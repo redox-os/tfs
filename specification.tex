@@ -95,7 +95,7 @@
 
         \begin{description}
             \item [$0$] No encryption (identity function).
-            \item [$1$] SPECK-256/BLAKE2s key stretching and fingerprint.
+            \item [$1$] SPECK-256 with BLAKE2s key stretching
                 See~\ref{crypto:speck}.
             \item [$\geq 2^{15}$] Implementation defined.
         \end{description}
@@ -108,24 +108,8 @@
             c_{b, k}^{-1} &: \{0, 1\}^b \times \{0, 1\}^k \to \{0, 1\}^b
         \end{align*}
 
-        and a class of password fingerprint functions (see~\ref{header:fingerprint}):
-
-        $$f_k : \{0,1\}^k \to \{0,1\}^{32}$$
-
         \subsection{Encryption algorithm, repeated (byte 34-36)}
         Repetition of~\ref{header:encryption}.
-
-        \subsection{Password fingerprint (byte 36-40)}
-        \label{header:fingerprint}
-        This field stores a little-endian integer whose value is dependent on
-        the key and the encryption algorithm that is used
-        (see~\ref{header:encryption}). In particular, the algorithm must
-        specify a function to derive a 4 byte number from an arbitrary string.
-        If this string matches the password, the number stored in this field
-        should match. Its purpose is to be able to detect wrong passwords.
-
-        \subsection{Password fingerprint, repeated (byte 40-44)}
-        Repetition of~\ref{header:fingerprint}.
 
     \chapter{State segment}
     Following the header, a \clustersize bytes segment containing the
@@ -136,8 +120,13 @@
     to the start of this segment (in absolute values, byte \diskheadersize). As
     such, any address is considered relative to this.
 
+    \section{Fixed}
+        \subsection{Zeros (byte 0-4)}
+        These bytes are zero. They are used to make sure the password was
+        correctly given and the decryption was correct.
+
     \section{Configuration}
-        \subsection{Checksum algorithm (byte 0-2)}
+        \subsection{Checksum algorithm (byte 16-18)}
         \label{config:checksum}
         This field stores a number in little-endian defining checksum algorithm
         in use.
@@ -150,7 +139,7 @@
             \item [$\geq 2^{15}$] Implementation defined.
         \end{description}
 
-        \subsection{Compression algorithm (byte 2-4)}
+        \subsection{Compression algorithm (byte 18-20)}
         \label{config:compression}
         This field stores a number in little-endian defining compression
         algorithm in use.
