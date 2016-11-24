@@ -308,16 +308,13 @@
             f(n)   &=      f_1(f_2(f_1(f_2(f_1(n)))))
         \end{align*}
 
+        TODO: Handle excessive bytes (latest update in the seahash algo).
+
         The final hash value is then produced by
 
-        $$h \equiv a + f(b) + f(c + f(d)) \pmod{2^{64}}$$
+        $$h \equiv l + a + f(b) + f(c + f(d)) \pmod{2^{64}}$$
 
-        If a byte, $e$, is excessive (i.e.\ the length is not divisible by 32),
-        it is included through
-
-        $$h' \equiv f(h + e) \pmod{2^{64}}$$
-
-        This process is repeated, until no more excessive bytes are left.
+        (where $l$ is the length)
 
     \section{Compression algorithms}
         \subsection{LZ4}
