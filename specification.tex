@@ -10,10 +10,15 @@
 \date{\today}
 
 % Constants
+\newcommand{\clusterheader}{8 }
+\newcommand{\clustersize}{4096 }
+\newcommand{\maxpagesincluster}{16 }
+\newcommand{\minimumsectorsize}{512 }
+\newcommand{\pagesize}{4090 }
 \newcommand{\versionnumber}{0 }
-\newcommand{\clustersize}{4104 }
-\newcommand{\pagesize}{4096 }
-\newcommand{\diskheadersize}{64 }
+
+% Math
+\newcommand{\concat}{\Vert}
 
 \begin{document}
     \maketitle
@@ -31,29 +36,32 @@
     efficiently. It will only specify it's static, disk format.
 
     \section{Assumptions and guarantees}
+    \label{assumptions_guarantees}
         TFS provides following guarantees:
 
         \begin{itemize}
             \item Unless data corruption happens, the disk should never be in
-                an inconsistent state. Poweroff and the alike should not affect
-                the system such that it enters an invalid or inconsistent
-                state.
+                an inconsistent state\footnote{TFS achieves this without using
+                journaling or a transactional model.}. Poweroff and the alike
+                should not affect the system such that it enters an invalid or
+                inconsistent state.
         \end{itemize}
 
         Provided that following premises hold:
 
         \begin{itemize}
-            \item Up to 16 bytes can be written atomically, i.e.\ that it is
-                never partially written, and interrupting the write will never
-                render the disk in a state in which it not already is written
-                or retaining the old data.
+            \item $n$ bytes can be written atomically if $n$ divides
+                \minimumsectorsize\footnote{Any disks on the market today has
+                sector size of \minimumsectorsize bytes or a multiple thereof,
+                hence the choice of this value.} and $n < \minimumsectorsize$,
+                i.e.\ it is never partially written, and interrupting the
+                write will never render the disk in a state in which it not already
+                is written or retaining the old data.
         \end{itemize}
 
-
-
     \chapter{Disk header}
-    The first \diskheadersize bytes are reserved for the ``disk header'' which
-    contains unencrypted configuration and information about the state.
+    The first \minimumsectorsize bytes are reserved for the ``disk header''
+    which contains unencrypted configuration and information about the state.
 
     \section{Introducer}
         \subsection{Magic number (byte 0-8)}
@@ -95,7 +103,7 @@
 
         \begin{description}
             \item [$0$] No encryption (identity function).
-            \item [$1$] SPECK-256 with BLAKE2s key stretching
+            \item [$1$] SPECK-256 with BLAKE2s key stretching (XEX mode).
                 See~\ref{crypto:speck}.
             \item [$\geq 2^{15}$] Implementation defined.
         \end{description}
@@ -109,8 +117,8 @@
     encryption method specified in~\ref{header:encryption}.
 
     For convenience, from now on, we will enumerate the bytes with $0$ mapping
-    to the start of this segment (in absolute values, byte \diskheadersize). As
-    such, any address is considered relative to this.
+    to the start of this segment (in absolute values, byte \minimumsectorsize).
+    As such, any address is considered relative to this.
 
     \section{Fixed}
         \subsection{Zeros (byte 0-4)}
@@ -143,11 +151,20 @@
             \item [$\geq 2^{15}$] Implementation defined.
         \end{description}
 
-        The exact semantics of encryption is described in~\ref{encryption}
+        In order to provide the guarantees given
+        in~\ref{assumptions_guarantees}, one constraint\footnote{It is
+        necessary because it allows first writing and then extending the
+        cluster, i.e.\ no data is corrupted on poweroff.  This is achieved
+        by most algorithms relevant for this usecase (particularly
+        streaming dictionary coders and adaptive entropy coders).} is put to
+        the compressions algorithms: It should be possible to extend the input
+        by appending some sequence of bytes to the compressed data, or
+
+        $$\forall x, y \  \exists k \quad x = c^{-1}(x') \implies x \concat y = c^{-1}(x' \concat k)$$
 
     \section{State}
         \subsection{Head freelist pointer (byte 32-40)}
-        This field stores some number (in little endian), which takes values
+        This field stores some number (in little-endian), which takes values
 
         \begin{description}
             \item [$n = 0$]    no free, allocatable cluster.
@@ -156,7 +173,7 @@
         \end{description}
 
         \subsection{Super-page pointer (byte 40-48)}
-        This field stores some number (in little endian), which takes values
+        This field stores some number (in little-endian), which takes values
 
         \begin{description}
             \item [$n = 0$]    super-page uninitialized.
@@ -176,37 +193,38 @@
         The disk is divided into clusters of \clustersize bytes each.
 
         \subsection{Cluster format}
-        Each cluster has a header of 8 bytes:
+        Each cluster has a header of \clusterheader bytes:
 
         \begin{description}
             \item [32-bit checksum] This is the 32 last bits of the
                 little-endian checksum of the cluster (algorithm
                 chosen in~\ref{config:checksum}). The first 4 bytes of
                 the cluster are not included in the checksum.
-            \item [1 byte page flags] Defines which pages the cluster contains.
-                If a bit flag is set, the respective page is contained (as
-                compressed) in the cluster. If no flags are set, the cluster is
-                uncompressed (i.e.\ represents the page without any special
-                representation). The first page flag is the least-significant
-                digit and counting up.
-            \item [3 bytes for implementation defined usage] This is
-                left to the implementation\footnote{Our implementation
-                uses it as garbage collection flag for mark-and-sweep.}.
+            \item [16-bit occupied space] This little-endian integer defines
+                how much of the cluster is used. Any data in the cluster beyond
+                this length is never read and can be freely overwritten.
+            \item [2 bytes of implementation defined use] These are left to the
+                implementation\footnote{Our implementation uses these for
+                mark-and-sweep garbage collection colors.}.
         \end{description}
 
-        This is followed by the number of set page flags in pages compressed.
-        The pages (which are \pagesize byte buffers) are concatenated and
-        compressed by the algorithm defined by~\ref{config:compression}.
+        A cluster contain up to \maxpagesincluster of \pagesize bytes blocks
+        called ``pages''. The decompressed data (algorithm defined
+        in~\ref{config:compression}) is the contained pages concatenated.
 
-        The $n$'th page in some cluster is found by counting the number of set
-        flags in the first $n$ bits of the page flags. Call this value $p$,
-        then the page is defined as the bytes from $\pagesize p$ to $\pagesize
-        (p + 1)$ of the decompressed cluster.
+        Pointers to pages uses the first 60 bits to define the cluster number,
+        and the last four bits to define which page, it points to. In
+        particular, if $c$ is the cluster number and $p$ is the number of the
+        page in the cluster, then the pointer is given by
 
-        A cluster can contain up to 8 pages, and the pages are enumerated
-        similarly to clusters. The first 61 bits defines what cluster the page
-        is stored in. The last 3 bits defines the index of the page in the
-        cluster.
+        $$r = \maxpagesincluster c + p$$
+
+        Allocation is done in implementation defined manner\footnote{Our
+        implementation first tries to fit it into the next cluster by
+        appending it (all this can be done atomically by updating the
+        occupied space field after writing the cluster, see requirements
+        in~\ref{config:compression}). If this fails, it proceeds to pop
+        from the top of the freelist.}.
 
         \subsection{Meta-clusters}
         \label{cluster:metacluster}
@@ -323,6 +341,6 @@
         $l - O$ to $l - O + t_2 + 256n_2 + e_2$ in the decoded buffer is
         appended to the output stream itself.
 
-        The last block in a stream can be ended after literals
-        section, such that no duplicates part is needed.
+        The last block in a stream can be ended after literals section, such
+        that no duplicates part is needed.
 \end{document}
