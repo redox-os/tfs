@@ -312,7 +312,7 @@
 
         The final hash value is then produced by
 
-        $$h \equiv l + a + f(b) + f(c + f(d)) \pmod{2^{64}}$$
+        $$h \equiv a + f(l + b) + f(c + f(d)) \pmod{2^{64}}$$
 
         (where $l$ is the length)
 

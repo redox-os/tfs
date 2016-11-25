@@ -19,6 +19,17 @@
 //! In particular, it fetches 4 integers in every round and independently diffuses them. This
 //! yields four different states, which are finally combined.
 //!
+//! # Advantages over other hash functions
+//!
+//! - Portability: SeaHash always gives the same hash across any platforms, and can thus be used
+//!   for e.g. on-disk structures.
+//! - Performance: SeaHash beats every high-quality (grading 10/10 in smhasher) hash function that
+//!   I know off.
+//! - Hardware accelerateable: SeaHash is designed such that ASICs can implement it with really
+//!   high performance.
+//! - Provable quality guarantees: Contrary to most other non-cryptographic hash function, SeaHash
+//!   can be proved to satisfy the avalanche criterion as well as BIC.
+//!
 //! # Statistical guarantees
 //!
 //! SeaHash comes with certain proven guarantees about the statistical properties of the output:
@@ -34,41 +45,13 @@
 //! The second guarantee requires more complex calculations: Construct a matrix of probabilities
 //! and set one to certain (1), then apply transformations through the respective operations. The
 //! proof is a bit long, but relatively simple.
-//!
-//! # Specification
-//!
-//! The hasher's state is 4-tuple of 4 64-bit integers, starting at `(0x16f11fe89b0d677c,
-//! 0xb480a793d8e6c86c, 0x6fe2e5aaf078ebc9, 0x14f994a4c5259381)`. The input is split into blocks of
-//! the size of the tuple. The block is split into 4 64-bit integers, each of which is added
-//! (modulo 2⁶⁴) to the state, in matching order. The integers are read in little-endian.
-//!
-//! When the block is read and the state is updated, the diffusion is applied. The diffusion
-//! function, `diffuse(x)`, is as follows:
-//!
-//! ```notest
-//! x ← x ⊕ (x >> 32)
-//! x ← px
-//! x ← x ⊕ (x >> 32)
-//! x ← px
-//! x ← x ⊕ (x >> 32)
-//! ```
-//!
-//! with `p = 0x7ed0e9fa0d94a33`.
-//!
-//! When the whole buffer (all blocks) is read, the state tuple, `(a, b, c, d)` is mixed into a
-//! single number:
-//!
-//! ```notest
-//! h = a + diffuse(b) + diffuse(c + diffuse(d))
-//! ```
-//!
-//! In case that there is excessive bytes, each are added to the hash value, and then it's diffused
-//! until all bytes are read.
 
 #![no_std]
 #![warn(missing_docs)]
 
 use core::num::Wrapping as W;
+
+pub mod reference;
 
 /// The diffusion function cornerstone of SeaHash.
 ///
@@ -78,6 +61,9 @@ use core::num::Wrapping as W;
 fn diffuse(mut x: W<u64>) -> W<u64> {
     x = x ^ (x >> 32);
     x = x * W(0x7ed0e9fa0d94a33);
+    x = x ^ (x >> 32);
+    x = x * W(0x7ed0e9fa0d94a33);
+    x = x ^ (x >> 32);
 
     x
 }
@@ -85,16 +71,18 @@ fn diffuse(mut x: W<u64>) -> W<u64> {
 /// Hash some buffer.
 pub fn hash(buf: &[u8]) -> u64 {
     unsafe {
+        // We fetch this in order to avoid aliasing things later on and thus breaking certain
+        // optimizations.
+        let len = buf.len() as isize;
+
         // We use 4 different registers to store seperate hash states, because this allows us to update
         // them seperately, and consequently exploiting ILP to update the states in parallel.
         let mut a = W(0x16f11fe89b0d677c);
         let mut b = W(0xb480a793d8e6c86c);
         let mut c = W(0x6fe2e5aaf078ebc9);
+        // We mix `len` in to make sure the function is zero-sensitive in the excessive bytes.
         let mut d = W(0x14f994a4c5259381);
 
-        // We fetch this in order to avoid aliasing things later on and thus breaking certain
-        // optimizations.
-        let len = buf.len() as isize;
         // We round down to a multiple of 32.
         let mut written_len = len & !0x1F;
         // We pre-fetch the pointer to the buffer to avoid too many cache misses.
@@ -265,12 +253,15 @@ pub fn hash(buf: &[u8]) -> u64 {
             }
         }
 
+        // Add the length in order to make the excessive bytes zero-sensitive.
+        b = b + W(len as u64);
+
         // Diffuse `b` and `d` into `a` and `c`.
         a = a + diffuse(b);
         c = c + diffuse(d);
 
         // Diffuse `a` and `c`.
-        (a + diffuse(c) + W(written_len as u64)).0
+        (a + diffuse(c)).0
     }
 }
 
@@ -278,9 +269,16 @@ pub fn hash(buf: &[u8]) -> u64 {
 mod tests {
     use super::*;
 
+    fn hash_match(a: &[u8]) {
+        assert_eq!(hash(a), reference::hash(a));
+    }
+
     #[test]
     fn zero() {
-        assert_eq!(hash(&[0; 4096]), 16549744396473422879);
+        let arr = [0; 4096];
+        for n in 0..4096 {
+            hash_match(&arr[0..n]);
+        }
     }
 
     #[test]
@@ -289,8 +287,9 @@ mod tests {
         for i in 0..4096 {
             buf[i] = i as u8;
         }
-        assert_eq!(hash(&buf), 11224124121938825130);
+        hash_match(&buf);
     }
+
 
     #[test]
     fn position_depedent() {
@@ -308,7 +307,8 @@ mod tests {
 
     #[test]
     fn shakespear() {
-        assert_eq!(hash(b"to be or not to be"), 9129472795863565305);
+        hash_match(b"to be or not to be");
+        hash_match(b"love is a wonderful terrible thing");
     }
 
     #[test]
@@ -332,5 +332,6 @@ mod tests {
         assert_ne!(hash(b"iiiiiijkjke"), hash(b"iiiiiijkjk"));
         assert_ne!(hash(b"iiiiiiijkjke"), hash(b"iiiiiiijkjk"));
         assert_ne!(hash(b"iiiiiiiijkjke"), hash(b"iiiiiiiijkjk"));
+        assert_ne!(hash(b"ab"), hash(b"bb"));
     }
 }
