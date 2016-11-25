@@ -34,7 +34,7 @@ fn diffuse(mut x: W<u64>) -> W<u64> {
 fn read_int(int: &[u8]) -> u64 {
     // Start at 0.
     let mut x = 0;
-    for &i in int {
+    for &i in int.iter().rev() {
         // Shift up a byte.
         x <<= 8;
         // Set the lower byte.
@@ -62,51 +62,29 @@ impl State {
         // Diffuse the component to remove deterministic behavior and commutativity.
         self.vec[self.cur] = diffuse(self.vec[self.cur]);
 
-        if self.cur == 0 {
-            // The component pointer was zero; wrap.
-            self.cur = 3;
-        } else {
-            // Simply decrement.
-            self.cur -= 1;
-        }
+        // Increment the cursor.
+        self.cur += 1;
+        // Wrap around.
+        self.cur %= 4;
 
         self.written += 8;
     }
 
     /// Write 7 or less excessive bytes to
-    fn write_excessive(&mut self, mut buf: &[u8]) {
+    fn write_excessive(&mut self, buf: &[u8]) {
         // Ensure that the invariants are true.
         debug_assert!(buf.len() < 8, "The buffer length of the excessive bytes must be less than an\
                       u64.");
-
-        // Update the number of written bytes.
-        self.written += buf.len();
 
         // We go to the first component for rather complicated reasons. The short version is that
         // doing this allows us to decrease code size in the optimized version.
         self.cur = 0;
 
-        // Write the excessive u32 (if any).
-        if buf.len() >= 4 {
-            // Read the u32 into a u64, and write it into the state.
-            self.write_u64(read_int(&buf[4..]));
-            // Shift the buffer.
-            buf = &buf[4..];
-        }
+        // Write the excessive byte into the state as one u64.
+        self.write_u64(read_int(buf));
 
-        // Write the excessive u16 (if any).
-        if buf.len() >= 2 {
-            // Read the u16 into a u64, and write it into the state.
-            self.write_u64(read_int(&buf[2..]));
-            // Shift the buffer.
-            buf = &buf[2..];
-        }
-
-        // Write the excessive u8 (if any).
-        if buf.len() >= 1 {
-            // Write the remaining byte into the state.
-            self.write_u64(buf[0] as u64);
-        }
+        // Update the written bytes counter.
+        self.written += buf.len();
     }
 
     /// Calculate the final hash.
@@ -156,7 +134,7 @@ pub fn hash(buf: &[u8]) -> u64 {
 
     // Partition the rounded down buffer to chunks of 8 bytes, and iterate over them in reversed
     // order.
-    for int in buf[..rounded_down_len].windows(8).rev() {
+    for int in buf[..rounded_down_len].windows(8) {
         // Read the chunk into an integer and write into the state.
         state.write_u64(read_int(int));
     }

@@ -50,6 +50,7 @@
 #![warn(missing_docs)]
 
 use core::num::Wrapping as W;
+use core::slice;
 
 pub mod reference;
 
@@ -68,6 +69,56 @@ fn diffuse(mut x: W<u64>) -> W<u64> {
     x
 }
 
+/// Read a buffer smaller than 8 bytes into an integer in little-endian.
+///
+/// # Unsafety
+///
+/// This assumes that `buf.len() < 8`, and relies on that for memory safety.
+#[inline(always)]
+unsafe fn read_int(buf: &[u8]) -> W<u64> {
+    let ptr = buf.as_ptr();
+    // Break it down to reads of integers with widths in total spanning the buffer. This minimizes
+    // the number of reads
+    match buf.len() {
+        // u8.
+        1 => W(*ptr as u64),
+        // u16.
+        2 => W((*(ptr as *const u16)).to_le() as u64),
+        // u16 + u8.
+        3 => {
+            let a = (*(ptr as *const u16)).to_le() as u64;
+            let b = *ptr.offset(2) as u64;
+
+            W(a | (b << 16))
+        },
+        // u32.
+        4 => W((*(ptr as *const u32)).to_le() as u64),
+        // u32 + u8.
+        5 => {
+            let a = (*(ptr as *const u32)).to_le() as u64;
+            let b = *ptr.offset(4) as u64;
+
+            W(a | (b << 32))
+        },
+        // u32 + u16.
+        6 => {
+            let a = (*(ptr as *const u32)).to_le() as u64;
+            let b = (*(ptr.offset(4) as *const u16)).to_le() as u64;
+
+            W(a | (b << 32))
+        },
+        // u32 + u16 + u8.
+        7 => {
+            let a = (*(ptr as *const u32)).to_le() as u64;
+            let b = (*(ptr.offset(4) as *const u16)).to_le() as u64;
+            let c = *ptr.offset(6) as u64;
+
+            W(a | (b << 32) | (c << 48))
+        },
+        _ => W(0),
+    }
+}
+
 /// Hash some buffer.
 pub fn hash(buf: &[u8]) -> u64 {
     unsafe {
@@ -83,35 +134,36 @@ pub fn hash(buf: &[u8]) -> u64 {
         // We mix `len` in to make sure the function is zero-sensitive in the excessive bytes.
         let mut d = W(0x14f994a4c5259381);
 
-        // We round down to a multiple of 32.
-        let mut written_len = len & !0x1F;
         // We pre-fetch the pointer to the buffer to avoid too many cache misses.
         let buf_ptr = buf.as_ptr();
         // The pointer to the current bytes.
-        let mut ptr = buf_ptr.offset(written_len) as *const u64;
+        let mut ptr = buf_ptr as *const u64;
+        /// The end of the "main segment", i.e. the biggest buffer s.t. the length is divisible by
+        /// 32.
+        let end_ptr = buf_ptr.offset(len & !0x1F) as *const u64;
 
-        while (buf_ptr as usize) < ptr as usize {
+        while ptr < end_ptr {
             // Read and diffuse the next 4 64-bit little-endian integers from their bytes. Note
             // that we on purpose not use `+=` and co., because it aliases the lvalue, making it
             // harder for LLVM to register allocate (it will have to inline the value behind the
             // pointer, effectively assuming that it is not aliased, which can be hard to prove).
 
-            ptr = ptr.offset(-1);
             // Placing these updates inplace can have some negative consequences on especially
             // older architectures, where they can block ILP because they assume the evaluation of
             // the old `byte` is executed, which might trigger the diffusion to run serially.
             // However, not introducing a tmp register makes sure that you don't push from the
             // register to the stack, which comes with a performance hit.
             a = a + W((*ptr).to_le());
+            ptr = ptr.offset(1);
 
-            ptr = ptr.offset(-1);
             b = b + W((*ptr).to_le());
+            ptr = ptr.offset(1);
 
-            ptr = ptr.offset(-1);
             c = c + W((*ptr).to_le());
+            ptr = ptr.offset(1);
 
-            ptr = ptr.offset(-1);
             d = d + W((*ptr).to_le());
+            ptr = ptr.offset(1);
 
             // Diffuse the updated registers. We hope that each of these are executed in parallel.
             a = diffuse(a);
@@ -120,136 +172,64 @@ pub fn hash(buf: &[u8]) -> u64 {
             d = diffuse(d);
         }
 
+        // Calculate the number of excessive bytes.
+        let mut excessive = len as usize + buf_ptr as usize - end_ptr as usize;
         // Handle the excessive bytes.
-        let mut excessive = len - written_len;
         if excessive != 0 {
             if excessive >= 24 {
                 // 24 bytes or more excessive.
 
                 // Update `a`.
-                ptr = ptr.offset(-1);
                 a = a + W((*ptr).to_le());
+                ptr = ptr.offset(1);
                 // Update `b`.
-                ptr = ptr.offset(-1);
                 b = b + W((*ptr).to_le());
+                ptr = ptr.offset(1);
                 // Update `c`.
-                ptr = ptr.offset(-1);
                 c = c + W((*ptr).to_le());
+                ptr = ptr.offset(1);
 
                 // Diffuse `a`, `b`, and `c`.
                 a = diffuse(a);
                 b = diffuse(b);
                 c = diffuse(c);
 
-                // We just wrote 8 bytes.
-                written_len = written_len + 24;
+                // Decrease the excessive counter by the number of bytes read.
+                excessive = excessive - 24;
             } else if excessive >= 16 {
                 // 16 bytes or more excessive.
 
                 // Update `a`.
-                ptr = ptr.offset(-1);
                 a = a + W((*ptr).to_le());
+                ptr = ptr.offset(1);
                 // Update `b`.
-                ptr = ptr.offset(-1);
                 b = b + W((*ptr).to_le());
+                ptr = ptr.offset(1);
 
                 // Diffuse `a` and `b`.
                 a = diffuse(a);
                 b = diffuse(b);
 
-                // We just wrote 8 bytes.
-                written_len = written_len + 16;
+                // Decrease the excessive counter by the number of bytes read.
+                excessive = excessive - 16;
             } else if excessive >= 8 {
                 // 8 bytes or more excessive.
 
                 // Update `a`.
-                ptr = ptr.offset(-1);
                 a = a + W((*ptr).to_le());
+                ptr = ptr.offset(1);
                 // Diffuse `a`.
                 a = diffuse(a);
 
-                // We just wrote 8 bytes.
-                written_len = written_len + 8;
+                // Decrease the excessive counter by the number of bytes read.
+                excessive = excessive - 8;
             }
 
-            // Update the excessive byte count.
-            excessive = len - written_len;
-            // We now have < 8 bytes excessive.
-            match excessive {
-                1 => {
-                    // Exactly one byte is excessive. Read this byte and diffuse it into `a`.
-                    a = diffuse(a + W(*buf_ptr.offset(written_len) as u64));
-                },
-                2 => {
-                    // Two bytes (an u16) is excessive. We diffuse this into `a`.
-                    a = diffuse(a + W((*(buf_ptr.offset(written_len) as *const u16)).to_le() as u64));
-                },
-                3 => {
-                    // An u16 and an u8 are excessive. We diffuse this into `a` and `b` respectively.
-
-                    // Mix the two first bytes into `a`.
-                    a = a + W((*(buf_ptr.offset(written_len) as *const u16)).to_le() as u64);
-                    // Update the written bytes counter.
-                    written_len = written_len + 2;
-                    // Mix the last byte into `b`.
-                    b = b + W(*buf_ptr.offset(written_len) as u64);
-
-                    // Diffuse the states.
-                    a = diffuse(a);
-                    b = diffuse(b);
-                },
-                4 => {
-                    // An u32 is excessive. We diffuse this into `a`.
-                    a = diffuse(a + W((*(buf_ptr.offset(written_len) as *const u32)).to_le() as u64));
-                },
-                5 => {
-                    // An u32 and an u8 are excessive. We diffuse this into `a` and `b`, respectively.
-
-                    // Mix the first 4 bytes into `a`.
-                    a = a + W((*(buf_ptr.offset(written_len) as *const u32)).to_le() as u64);
-                    // Update the written bytes counter.
-                    written_len = written_len + 4;
-                    // Mix the last byte into `b`.
-                    b = b + W(*buf_ptr.offset(written_len) as u64);
-
-                    // Diffuse the states.
-                    a = diffuse(a);
-                    b = diffuse(b);
-                },
-                6 => {
-                    // An u32 and an u16 are excessive. We diffuse this into `a` and `b`, respectively.
-
-                    // Mix the first 4 bytes into `a`.
-                    a = a + W((*(buf_ptr.offset(written_len) as *const u32)).to_le() as u64);
-                    // Update the written bytes counter.
-                    written_len = written_len + 4;
-                    // Mix the last byte into `b`.
-                    b = b + W((*(buf_ptr.offset(written_len) as *const u16)).to_le() as u64);
-
-                    // Diffuse the states.
-                    a = diffuse(a);
-                    b = diffuse(b);
-                },
-                7 => {
-                    // An u32, an u16, and an u8 are excessive. We diffuse this into `a`, `b`, and `c`, respectively.
-
-                    // Mix the first 4 bytes into `a`.
-                    a = a + W((*(buf_ptr.offset(written_len) as *const u32)).to_le() as u64);
-                    // Update the written bytes counter.
-                    written_len = written_len + 4;
-                    // Mix the next 2 bytes into `b`.
-                    b = b + W((*(buf_ptr.offset(written_len) as *const u16)).to_le() as u64);
-                    // Update the written bytes counter.
-                    written_len = written_len + 2;
-                    // Mix the last byte into `c`.
-                    c = c + W(*buf_ptr.offset(written_len) as u64);
-
-                    // Diffuse the states.
-                    a = diffuse(a);
-                    b = diffuse(b);
-                    c = diffuse(c);
-                },
-                _ => {},
+            if excessive != 0 {
+                // If the number of excessive bytes is still non-zero, we read the rest (<8) bytes
+                // and diffuse them into state `a`.
+                a = a + read_int(slice::from_raw_parts(ptr as *const u8, excessive));
+                a = diffuse(a);
             }
         }
 
