@@ -1,0 +1,44 @@
+use core::hash::Hasher;
+use core::num::Wrapping as W;
+
+use {hash, diffuse};
+
+/// The streaming version of the algorithm.
+///
+/// Note that the input type is not taken into account, and thus is assumed to be fixed.
+pub struct SeaHasher {
+    /// The state of the hasher.
+    state: W<u64>,
+}
+
+impl Hasher for SeaHasher {
+    fn finish(&self) -> u64 {
+        self.state.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        self.state += W(hash(bytes));
+        self.state = diffuse(self.state);
+    }
+
+    fn write_u64(&mut self, n: u64) {
+        self.state += W(n);
+        self.state = diffuse(self.state);
+    }
+
+    fn write_u8(&mut self, n: u8) {
+        self.write_u64(n as u64);
+    }
+
+    fn write_u16(&mut self, n: u16) {
+        self.write_u64(n as u64);
+    }
+
+    fn write_u32(&mut self, n: u32) {
+        self.write_u64(n as u64);
+    }
+
+    fn write_usize(&mut self, n: usize) {
+        self.write_u64(n as u64);
+    }
+}

@@ -2,33 +2,7 @@
 
 use core::num::Wrapping as W;
 
-/// The diffusion function.
-fn diffuse(mut x: W<u64>) -> W<u64> {
-    // Move entropy down by XOR with shifting.
-    x ^= x >> 32;
-    // Move entropy up by scattering through multiplication.
-    x *= W(0x7ed0e9fa0d94a33);
-    // We still need more entropy downwards. Flipping higher bits won't flip lower ones, so far.
-    // For example, if you flip the most significant bit, the 32'th bit will flip per the XOR-shift
-    // subdiffusion, but this flip will only be scattered by the multiplication to flipping bits
-    // higher than the 32'th, meaning that the ones lower will be unaffected. As such, we need to
-    // get some entropy down.
-    x ^= x >> 32;
-    // So far, the avalanche diagram looks pretty good, but it still emits stripe patterns. For
-    // example, flipping the 5'th lowest bit won't flip the least significant bit because of the
-    // choice of scalar (in particular, observe how it leaves the 32'th bit unflipped after the
-    // multiplication, which means that the XOR-shift never affects the lowest bit). No choice of
-    // scalar will make this go away, it will merely change the unaffected bits. Instead, we need
-    // to make the behavior more undeterministic by scattering bits through multiplication.
-    x *= W(0x7ed0e9fa0d94a33);
-    // This is the final stage of the diffusion function. There are still issues with the lowest
-    // bits, which are still unaffected by the multiplication above. However, the multiplication
-    // solved the higher bits' dependence, so lending entropy from the higher half will fix the
-    // issues with the lower half.
-    x ^= x >> 32;
-
-    x
-}
+use diffuse;
 
 /// Read an integer in little-endian.
 fn read_int(int: &[u8]) -> u64 {
