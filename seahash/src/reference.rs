@@ -6,6 +6,9 @@ use diffuse;
 
 /// Read an integer in little-endian.
 fn read_int(int: &[u8]) -> u64 {
+    debug_assert!(int.len() <= 8, "The buffer length of the integer must be less than or equal to \
+                  the one of an u64.");
+
     // Start at 0.
     let mut x = 0;
     for &i in int.iter().rev() {
@@ -30,7 +33,7 @@ struct State {
 
 impl State {
     /// Write a 64-bit integer to the state.
-    fn write_u64(&mut self, x: u64) {
+    fn write_u64(&mut self, x: u64, len: usize) {
         // Mix it into the substate by adding it.
         self.vec[self.cur] += W(x);
         // Diffuse the component to remove deterministic behavior and commutativity.
@@ -41,36 +44,23 @@ impl State {
         // Wrap around.
         self.cur %= 4;
 
-        self.written += 8;
-    }
-
-    /// Write 7 or less excessive bytes to
-    fn write_excessive(&mut self, buf: &[u8]) {
-        // Ensure that the invariants are true.
-        debug_assert!(buf.len() < 8, "The buffer length of the excessive bytes must be less than an\
-                      u64.");
-
-        // We go to the first component for rather complicated reasons. The short version is that
-        // doing this allows us to decrease code size in the optimized version.
-        self.cur = 0;
-
-        // Write the excessive byte into the state as one u64.
-        self.write_u64(read_int(buf));
-
-        // Update the written bytes counter.
-        self.written += buf.len();
+        self.written += len;
     }
 
     /// Calculate the final hash.
     fn finish(self) -> W<u64> {
-        // This is calculated like a Merkle tree, but because concatenation makes no sense in the
-        // context and we use addition instead, we need to get rid of the commutativity, which we
-        // do by diffusing the right child of every node and finally adding it all together.
-        self.vec[0]
+        // Even though addition is commutative, it doesn't matter, because the state vector's
+        // initial components are mutually distinct, and thus swapping even and odd chunks will
+        // affect the result, because it is sensitive to the initial condition. To add
+        // discreteness, we diffuse.
+        diffuse(self.vec[0]
+            + self.vec[1]
+            + self.vec[2]
+            + self.vec[3]
             // We add in the number of written bytes to make it zero-sensitive when excessive bytes
             // are written (0u32.0u8 ≠ 0u16.0u8).
-            + diffuse(self.vec[1] + W(self.written as u64))
-            + diffuse(self.vec[2] + diffuse(self.vec[3]))
+            + W(self.written as u64)
+        )
     }
 }
 
@@ -110,11 +100,11 @@ pub fn hash(buf: &[u8]) -> u64 {
     // order.
     for int in buf[..rounded_down_len].windows(8) {
         // Read the chunk into an integer and write into the state.
-        state.write_u64(read_int(int));
+        state.write_u64(read_int(int), 8);
     }
 
     // Write the excessive bytes.
-    state.write_excessive(&buf[rounded_down_len..]);
+    state.write_u64(read_int(&buf[rounded_down_len..]), buf.len() - rounded_down_len);
 
     // Finish the hash state and return the final value.
     state.finish().0
