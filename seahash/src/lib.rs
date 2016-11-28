@@ -79,9 +79,10 @@
 //! # Inner workings
 //!
 //! In technical terms, SeaHash follows a alternating 4-state length-padded Merkle–Damgård
-//! construction with an XOR-diffuse compression function:
+//! construction with an XOR-diffuse compression function (click to enlargen):
 //!
-//! [![A diagram.](http://ticki.github.io/img/seahash_construction_diagram.svg)](http://ticki.github.io/img/seahash_construction_diagram.svg)
+//! [![A diagram.](http://ticki.github.io/img/seahash_construction_diagram.svg)]
+//! (http://ticki.github.io/img/seahash_construction_diagram.svg)
 //!
 //! It starts with 4 initial states, then it alternates between them (increment, wrap on 4) and
 //! does modular XOR with the respective block. When a state has been visited the diffusion
@@ -110,6 +111,15 @@
 //! trivially. This might seem irrelavant, as it clearly isn't cryptographically secure, but it
 //! tells us something about the inner semantics. In particular, any diffusion function with
 //! sufficient statistical quality will make up a good hash function in this construction.
+//!
+//! # ASIC version
+//!
+//! SeaHash is specifically designed such that it can be efficiently implemented in the form of
+//! ASIC while only using very few transistors.
+//!
+//! # Specification
+//!
+//! See the [`reference`](./reference) module.
 
 #![no_std]
 #![warn(missing_docs)]

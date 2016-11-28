@@ -1,4 +1,33 @@
 //! A slow, but clear reference implementation of SeaHash.
+//!
+//! # Specification
+//!
+//! The input buffer is padded with null bytes until the length is divisible by 8.
+//!
+//! We start out with state
+//!
+//! ```notest
+//! a = 0x16f11fe89b0d677c
+//! b = 0xb480a793d8e6c86c
+//! c = 0x6fe2e5aaf078ebc9
+//! d = 0x14f994a4c5259381
+//! ```
+//!
+//! From the stream, we read one 64-bit block (in little-endian) at a time.  This number, `n`,
+//! determines the new the new state by:
+//!
+//! ```notest
+//! a' = b
+//! b' = c
+//! c' = d
+//! d  = g(a ⊕ n)
+//! ```
+//!
+//! `g(x)` is defined as `g(x) = h(j(h(j(h(x))))))` with `h(x) = x ≫ 32` and `j(x) ≡ px (mod 2⁶⁴)`
+//! with `p = 0x7ed0e9fa0d94a33`.
+//!
+//! Let the final state be `(x, y, z, w)`. Then the final result is given by `H = g(x ⊕ y ⊕ z ⊕ w ⊕
+//! l)` where `l` is the number of bytes in the original buffer.
 
 use diffuse;
 

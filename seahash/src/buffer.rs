@@ -1,3 +1,5 @@
+//! A highly optimized version of SeaHash.
+
 use core::slice;
 
 use diffuse;
@@ -70,6 +72,21 @@ unsafe fn read_u64(ptr: *const u8) -> u64 {
 }
 
 /// Hash some buffer.
+///
+/// This is a highly optimized implementation of SeaHash. It implements numerous techniques to
+/// improve performance:
+///
+/// - Register allocation: This makes a great deal out of making sure everything fits into
+///   registers such that minimal memory accesses are needed. This works quite successfully on most
+///   CPUs, and the only time it reads from memory is when it fetches the data of the buffer.
+/// - SIMD reads: Like most other good hash functions, we read 8 bytes a time. This improves things
+///   a lot
+/// - Independent updates: We make sure very few statements next to each other depends on the
+///   other. This means that almost always the CPU will be able to run the instructions in parallel.
+/// - Loop unrolling: The hot loop is unrolled such that very little branches (one every 32 bytes)
+///   are needed.
+///
+/// and more.
 pub fn hash(buf: &[u8]) -> u64 {
     unsafe {
         // We use 4 different registers to store seperate hash states, because this allows us to update
