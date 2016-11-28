@@ -56,7 +56,7 @@ Guaranteed atomicity
 Improved caching
     TFS puts a lot of effort into caching the disk to speed up disk accesses.
 Concurrent
-    TFS contains very few locks and aims to be as suitable for multithreded
+    TFS contains very few locks and aims to be as suitable for multithreaded
     systems as possible. It makes use of multiple truely concurrent structures
     to manage the data, and scales linearly by the number of cores.
 Better file monitoring
