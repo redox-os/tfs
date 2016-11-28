@@ -38,6 +38,7 @@
 //!    independent of the choice of _s_ (all equivalence class have equal size).
 //! 2. If you flip any bit in the input, the probability for any bit in the output to be flipped is
 //!    0.5.
+//! 3. The hash value of a sequence of uniformly distributed bytes is itself uniformly distributed.
 //!
 //! The first guarantee can be derived through deduction, by proving that the diffusion function is
 //! bijective (reverse the XORs and find the congruence inverses to the primes).
@@ -45,6 +46,14 @@
 //! The second guarantee requires more complex calculations: Construct a matrix of probabilities
 //! and set one to certain (1), then apply transformations through the respective operations. The
 //! proof is a bit long, but relatively simple.
+//!
+//! The third guarantee requires proving that the hash value is a tree, such that:
+//! - Leafs represents the input values.
+//! - Single-child nodes reduce to the diffusion of the child.
+//! - Multiple-child nodes reduce to the sum of the children.
+//!
+//! Then simply show that each of these reductions transform uniformly distributed variables to
+//! uniformly distributed variables.
 //!
 //! # Inner workings
 //!
