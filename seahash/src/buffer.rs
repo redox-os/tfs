@@ -102,7 +102,7 @@ pub fn hash(buf: &[u8]) -> u64 {
         /// 32.
         let end_ptr = buf.as_ptr().offset(buf.len() as isize & !0x1F) as usize;
 
-        while end_ptr >= ptr as usize {
+        while end_ptr > ptr as usize {
             // Read and diffuse the next 4 64-bit little-endian integers from their bytes. Note
             // that we on purpose not use `^=` and co., because it aliases the lvalue, making it
             // harder for LLVM to register allocate (it will have to inline the value behind the
@@ -195,6 +195,7 @@ pub fn hash(buf: &[u8]) -> u64 {
                 ptr = ptr.offset(8);
                 // Update `b`.
                 b = b ^ read_u64(ptr);
+                ptr = ptr.offset(8);
 
                 // Write the last excessive bytes (<8 bytes).
                 excessive = excessive - 16;
@@ -213,10 +214,14 @@ pub fn hash(buf: &[u8]) -> u64 {
                 ptr = ptr.offset(8);
                 // Update `b`.
                 b = b ^ read_u64(ptr);
+                ptr = ptr.offset(8);
+                // Update `c`.
+                c = c ^ read_u64(ptr);
 
                 // Diffuse.
                 a = diffuse(a);
                 b = diffuse(b);
+                c = diffuse(c);
             },
             _ => {
                 // More than 24 bytes excessive.

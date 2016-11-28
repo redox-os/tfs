@@ -85,8 +85,8 @@
 //! (http://ticki.github.io/img/seahash_construction_diagram.svg)
 //!
 //! It starts with 4 initial states, then it alternates between them (increment, wrap on 4) and
-//! does modular XOR with the respective block. When a state has been visited the diffusion
-//! function (f) is applied. The very last block is padded with zeros.
+//! does XOR with the respective block. When a state has been visited the diffusion function (f) is
+//! applied. The very last block is padded with zeros.
 //!
 //! After all the blocks have been gone over, all the states are XOR'd to the number of bytes
 //! written. The sum is then passed through the diffusion function, which produces the final hash
