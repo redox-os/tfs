@@ -45,6 +45,41 @@
 //! The second guarantee requires more complex calculations: Construct a matrix of probabilities
 //! and set one to certain (1), then apply transformations through the respective operations. The
 //! proof is a bit long, but relatively simple.
+//!
+//! # Inner workings
+//!
+//! In technical terms, SeaHash follows a alternating 4-state length-padded Merkle–Damgård
+//! construction with an add-diffuse compression function:
+//!
+//! ![A diagram.](http://ticki.github.io/img/seahash_construction_diagram.svg)
+//!
+//! It starts with 4 initial states, then it alternates between them (increment, wrap on 4) and
+//! does modular addition with the respective block. When a state has been visited the diffusion
+//! function (f) is applied. The very last block is padded with zeros.
+//!
+//! After all the blocks have been gone over, all the states are added to the number of bytes
+//! written. The sum is then passed through the diffusion function, which produces the final hash
+//! value.
+//!
+//! The diffusion function is drawn below.
+//!
+//! ```notest
+//! x ← x ≫ 32
+//! x ← px
+//! x ← x ≫ 32
+//! x ← px
+//! x ← x ≫ 32
+//! ```
+//!
+//! The advantage of having four completely segregated (note that there is no mix round, so they're
+//! entirely independent) states is that fast parallelism is possible. For example, if I were to
+//! hash 1 TB, I can spawn up four threads which can run independently without _any_
+//! intercommunication or syncronization before the last round.
+//!
+//! If the diffusion function (f) was cryptographically secure, it would pass cryptoanalysis
+//! trivially. This might seem irrelavant, as it clearly isn't cryptographically secure, but it
+//! tells us something about the inner semantics. In particular, any diffusion function with
+//! sufficient statistical quality will make up a good hash function in this construction.
 
 #![no_std]
 #![warn(missing_docs)]
