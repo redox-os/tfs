@@ -95,7 +95,6 @@
 //! The diffusion function is drawn below.
 //!
 //! ```notest
-//! x ← x ≫ 32
 //! x ← px
 //! x ← x ≫ 32
 //! x ← px
@@ -161,4 +160,19 @@ fn diffuse(mut x: u64) -> u64 {
     // because applying this function twice, reduces this bias.
 
     x
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn values() {
+        assert_eq!(diffuse(94203824938), 10193074813231793594);
+        assert_eq!(diffuse(0xDEADBEEF), 6614710713750238119);
+        assert_eq!(diffuse(0), 0);
+        assert_eq!(diffuse(1), 4953261612383527797);
+        assert_eq!(diffuse(2), 10477652027101941690);
+        assert_eq!(diffuse(3), 7825972970944271313);
+    }
 }

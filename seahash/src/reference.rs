@@ -23,7 +23,7 @@
 //! d  = g(a ⊕ n)
 //! ```
 //!
-//! `g(x)` is defined as `g(x) = h(j(h(j(h(x))))))` with `h(x) = x ≫ 32` and `j(x) ≡ px (mod 2^64)`
+//! `g(x)` is defined as `g(x) = h(j(h(j(x)))))` with `h(x) = x ≫ 32` and `j(x) ≡ px (mod 2^64)`
 //! with `p = 0x7ed0e9fa0d94a33`.
 //!
 //! Let the final state be `(x, y, z, w)`. Then the final result is given by `H = g(x ⊕ y ⊕ z ⊕ w ⊕
