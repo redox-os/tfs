@@ -142,7 +142,7 @@ fn diffuse(mut x: u64) -> u64 {
     // subdiffusion, but this flip will only be scattered by the multiplication to flipping bits
     // higher than the 32'th, meaning that the ones lower will be unaffected. As such, we need to
     // get some entropy down.
-    x = x ^ (x >> 32);
+    x ^= x >> 32;
     // So far, the avalanche diagram looks pretty good, but it still emits stripe patterns. For
     // example, flipping the 5'th lowest bit won't flip the least significant bit because of the
     // choice of scalar (in particular, observe how it leaves the 32'th bit unflipped after the
@@ -154,7 +154,7 @@ fn diffuse(mut x: u64) -> u64 {
     // bits, which are still unaffected by the multiplication above. However, the multiplication
     // solved the higher bits' dependence, so lending entropy from the higher half will fix the
     // issues with the lower half.
-    x = x ^ (x >> 32);
+    x ^= x >> 32;
 
     // There is still a bias, but this is solved in the very last round of the hash function,
     // because applying this function twice, reduces this bias.

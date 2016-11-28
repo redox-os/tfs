@@ -62,6 +62,8 @@ fn read_int(buf: &[u8]) -> u64 {
 unsafe fn read_u64(ptr: *const u8) -> u64 {
     #[cfg(target_pointer_width = "32")]
     {
+        // We cannot be sure about the memory layout of a potentially emulated 64-bit integer, so
+        // we read it manually. If possible, the compiler should emit proper instructions.
         (*(ptr as *const u32)).to_le() as u64 | ((*(ptr as *const u32)).to_le() as u64) << 32
     }
 
@@ -79,8 +81,8 @@ unsafe fn read_u64(ptr: *const u8) -> u64 {
 /// - Register allocation: This makes a great deal out of making sure everything fits into
 ///   registers such that minimal memory accesses are needed. This works quite successfully on most
 ///   CPUs, and the only time it reads from memory is when it fetches the data of the buffer.
-/// - SIMD reads: Like most other good hash functions, we read 8 bytes a time. This improves things
-///   a lot
+/// - Bulk reads: Like most other good hash functions, we read 8 bytes a time. This obviously
+///   improves performance a lot
 /// - Independent updates: We make sure very few statements next to each other depends on the
 ///   other. This means that almost always the CPU will be able to run the instructions in parallel.
 /// - Loop unrolling: The hot loop is unrolled such that very little branches (one every 32 bytes)
@@ -112,30 +114,18 @@ pub fn hash_seeded(buf: &[u8], seed: u64) -> u64 {
         let mut ptr = buf.as_ptr();
         /// The end of the "main segment", i.e. the biggest buffer s.t. the length is divisible by
         /// 32.
-        let end_ptr = buf.as_ptr().offset(buf.len() as isize & !0x1F) as usize;
+        let end_ptr = buf.as_ptr().offset(buf.len() as isize & !0x1F);
 
-        while end_ptr > ptr as usize {
-            // Read and diffuse the next 4 64-bit little-endian integers from their bytes. Note
-            // that we on purpose not use `^=` and co., because it aliases the lvalue, making it
-            // harder for LLVM to register allocate (it will have to inline the value behind the
-            // pointer, effectively assuming that it is not aliased, which can be hard to prove).
+        while end_ptr > ptr {
+            // Modern CPUs allow the pointer arithmetic to be done in place, hence not introducing
+            // tmpvars.
+            a ^= read_u64(ptr);
+            b ^= read_u64(ptr.offset(8));
+            c ^= read_u64(ptr.offset(16));
+            d ^= read_u64(ptr.offset(24));
 
-            // Placing these updates inplace can have some negative consequences on especially
-            // older architectures, where they can block ILP because they assume the evaluation of
-            // the old `byte` is executed, which might trigger the diffusion to run serially.
-            // However, not introducing a tmp register makes sure that you don't push from the
-            // register to the stack, which comes with a performance hit.
-            a = a ^ read_u64(ptr);
-            ptr = ptr.offset(8);
-
-            b = b ^ read_u64(ptr);
-            ptr = ptr.offset(8);
-
-            c = c ^ read_u64(ptr);
-            ptr = ptr.offset(8);
-
-            d = d ^ read_u64(ptr);
-            ptr = ptr.offset(8);
+            // Increment the pointer.
+            ptr = ptr.offset(32);
 
             // Diffuse the updated registers. We hope that each of these are executed in parallel.
             a = diffuse(a);
@@ -144,11 +134,9 @@ pub fn hash_seeded(buf: &[u8], seed: u64) -> u64 {
             d = diffuse(d);
         }
 
-        // Rename the register (we do this to make it easier for LLVM to reallocate the register).
-        let mut excessive = end_ptr;
         // Calculate the number of excessive bytes. These are bytes that could not be handled in
         // the loop above.
-        excessive = buf.len() as usize + buf.as_ptr() as usize - excessive as usize;
+        let mut excessive = buf.len() as usize + buf.as_ptr() as usize - end_ptr as usize;
         // Handle the excessive bytes.
         match excessive {
             0 => {},
@@ -156,7 +144,7 @@ pub fn hash_seeded(buf: &[u8], seed: u64) -> u64 {
                 // 1 or more excessive.
 
                 // Write the last excessive bytes (<8 bytes).
-                a = a ^ read_int(slice::from_raw_parts(ptr as *const u8, excessive));
+                a ^= read_int(slice::from_raw_parts(ptr as *const u8, excessive));
 
                 // Diffuse.
                 a = diffuse(a);
@@ -164,8 +152,8 @@ pub fn hash_seeded(buf: &[u8], seed: u64) -> u64 {
             8 => {
                 // 8 bytes excessive.
 
-                // Update `a`.
-                a = a ^ read_u64(ptr);
+                // Mix in the partial block.
+                a ^= read_u64(ptr);
 
                 // Diffuse.
                 a = diffuse(a);
@@ -173,13 +161,12 @@ pub fn hash_seeded(buf: &[u8], seed: u64) -> u64 {
             9...15 => {
                 // More than 8 bytes excessive.
 
-                // Update `a`.
-                a = a ^ read_u64(ptr);
-                ptr = ptr.offset(8);
+                // Mix in the partial block.
+                a ^= read_u64(ptr);
 
                 // Write the last excessive bytes (<8 bytes).
                 excessive = excessive - 8;
-                b = b ^ read_int(slice::from_raw_parts(ptr as *const u8, excessive));
+                b ^= read_int(slice::from_raw_parts(ptr.offset(8), excessive));
 
                 // Diffuse.
                 a = diffuse(a);
@@ -189,11 +176,9 @@ pub fn hash_seeded(buf: &[u8], seed: u64) -> u64 {
             16 => {
                 // 16 bytes excessive.
 
-                // Update `a`.
-                a = a ^ read_u64(ptr);
-                ptr = ptr.offset(8);
-                // Update `b`.
-                b = b ^ read_u64(ptr);
+                // Mix in the partial block.
+                a ^= read_u64(ptr);
+                b ^= read_u64(ptr.offset(8));
 
                 // Diffuse.
                 a = diffuse(a);
@@ -202,16 +187,13 @@ pub fn hash_seeded(buf: &[u8], seed: u64) -> u64 {
             17...23 => {
                 // 16 bytes or more excessive.
 
-                // Update `a`.
-                a = a ^ read_u64(ptr);
-                ptr = ptr.offset(8);
-                // Update `b`.
-                b = b ^ read_u64(ptr);
-                ptr = ptr.offset(8);
+                // Mix in the partial block.
+                a ^= read_u64(ptr);
+                b ^= read_u64(ptr.offset(8));
 
                 // Write the last excessive bytes (<8 bytes).
                 excessive = excessive - 16;
-                c = c ^ read_int(slice::from_raw_parts(ptr as *const u8, excessive));
+                c ^= read_int(slice::from_raw_parts(ptr.offset(16), excessive));
 
                 // Diffuse.
                 a = diffuse(a);
@@ -221,14 +203,10 @@ pub fn hash_seeded(buf: &[u8], seed: u64) -> u64 {
             24 => {
                 // 24 bytes excessive.
 
-                // Update `a`.
-                a = a ^ read_u64(ptr);
-                ptr = ptr.offset(8);
-                // Update `b`.
-                b = b ^ read_u64(ptr);
-                ptr = ptr.offset(8);
-                // Update `c`.
-                c = c ^ read_u64(ptr);
+                // Mix in the partial block.
+                a ^= read_u64(ptr);
+                b ^= read_u64(ptr.offset(8));
+                c ^= read_u64(ptr.offset(16));
 
                 // Diffuse.
                 a = diffuse(a);
@@ -238,19 +216,14 @@ pub fn hash_seeded(buf: &[u8], seed: u64) -> u64 {
             _ => {
                 // More than 24 bytes excessive.
 
-                // Update `a`.
-                a = a ^ read_u64(ptr);
-                ptr = ptr.offset(8);
-                // Update `b`.
-                b = b ^ read_u64(ptr);
-                ptr = ptr.offset(8);
-                // Update `c`.
-                c = c ^ read_u64(ptr);
-                ptr = ptr.offset(8);
+                // Mix in the partial block.
+                a ^= read_u64(ptr);
+                b ^= read_u64(ptr.offset(8));
+                c ^= read_u64(ptr.offset(16));
 
                 // Write the last excessive bytes (<8 bytes).
                 excessive = excessive - 24;
-                d = d ^ read_int(slice::from_raw_parts(ptr as *const u8, excessive));
+                d ^= read_int(slice::from_raw_parts(ptr.offset(24), excessive));
 
                 // Diffuse.
                 a = diffuse(a);
@@ -264,13 +237,13 @@ pub fn hash_seeded(buf: &[u8], seed: u64) -> u64 {
         // XOR the states together. Even though XOR is commutative, it doesn't matter, because the
         // state vector's initial components are mutually distinct, and thus swapping even and odd
         // chunks will affect the result, because it is sensitive to the initial condition.
-        a = a ^ b;
-        c = c ^ d;
-        a = a ^ c;
+        a ^= b;
+        c ^= d;
+        a ^= c;
         // XOR the number of written bytes in order to make the excessive bytes zero-sensitive
         // (without this, two excessive zeros would be equivalent to three excessive zeros). This
         // is know as length padding.
-        a = a ^ buf.len() as u64;
+        a ^= buf.len() as u64;
 
         // We diffuse to make the excessive bytes discrete (i.e. small changes shouldn't give small
         // changes in the output).
