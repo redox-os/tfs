@@ -122,9 +122,89 @@ pub fn hash(buf: &[u8]) -> u64 {
         // the loop above.
         excessive = buf.len() as usize + buf.as_ptr() as usize - excessive as usize;
         // Handle the excessive bytes.
-        if excessive != 0 {
-            if excessive >= 24 {
-                // 24 bytes or more excessive.
+        match excessive {
+            0 => {},
+            1...7 => {
+                // 1 or more excessive.
+
+                // Write the last excessive bytes (<8 bytes).
+                a = a + read_int(slice::from_raw_parts(ptr as *const u8, excessive));
+
+                // Diffuse.
+                a = diffuse(a);
+            },
+            8 => {
+                // 8 bytes excessive.
+
+                // Update `a`.
+                a = a + W(read_u64(ptr));
+
+                // Diffuse.
+                a = diffuse(a);
+            },
+            9...15 => {
+                // More than 8 bytes excessive.
+
+                // Update `a`.
+                a = a + W(read_u64(ptr));
+                ptr = ptr.offset(8);
+
+                // Write the last excessive bytes (<8 bytes).
+                excessive = excessive - 8;
+                b = b + read_int(slice::from_raw_parts(ptr as *const u8, excessive));
+
+                // Diffuse.
+                a = diffuse(a);
+                b = diffuse(b);
+
+            },
+            16 => {
+                // 16 bytes excessive.
+
+                // Update `a`.
+                a = a + W(read_u64(ptr));
+                ptr = ptr.offset(8);
+                // Update `b`.
+                b = b + W(read_u64(ptr));
+
+                // Diffuse.
+                a = diffuse(a);
+                b = diffuse(b);
+            },
+            17...23 => {
+                // 16 bytes or more excessive.
+
+                // Update `a`.
+                a = a + W(read_u64(ptr));
+                ptr = ptr.offset(8);
+                // Update `b`.
+                b = b + W(read_u64(ptr));
+
+                // Write the last excessive bytes (<8 bytes).
+                excessive = excessive - 16;
+                c = c + read_int(slice::from_raw_parts(ptr as *const u8, excessive));
+
+                // Diffuse.
+                a = diffuse(a);
+                b = diffuse(b);
+                c = diffuse(c);
+            },
+            24 => {
+                // 24 bytes excessive.
+
+                // Update `a`.
+                a = a + W(read_u64(ptr));
+                ptr = ptr.offset(8);
+                // Update `b`.
+                b = b + W(read_u64(ptr));
+                ptr = ptr.offset(8);
+
+                // Diffuse.
+                a = diffuse(a);
+                b = diffuse(b);
+            },
+            _ => {
+                // More than 24 bytes excessive.
 
                 // Update `a`.
                 a = a + W(read_u64(ptr));
@@ -140,43 +220,12 @@ pub fn hash(buf: &[u8]) -> u64 {
                 excessive = excessive - 24;
                 d = d + read_int(slice::from_raw_parts(ptr as *const u8, excessive));
 
-                // Diffuse `a`, `b`, and `c`.
+                // Diffuse.
                 a = diffuse(a);
                 b = diffuse(b);
                 c = diffuse(c);
                 d = diffuse(d);
-            } else if excessive >= 16 {
-                // 16 bytes or more excessive.
 
-                // Update `a`.
-                a = a + W(read_u64(ptr));
-                ptr = ptr.offset(8);
-                // Update `b`.
-                b = b + W(read_u64(ptr));
-                ptr = ptr.offset(8);
-
-                // Write the last excessive bytes (<8 bytes).
-                excessive = excessive - 16;
-                c = c + read_int(slice::from_raw_parts(ptr as *const u8, excessive));
-
-                // Diffuse.
-                a = diffuse(a);
-                b = diffuse(b);
-                c = diffuse(c);
-            } else if excessive >= 8 {
-                // 8 bytes or more excessive.
-
-                // Update `a`.
-                a = a + W(read_u64(ptr));
-                ptr = ptr.offset(8);
-
-                // Write the last excessive bytes (<8 bytes).
-                excessive = excessive - 8;
-                b = b + read_int(slice::from_raw_parts(ptr as *const u8, excessive));
-
-                // Diffuse.
-                a = diffuse(a);
-                b = diffuse(b);
             }
         }
 
@@ -187,7 +236,8 @@ pub fn hash(buf: &[u8]) -> u64 {
         c = c + d;
         a = a + c;
         // Add the number of written bytes in order to make the excessive bytes zero-sensitive
-        // (without this, two excessive zeros would be equivalent to three excessive zeros).
+        // (without this, two excessive zeros would be equivalent to three excessive zeros). This
+        // is know as length padding.
         a = a + W(buf.len() as u64);
 
         // We diffuse to make the excessive bytes, which we added, discrete (i.e. small changes

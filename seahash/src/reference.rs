@@ -33,7 +33,7 @@ struct State {
 
 impl State {
     /// Write a 64-bit integer to the state.
-    fn write_u64(&mut self, x: u64, len: usize) {
+    fn write_u64(&mut self, x: u64) {
         // Mix it into the substate by adding it.
         self.vec[self.cur] += W(x);
         // Diffuse the component to remove deterministic behavior and commutativity.
@@ -43,12 +43,10 @@ impl State {
         self.cur += 1;
         // Wrap around.
         self.cur %= 4;
-
-        self.written += len;
     }
 
     /// Calculate the final hash.
-    fn finish(self) -> W<u64> {
+    fn finish(self, total: usize) -> W<u64> {
         // Even though addition is commutative, it doesn't matter, because the state vector's
         // initial components are mutually distinct, and thus swapping even and odd chunks will
         // affect the result, because it is sensitive to the initial condition. To add
@@ -59,7 +57,7 @@ impl State {
             + self.vec[3]
             // We add in the number of written bytes to make it zero-sensitive when excessive bytes
             // are written (0u32.0u8 ≠ 0u16.0u8).
-            + W(self.written as u64)
+            + W(total as u64)
         )
     }
 }
@@ -93,19 +91,13 @@ pub fn hash(buf: &[u8]) -> u64 {
     // Initialize the state.
     let mut state = State::default();
 
-    // Round down the buffer length to the nearest multiple of 8 (aligned to u64).
-    let rounded_down_len = buf.len() / 8 * 8;
-
-    // Partition the rounded down buffer to chunks of 8 bytes, and iterate over them in reversed
-    // order.
-    for int in buf[..rounded_down_len].windows(8) {
+    // Partition the rounded down buffer to chunks of 8 bytes, and iterate over them. The last
+    // block might not be 8 bytes long.
+    for int in buf.chunks(8) {
         // Read the chunk into an integer and write into the state.
-        state.write_u64(read_int(int), 8);
+        state.write_u64(read_int(int));
     }
 
-    // Write the excessive bytes.
-    state.write_u64(read_int(&buf[rounded_down_len..]), buf.len() - rounded_down_len);
-
     // Finish the hash state and return the final value.
-    state.finish().0
+    state.finish(buf.len()).0
 }
