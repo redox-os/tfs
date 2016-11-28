@@ -311,33 +311,32 @@
             d &= \texttt{14f994a4c5259381}_{16}
         \end{align*}
 
-        The input is broken into chunks of 32 bytes, or 4 64-bit little-endian
-        integers. Call these integers $(p, q, r, s)$ respectively. Then
-        updating state is defined by
+        The input is broken into 64-bit little-endian integers. If necessary,
+        the last block is padded with zeros to fit.
+
+        Call this integer $n$, then the updated state is
 
         \begin{align*}
-            a' &\equiv f(a + p) \pmod{2^{64}} \\
-            b' &\equiv f(b + q) \pmod{2^{64}} \\
-            c' &\equiv f(c + r) \pmod{2^{64}} \\
-            d' &\equiv f(d + s) \pmod{2^{64}}
+            a' &= b \\
+            b' &= c \\
+            c' &= d \\
+            d' &= f(a \oplus n)
         \end{align*}
 
         with $f(n)$ defined by
 
         \begin{align*}
-            k      &=      \texttt{7ed0e9fa0d94a33}_{16} \\
-            f_1(n) &=      n \oplus (x \gg 32) \\
-            f_2(n) &\equiv kn \pmod{2^{64}} \\
-            f(n)   &=      f_1(f_2(f_1(f_2(f_1(n)))))
+            p      &=      \texttt{7ed0e9fa0d94a33}_{16} \\
+            f_1(x) &=      x \oplus (x \gg 32) \\
+            f_2(x) &\equiv px \pmod{2^{64}} \\
+            f(n)   &=      f_1(f_2(f_1(f_2(n))))
         \end{align*}
-
-        TODO: Handle excessive bytes (latest update in the seahash algo).
 
         The final hash value is then produced by
 
-        $$h \equiv a + f(l + b) + f(c + f(d)) \pmod{2^{64}}$$
+        $$h = f(a \oplus b \oplus c \oplus d \oplus l) $$
 
-        (where $l$ is the length)
+        where $l$ is the original length of the (unpadded) hashed buffer.
 
     \section{Compression algorithms}
         \subsection{LZ4}
