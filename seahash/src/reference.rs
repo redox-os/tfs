@@ -1,7 +1,5 @@
 //! A slow, but clear reference implementation of SeaHash.
 
-use core::num::Wrapping as W;
-
 use diffuse;
 
 /// Read an integer in little-endian.
@@ -24,18 +22,16 @@ fn read_int(int: &[u8]) -> u64 {
 /// A hash state.
 struct State {
     /// The state vector.
-    vec: [W<u64>; 4],
+    vec: [u64; 4],
     /// The component of the state vector which is currently being modified.
     cur: usize,
-    /// The number of bytes written into the state.
-    written: usize,
 }
 
 impl State {
     /// Write a 64-bit integer to the state.
     fn write_u64(&mut self, x: u64) {
-        // Mix it into the substate by adding it.
-        self.vec[self.cur] += W(x);
+        // Mix it into the substate by XORing it.
+        self.vec[self.cur] ^= x;
         // Diffuse the component to remove deterministic behavior and commutativity.
         self.vec[self.cur] = diffuse(self.vec[self.cur]);
 
@@ -46,18 +42,18 @@ impl State {
     }
 
     /// Calculate the final hash.
-    fn finish(self, total: usize) -> W<u64> {
-        // Even though addition is commutative, it doesn't matter, because the state vector's
-        // initial components are mutually distinct, and thus swapping even and odd chunks will
-        // affect the result, because it is sensitive to the initial condition. To add
-        // discreteness, we diffuse.
+    fn finish(self, total: usize) -> u64 {
+        // Even though XORing is commutative, it doesn't matter, because the state vector's initial
+        // components are mutually distinct, and thus swapping even and odd chunks will affect the
+        // result, because it is sensitive to the initial condition. To add discreteness, we
+        // diffuse.
         diffuse(self.vec[0]
-            + self.vec[1]
-            + self.vec[2]
-            + self.vec[3]
-            // We add in the number of written bytes to make it zero-sensitive when excessive bytes
+            ^ self.vec[1]
+            ^ self.vec[2]
+            ^ self.vec[3]
+            // We XOR in the number of written bytes to make it zero-sensitive when excessive bytes
             // are written (0u32.0u8 ≠ 0u16.0u8).
-            + W(total as u64)
+            ^ total as u64
         )
     }
 }
@@ -68,15 +64,13 @@ impl Default for State {
             // These values are randomly generated, and can be changed to anything (you could make
             // the hash function keyed by replacing these.)
             vec: [
-                W(0x16f11fe89b0d677c),
-                W(0xb480a793d8e6c86c),
-                W(0x6fe2e5aaf078ebc9),
-                W(0x14f994a4c5259381),
+                0x16f11fe89b0d677c,
+                0xb480a793d8e6c86c,
+                0x6fe2e5aaf078ebc9,
+                0x14f994a4c5259381,
             ],
             // We start at the first component.
             cur: 0,
-            // Initially, no bytes are written.
-            written: 0,
         }
     }
 }
@@ -99,5 +93,5 @@ pub fn hash(buf: &[u8]) -> u64 {
     }
 
     // Finish the hash state and return the final value.
-    state.finish(buf.len()).0
+    state.finish(buf.len())
 }

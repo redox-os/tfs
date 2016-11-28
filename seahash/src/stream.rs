@@ -1,5 +1,4 @@
 use core::hash::Hasher;
-use core::num::Wrapping as W;
 
 use {hash, diffuse};
 
@@ -8,21 +7,36 @@ use {hash, diffuse};
 /// Note that the input type is not taken into account, and thus is assumed to be fixed.
 pub struct SeaHasher {
     /// The state of the hasher.
-    state: W<u64>,
+    state: u64,
+}
+
+impl Default for SeaHasher {
+    fn default() -> SeaHasher {
+        SeaHasher {
+            state: 0xba663d61fe3aa408,
+        }
+    }
+}
+
+impl SeaHasher {
+    /// Create a new `SeaHasher` with default state.
+    pub fn new() -> SeaHasher {
+        SeaHasher::default()
+    }
 }
 
 impl Hasher for SeaHasher {
     fn finish(&self) -> u64 {
-        self.state.0
+        self.state
     }
 
     fn write(&mut self, bytes: &[u8]) {
-        self.state += W(hash(bytes));
+        self.state ^= hash(bytes);
         self.state = diffuse(self.state);
     }
 
     fn write_u64(&mut self, n: u64) {
-        self.state += W(n);
+        self.state ^= n;
         self.state = diffuse(self.state);
     }
 
