@@ -85,15 +85,13 @@ impl State {
             ^ total as u64
         )
     }
-}
 
-impl Default for State {
-    fn default() -> State {
+    fn with_seed(seed: u64) -> State {
         State {
             // These values are randomly generated, and can be changed to anything (you could make
             // the hash function keyed by replacing these.)
             vec: [
-                0x16f11fe89b0d677c,
+                seed,
                 0xb480a793d8e6c86c,
                 0x6fe2e5aaf078ebc9,
                 0x14f994a4c5259381,
@@ -111,8 +109,13 @@ impl Default for State {
 /// maximal performance, but this makes code significantly less readable. As such, this version has
 /// only one goal: to make the algorithm readable and understandable.
 pub fn hash(buf: &[u8]) -> u64 {
+    hash_seeded(buf, 0x16f11fe89b0d677c)
+}
+
+/// The seeded version of the reference implementation.
+pub fn hash_seeded(buf: &[u8], seed: u64) -> u64 {
     // Initialize the state.
-    let mut state = State::default();
+    let mut state = State::with_seed(seed);
 
     // Partition the rounded down buffer to chunks of 8 bytes, and iterate over them. The last
     // block might not be 8 bytes long.

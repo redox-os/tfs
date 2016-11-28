@@ -1,6 +1,6 @@
 use core::hash::Hasher;
 
-use {hash, diffuse};
+use {hash_seeded, diffuse};
 
 /// The streaming version of the algorithm.
 ///
@@ -8,13 +8,13 @@ use {hash, diffuse};
 pub struct SeaHasher {
     /// The state of the hasher.
     state: u64,
+    /// The seed of the hasher.
+    seed: u64,
 }
 
 impl Default for SeaHasher {
     fn default() -> SeaHasher {
-        SeaHasher {
-            state: 0xba663d61fe3aa408,
-        }
+        SeaHasher::with_seed(0xe7b0c93ca8525013)
     }
 }
 
@@ -23,15 +23,23 @@ impl SeaHasher {
     pub fn new() -> SeaHasher {
         SeaHasher::default()
     }
+
+    /// Construct a new `SeaHasher` given some seed.
+    pub fn with_seed(seed: u64) -> SeaHasher {
+        SeaHasher {
+            state: 0xba663d61fe3aa408,
+            seed: seed,
+        }
+    }
 }
 
 impl Hasher for SeaHasher {
     fn finish(&self) -> u64 {
-        self.state
+        diffuse(self.state)
     }
 
     fn write(&mut self, bytes: &[u8]) {
-        self.state ^= hash(bytes);
+        self.state ^= hash_seeded(bytes, self.seed);
         self.state = diffuse(self.state);
     }
 

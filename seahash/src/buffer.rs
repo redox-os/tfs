@@ -88,10 +88,22 @@ unsafe fn read_u64(ptr: *const u8) -> u64 {
 ///
 /// and more.
 pub fn hash(buf: &[u8]) -> u64 {
+    hash_seeded(buf, 0x16f11fe89b0d677c)
+}
+
+/// Hash some buffer according to a chosen seed.
+///
+/// This is the _keyed_ version of SeaHash, which allows chosing a seed defining the hash function.
+/// It is generally suspected that this is secure (i.e. you cannot deduce the seed, even with
+/// unlimited "black box" access to the function), but it has not yet been subject to proper
+/// cryptoanalysis.
+///
+/// The seed is expected to be chosen from an uniform distribution.
+pub fn hash_seeded(buf: &[u8], seed: u64) -> u64 {
     unsafe {
         // We use 4 different registers to store seperate hash states, because this allows us to update
         // them seperately, and consequently exploiting ILP to update the states in parallel.
-        let mut a = 0x16f11fe89b0d677c;
+        let mut a = seed;
         let mut b = 0xb480a793d8e6c86c;
         let mut c = 0x6fe2e5aaf078ebc9;
         let mut d = 0x14f994a4c5259381;
@@ -274,6 +286,10 @@ mod tests {
 
     fn hash_match(a: &[u8]) {
         assert_eq!(hash(a), reference::hash(a));
+        assert_eq!(hash_seeded(a, 1), reference::hash_seeded(a, 1));
+        assert_eq!(hash_seeded(a, 500), reference::hash_seeded(a, 500));
+        assert_eq!(hash_seeded(a, 238945723984), reference::hash_seeded(a, 238945723984));
+        assert_eq!(hash_seeded(a, !0), reference::hash_seeded(a, !0));
     }
 
     #[test]

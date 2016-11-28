@@ -123,7 +123,7 @@
 #![no_std]
 #![warn(missing_docs)]
 
-pub use buffer::hash;
+pub use buffer::{hash, hash_seeded};
 pub use stream::SeaHasher;
 
 pub mod reference;
