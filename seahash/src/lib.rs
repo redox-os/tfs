@@ -136,8 +136,6 @@ mod stream;
 /// This is a bijective function emitting chaotic behavior. Such functions are used as building
 /// blocks for hash functions.
 fn diffuse(mut x: u64) -> u64 {
-    // Move entropy down by XOR with shifting.
-    x = x ^ (x >> 32);
     // Move entropy up by scattering through multiplication.
     x = x.wrapping_mul(0x7ed0e9fa0d94a33);
     // We still need more entropy downwards. Flipping higher bits won't flip lower ones, so far.
@@ -158,6 +156,9 @@ fn diffuse(mut x: u64) -> u64 {
     // solved the higher bits' dependence, so lending entropy from the higher half will fix the
     // issues with the lower half.
     x = x ^ (x >> 32);
+
+    // There is still a bias, but this is solved in the very last round of the hash function,
+    // because applying this function twice, reduces this bias.
 
     x
 }
