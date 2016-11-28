@@ -81,7 +81,7 @@
 //! In technical terms, SeaHash follows a alternating 4-state length-padded Merkle–Damgård
 //! construction with an XOR-diffuse compression function:
 //!
-//! ![A diagram.](http://ticki.github.io/img/seahash_construction_diagram.svg)
+//! [![A diagram.](http://ticki.github.io/img/seahash_construction_diagram.svg)](http://ticki.github.io/img/seahash_construction_diagram.svg)
 //!
 //! It starts with 4 initial states, then it alternates between them (increment, wrap on 4) and
 //! does modular XOR with the respective block. When a state has been visited the diffusion
