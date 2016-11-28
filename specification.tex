@@ -79,8 +79,10 @@
 
         Breaking changes will increment the higher half of this number.
 
-        \subsection{Version number, repeated (byte 12-16)}
-        Repetition of~\ref{header:versionnumber}.
+        \subsection{Bitwise negation version number (byte 12-16)}
+        Repetition of~\ref{header:versionnumber}, bitwise
+        negated\footnote{The reason for this negation is if one overwrites it
+        with e.g. all zeros, it should be able to detect this.}.
 
         \subsection{Implementation ID (byte 16-24)}
         \label{header:implementationid}
@@ -92,8 +94,8 @@
         The recommended format is the original author's name truncated
         followed by the year of the initial release.
 
-        \subsection{Implementation ID, repeated (byte 24-32)}
-        Repetition of~\ref{header:implementationid}.
+        \subsection{Bitwise negation of implementation ID (byte 24-32)}
+        Repetition of~\ref{header:implementationid}, bitwise negated.
 
     \section{Encryption}
         \subsection{Encryption algorithm (byte 32-34)}
@@ -108,8 +110,29 @@
             \item [$\geq 2^{15}$] Implementation defined.
         \end{description}
 
-        \subsection{Encryption algorithm, repeated (byte 34-36)}
-        Repetition of~\ref{header:encryption}.
+        \subsection{Bitwise negation of encryption algorithm (byte 34-36)}
+        Repetition of~\ref{header:encryption}, bitwise negated.
+
+    \section{I/O state}
+        \subsection{Consistency flag (byte 64-66)}
+        \label{header:consistency}
+        This little-endian integer takes one of the following
+        values\footnote{The reason it takes two bytes instead of one is to be
+        able to detect errors.}:
+
+        \begin{description}
+            \item [$FF00_{16}$] Disk I/O stream was properly closed.
+            \item [$FE01_{16}$] Disk I/O stream was not properly
+                closed\footnote{This \emph{does not} make the state
+                inconsistent. It simply serves to warn the user that the last
+                writes might have been lost, e.g. the cache didn't flush.}
+            \item [$FD02_{16}$] The disk is in an inconsistent
+                state\footnote{This typically only happen if the user poweroffs
+                his or her computer while reformatting the disk.}
+            \item [$FC03_{16}$] The file system is uninitialized.
+        \end{description}
+
+        Any other values are considered invalid.
 
     \chapter{State segment}
     Following the header, a \clustersize bytes segment containing the
