@@ -11,7 +11,7 @@ fn gigabyte(b: &mut test::Bencher) {
 
         for _ in 0..250000 {
             x ^= seahash::hash(&buf);
-            buf[x as usize % 4096] += 1;
+            buf[0] += buf[0].wrapping_add(1);
         }
 
         x
