@@ -91,7 +91,6 @@ unsafe fn read_u64(ptr: *const u8) -> u64 {
 /// and more.
 ///
 /// The seed of this hash function is prechosen.
-#[inline]
 pub fn hash(buf: &[u8]) -> u64 {
     hash_seeded(buf, 0x16f11fe89b0d677c, 0xb480a793d8e6c86c, 0x6fe2e5aaf078ebc9, 0x14f994a4c5259381)
 }
@@ -104,7 +103,6 @@ pub fn hash(buf: &[u8]) -> u64 {
 /// cryptoanalysis.
 ///
 /// The keys are expected to be chosen from an uniform distribution.
-#[inline]
 pub fn hash_seeded(buf: &[u8], mut a: u64, mut b: u64, mut c: u64, mut d: u64) -> u64 {
     unsafe {
         // We use 4 different registers to store seperate hash states, because this allows us to update
