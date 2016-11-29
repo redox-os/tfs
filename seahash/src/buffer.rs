@@ -89,8 +89,11 @@ unsafe fn read_u64(ptr: *const u8) -> u64 {
 ///   are needed.
 ///
 /// and more.
+///
+/// The seed of this hash function is prechosen.
+#[inline]
 pub fn hash(buf: &[u8]) -> u64 {
-    hash_seeded(buf, 1)
+    hash_seeded(buf, 0x16f11fe89b0d677c, 0xb480a793d8e6c86c, 0x6fe2e5aaf078ebc9, 0x14f994a4c5259381)
 }
 
 /// Hash some buffer according to a chosen seed.
@@ -100,15 +103,12 @@ pub fn hash(buf: &[u8]) -> u64 {
 /// unlimited "black box" access to the function), but it has not yet been subject to proper
 /// cryptoanalysis.
 ///
-/// The seed is expected to be chosen from an uniform distribution.
-pub fn hash_seeded(buf: &[u8], seed: u64) -> u64 {
+/// The keys are expected to be chosen from an uniform distribution.
+#[inline]
+pub fn hash_seeded(buf: &[u8], mut a: u64, mut b: u64, mut c: u64, mut d: u64) -> u64 {
     unsafe {
         // We use 4 different registers to store seperate hash states, because this allows us to update
         // them seperately, and consequently exploiting ILP to update the states in parallel.
-        let mut a = seed.wrapping_mul(0x16f11fe89b0d677c);
-        let mut b = seed.wrapping_mul(0xb480a793d8e6c86c);
-        let mut c = seed.wrapping_mul(0x6fe2e5aaf078ebc9);
-        let mut d = seed.wrapping_mul(0x14f994a4c5259381);
 
         // The pointer to the current bytes.
         let mut ptr = buf.as_ptr();
@@ -259,10 +259,11 @@ mod tests {
 
     fn hash_match(a: &[u8]) {
         assert_eq!(hash(a), reference::hash(a));
-        assert_eq!(hash_seeded(a, 1), reference::hash_seeded(a, 1));
-        assert_eq!(hash_seeded(a, 500), reference::hash_seeded(a, 500));
-        assert_eq!(hash_seeded(a, 238945723984), reference::hash_seeded(a, 238945723984));
-        assert_eq!(hash_seeded(a, !0), reference::hash_seeded(a, !0));
+        assert_eq!(hash_seeded(a, 1, 1, 1, 1), reference::hash_seeded(a, 1, 1, 1, 1));
+        assert_eq!(hash_seeded(a, 500, 2873, 2389, 9283), reference::hash_seeded(a, 500, 2873, 2389, 9283));
+        assert_eq!(hash_seeded(a, 238945723984, 872894734, 239478243, 28937498234), reference::hash_seeded(a, 238945723984, 872894734, 239478243, 28937498234));
+        assert_eq!(hash_seeded(a, !0, !0, !0, !0), reference::hash_seeded(a, !0, !0, !0, !0));
+        assert_eq!(hash_seeded(a, 0, 0, 0, 0), reference::hash_seeded(a, 0, 0, 0, 0));
     }
 
     #[test]

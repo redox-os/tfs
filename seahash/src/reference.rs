@@ -96,13 +96,14 @@ impl State {
         )
     }
 
-    fn with_seed(seed: u64) -> State {
+    /// Create a new state with some initial values (seed).
+    fn with_seeds(k1: u64, k2: u64, k3: u64, k4: u64) -> State {
         State {
             // These values are randomly generated.
-            a: seed.wrapping_mul(0x16f11fe89b0d677c),
-            b: seed.wrapping_mul(0xb480a793d8e6c86c),
-            c: seed.wrapping_mul(0x6fe2e5aaf078ebc9),
-            d: seed.wrapping_mul(0x14f994a4c5259381),
+            a: k1,
+            b: k2,
+            c: k3,
+            d: k4,
         }
     }
 }
@@ -113,16 +114,14 @@ impl State {
 /// specifically designed to take all sorts of hardware and software hacks into account to achieve
 /// maximal performance, but this makes code significantly less readable. As such, this version has
 /// only one goal: to make the algorithm readable and understandable.
-#[inline]
 pub fn hash(buf: &[u8]) -> u64 {
-    hash_seeded(buf, 1)
+    hash_seeded(buf, 0x16f11fe89b0d677c, 0xb480a793d8e6c86c, 0x6fe2e5aaf078ebc9, 0x14f994a4c5259381)
 }
 
 /// The seeded version of the reference implementation.
-#[inline]
-pub fn hash_seeded(buf: &[u8], seed: u64) -> u64 {
+pub fn hash_seeded(buf: &[u8], k1: u64, k2: u64, k3: u64, k4: u64) -> u64 {
     // Initialize the state.
-    let mut state = State::with_seed(seed);
+    let mut state = State::with_seeds(k1, k2, k3, k4);
 
     // Partition the rounded down buffer to chunks of 8 bytes, and iterate over them. The last
     // block might not be 8 bytes long.
@@ -133,4 +132,14 @@ pub fn hash_seeded(buf: &[u8], seed: u64) -> u64 {
 
     // Finish the hash state and return the final value.
     state.finish(buf.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shakespear() {
+        assert_eq!(hash(b"to be or not to be"), 16114993074217697639);
+    }
 }
