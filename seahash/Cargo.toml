@@ -1,6 +1,6 @@
 [package]
 name = "seahash"
-version = "2.2.0"
+version = "2.3.0"
 authors = ["ticki <ticki@users.noreply.github.com>"]
 description = "A blazingly fast, portable hash function with proven statistical guarantees."
 repository = "https://github.com/ticki/tfs"

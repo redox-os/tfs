@@ -90,7 +90,7 @@ unsafe fn read_u64(ptr: *const u8) -> u64 {
 ///
 /// and more.
 pub fn hash(buf: &[u8]) -> u64 {
-    hash_seeded(buf, 0)
+    hash_seeded(buf, 1)
 }
 
 /// Hash some buffer according to a chosen seed.
@@ -105,10 +105,10 @@ pub fn hash_seeded(buf: &[u8], seed: u64) -> u64 {
     unsafe {
         // We use 4 different registers to store seperate hash states, because this allows us to update
         // them seperately, and consequently exploiting ILP to update the states in parallel.
-        let mut a = 0x16f11fe89b0d677c ^ seed;
-        let mut b = 0xb480a793d8e6c86c ^ seed;
-        let mut c = 0x6fe2e5aaf078ebc9 ^ seed;
-        let mut d = 0x14f994a4c5259381 ^ seed;
+        let mut a = seed.wrapping_mul(0x16f11fe89b0d677c);
+        let mut b = seed.wrapping_mul(0xb480a793d8e6c86c);
+        let mut c = seed.wrapping_mul(0x6fe2e5aaf078ebc9);
+        let mut d = seed.wrapping_mul(0x14f994a4c5259381);
 
         // The pointer to the current bytes.
         let mut ptr = buf.as_ptr();

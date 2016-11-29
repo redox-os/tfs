@@ -97,10 +97,10 @@ impl State {
     fn with_seed(seed: u64) -> State {
         State {
             // These values are randomly generated.
-            a: 0x16f11fe89b0d677c ^ seed,
-            b: 0xb480a793d8e6c86c ^ seed,
-            c: 0x6fe2e5aaf078ebc9 ^ seed,
-            d: 0x14f994a4c5259381 ^ seed,
+            a: seed.wrapping_mul(0x16f11fe89b0d677c),
+            b: seed.wrapping_mul(0xb480a793d8e6c86c),
+            c: seed.wrapping_mul(0x6fe2e5aaf078ebc9),
+            d: seed.wrapping_mul(0x14f994a4c5259381),
         }
     }
 }
@@ -113,7 +113,7 @@ impl State {
 /// only one goal: to make the algorithm readable and understandable.
 #[inline]
 pub fn hash(buf: &[u8]) -> u64 {
-    hash_seeded(buf, 0)
+    hash_seeded(buf, 1)
 }
 
 /// The seeded version of the reference implementation.
