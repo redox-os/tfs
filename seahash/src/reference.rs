@@ -91,10 +91,10 @@ impl State {
             // These values are randomly generated, and can be changed to anything (you could make
             // the hash function keyed by replacing these.)
             vec: [
-                seed,
-                0xb480a793d8e6c86c,
-                0x6fe2e5aaf078ebc9,
-                0x14f994a4c5259381,
+                0x16f11fe89b0d677c ^ seed,
+                0xb480a793d8e6c86c ^ seed,
+                0x6fe2e5aaf078ebc9 ^ seed,
+                0x14f994a4c5259381 ^ seed,
             ],
             // We start at the first component.
             cur: 0,
@@ -109,7 +109,7 @@ impl State {
 /// maximal performance, but this makes code significantly less readable. As such, this version has
 /// only one goal: to make the algorithm readable and understandable.
 pub fn hash(buf: &[u8]) -> u64 {
-    hash_seeded(buf, 0x16f11fe89b0d677c)
+    hash_seeded(buf, 0)
 }
 
 /// The seeded version of the reference implementation.
