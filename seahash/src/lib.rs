@@ -96,9 +96,8 @@
 //!
 //! ```notest
 //! x ← px
-//! x ← x ≫ 32
+//! x ← (x ≫ 32) ≫ (x ≫ 60)
 //! x ← px
-//! x ← x ≫ 32
 //! ```
 //!
 //! The advantage of having four completely segregated (note that there is no mix round, so they're
@@ -119,6 +118,12 @@
 //! # Specification
 //!
 //! See the [`reference`](./reference) module.
+//!
+//! # Credits
+//!
+//! Aside for myself (@ticki), there are couple of other people who have helped creating this.
+//! Joshua Landau suggested using the [PCG family of diffusions](http://www.pcg-random.org/),
+//! created by Melissa E. O'Neill. Sokolov Yura spotted multiple bugs in SeaHash.
 
 #![no_std]
 #![warn(missing_docs)]
@@ -135,29 +140,16 @@ mod stream;
 /// This is a bijective function emitting chaotic behavior. Such functions are used as building
 /// blocks for hash functions.
 fn diffuse(mut x: u64) -> u64 {
-    // Move entropy up by scattering through multiplication.
-    x = x.wrapping_mul(0x7ed0e9fa0d94a33);
-    // We still need more entropy downwards. Flipping higher bits won't flip lower ones, so far.
-    // For example, if you flip the most significant bit, the 32'th bit will flip per the XOR-shift
-    // subdiffusion, but this flip will only be scattered by the multiplication to flipping bits
-    // higher than the 32'th, meaning that the ones lower will be unaffected. As such, we need to
-    // get some entropy down.
-    x ^= x >> 32;
-    // So far, the avalanche diagram looks pretty good, but it still emits stripe patterns. For
-    // example, flipping the 5'th lowest bit won't flip the least significant bit because of the
-    // choice of scalar (in particular, observe how it leaves the 32'th bit unflipped after the
-    // multiplication, which means that the XOR-shift never affects the lowest bit). No choice of
-    // scalar will make this go away, it will merely change the unaffected bits. Instead, we need
-    // to make the behavior more undeterministic by scattering bits through multiplication.
-    x = x.wrapping_mul(0x7ed0e9fa0d94a33);
-    // This is the final stage of the diffusion function. There are still issues with the lowest
-    // bits, which are still unaffected by the multiplication above. However, the multiplication
-    // solved the higher bits' dependence, so lending entropy from the higher half will fix the
-    // issues with the lower half.
-    x ^= x >> 32;
+    // These are derived from the PCG RNG's round. Thanks to @Veedrac for proposing this. The basic
+    // idea is that we use dynamic shifts, which are determined by the input itself. The shift is
+    // chosen by the higher bits, which means that changing those flips the lower bits, which
+    // scatters upwards because of the multiplication.
 
-    // There is still a bias, but this is solved in the very last round of the hash function,
-    // because applying this function twice, reduces this bias.
+    x = x.wrapping_mul(0x6eed0e9da4d94a4f);
+    let a = x >> 32;
+    let b = x >> 60;
+    x ^= a >> b;
+    x = x.wrapping_mul(0x6eed0e9da4d94a4f);
 
     x
 }
@@ -168,11 +160,11 @@ mod tests {
 
     #[test]
     fn values() {
-        assert_eq!(diffuse(94203824938), 10193074813231793594);
-        assert_eq!(diffuse(0xDEADBEEF), 6614710713750238119);
+        assert_eq!(diffuse(94203824938), 17289265692384716055);
+        assert_eq!(diffuse(0xDEADBEEF), 12110756357096144265);
         assert_eq!(diffuse(0), 0);
-        assert_eq!(diffuse(1), 4953261612383527797);
-        assert_eq!(diffuse(2), 10477652027101941690);
-        assert_eq!(diffuse(3), 7825972970944271313);
+        assert_eq!(diffuse(1), 15197155197312260123);
+        assert_eq!(diffuse(2), 1571904453004118546);
+        assert_eq!(diffuse(3), 16467633989910088880);
     }
 }

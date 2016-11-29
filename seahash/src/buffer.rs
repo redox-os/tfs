@@ -230,7 +230,6 @@ pub fn hash_seeded(buf: &[u8], mut a: u64, mut b: u64, mut c: u64, mut d: u64) -
                 b = diffuse(b);
                 c = diffuse(c);
                 d = diffuse(d);
-
             }
         }
 

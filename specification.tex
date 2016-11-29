@@ -327,9 +327,9 @@
 
         \begin{align*}
             p      &=      \texttt{7ed0e9fa0d94a33}_{16} \\
-            f_1(x) &=      x \oplus (x \gg 32) \\
-            f_2(x) &\equiv px \pmod{2^{64}} \\
-            f(n)   &=      f_1(f_2(f_1(f_2(n))))
+            f_1(x) &\equiv px \pmod{2^{64}} \\
+            f_2(x) &=      x \oplus ((x \gg 32) \gg (x \gg 60)) \\
+            f(n)   &=      f_1(f_2(f_1(x))))
         \end{align*}
 
         The final hash value is then produced by

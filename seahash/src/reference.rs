@@ -25,8 +25,8 @@
 //! d  = g(a ⊕ n)
 //! ```
 //!
-//! `g(x)` is defined as `g(x) = h(j(h(j(x)))))` with `h(x) = x ≫ 32` and `j(x) ≡ px (mod 2^64)`
-//! with `p = 0x7ed0e9fa0d94a33`.
+//! `g(x)` is defined as `g(x) = j(h(j(x))))` with `h(x) = (x ≫ 32) ≫ (x ≫ 60)` and `j(x) ≡ px (mod
+//! 2^64)` with `p = 0x7ed0e9fa0d94a33`.
 //!
 //! Let the final state be `(x, y, z, w)`. Then the final result is given by `H = g(x ⊕ y ⊕ z ⊕ w ⊕
 //! l)` where `l` is the number of bytes in the original buffer.
@@ -140,6 +140,6 @@ mod tests {
 
     #[test]
     fn shakespear() {
-        assert_eq!(hash(b"to be or not to be"), 16114993074217697639);
+        assert_eq!(hash(b"to be or not to be"), 1988685042348123509);
     }
 }
