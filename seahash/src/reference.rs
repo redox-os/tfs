@@ -13,6 +13,8 @@
 //! d = 0x14f994a4c5259381
 //! ```
 //!
+//! If a seed is given, each of the initial state component are modularly multiplied by the seed.
+//!
 //! From the stream, we read one 64-bit block (in little-endian) at a time.  This number, `n`,
 //! determines the new the new state by:
 //!
