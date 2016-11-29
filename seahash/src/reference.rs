@@ -50,24 +50,32 @@ fn read_int(int: &[u8]) -> u64 {
 
 /// A hash state.
 struct State {
-    /// The state vector.
-    vec: [u64; 4],
-    /// The component of the state vector which is currently being modified.
-    cur: usize,
+    /// The `a` substate.
+    a: u64,
+    /// The `b` substate.
+    b: u64,
+    /// The `c` substate.
+    c: u64,
+    /// The `d` substate.
+    d: u64,
 }
 
 impl State {
     /// Write a 64-bit integer to the state.
     fn write_u64(&mut self, x: u64) {
-        // Mix it into the substate by XORing it.
-        self.vec[self.cur] ^= x;
-        // Diffuse the component to remove deterministic behavior and commutativity.
-        self.vec[self.cur] = diffuse(self.vec[self.cur]);
+        let mut a = self.a;
 
-        // Increment the cursor.
-        self.cur += 1;
-        // Wrap around.
-        self.cur %= 4;
+        // Mix `x` into `a`.
+        a = diffuse(a ^ x);
+
+        //  Rotate around.
+        //  _______________________
+        // |                       v
+        // a <---- b <---- c <---- d
+        self.a = self.b;
+        self.b = self.c;
+        self.c = self.d;
+        self.d = a;
     }
 
     /// Calculate the final hash.
@@ -76,10 +84,10 @@ impl State {
         // components are mutually distinct, and thus swapping even and odd chunks will affect the
         // result, because it is sensitive to the initial condition. To add discreteness, we
         // diffuse.
-        diffuse(self.vec[0]
-            ^ self.vec[1]
-            ^ self.vec[2]
-            ^ self.vec[3]
+        diffuse(self.a
+            ^ self.b
+            ^ self.c
+            ^ self.d
             // We XOR in the number of written bytes to make it zero-sensitive when excessive bytes
             // are written (0u32.0u8 ≠ 0u16.0u8).
             ^ total as u64
@@ -88,16 +96,11 @@ impl State {
 
     fn with_seed(seed: u64) -> State {
         State {
-            // These values are randomly generated, and can be changed to anything (you could make
-            // the hash function keyed by replacing these.)
-            vec: [
-                0x16f11fe89b0d677c ^ seed,
-                0xb480a793d8e6c86c ^ seed,
-                0x6fe2e5aaf078ebc9 ^ seed,
-                0x14f994a4c5259381 ^ seed,
-            ],
-            // We start at the first component.
-            cur: 0,
+            // These values are randomly generated.
+            a: 0x16f11fe89b0d677c ^ seed,
+            b: 0xb480a793d8e6c86c ^ seed,
+            c: 0x6fe2e5aaf078ebc9 ^ seed,
+            d: 0x14f994a4c5259381 ^ seed,
         }
     }
 }
@@ -108,11 +111,13 @@ impl State {
 /// specifically designed to take all sorts of hardware and software hacks into account to achieve
 /// maximal performance, but this makes code significantly less readable. As such, this version has
 /// only one goal: to make the algorithm readable and understandable.
+#[inline]
 pub fn hash(buf: &[u8]) -> u64 {
     hash_seeded(buf, 0)
 }
 
 /// The seeded version of the reference implementation.
+#[inline]
 pub fn hash_seeded(buf: &[u8], seed: u64) -> u64 {
     // Initialize the state.
     let mut state = State::with_seed(seed);
