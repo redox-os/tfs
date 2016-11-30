@@ -7,10 +7,47 @@
 //! architecture, and makes no assumptions on endianness or the alike. This stable layout allows it
 //! to be used for on-disk/permanent storage (e.g. checksums).
 //!
+//! # Design, advantages, and features
+//!
+//! - **High quality**: It beats most other general purpose hash functions because it provides full
+//!   avalanche inbetween state updates.
+//! - **Performance**: SeaHash beats every high-quality (grading 10/10 in smhasher) hash function
+//!    that I know of.
+//! - **Provable quality guarantees**: Contrary to most other non-cryptographic hash function,
+//!   SeaHash can be proved to satisfy the avalanche criterion as well as BIC.
+//! - **Parallelizable**: Consists of multiple, independent states to take advantage of ILP and/or
+//!   software threads.
+//! - **Bulk reads**: Reads 8 or 4 bytes a time.
+//! - **Stable and portable**: Does not depend on the target architecture, and produces a stable
+//!   value, which is only changed in major version bumps.
+//! - **Keyed**: Designed to not leak the seed/key. Note that it has not gone through
+//!   cryptoanalysis yet, so the keyed version shouldn't be relied on when security is needed.
+//! - **Hardware accelerateable**: SeaHash is designed such that ASICs can implement it with really
+//!   high performance.
+//!
+//! # A word of warning!
+//!
+//! This is **not** a cryptographic function, and it certainly should not be used as one. If you
+//! want a good cryptograhic hash function, you should use SHA-3 (Keccak) or BLAKE2.
+//!
 //! # Benchmark
 //!
 //! On normal hardware, it is expected to run with a rate around 5.9-6.7 GB/S on a 2.5 GHz CPU.
 //! Further improvement can be seen when hashing very big buffers in parallel.
+//!
+//! | Function    | Quality       | Cycles per byte (lower is better) | Author
+//! |-------------|---------------|-----------------------------------|-------------------
+//! | **SeaHash** | **Excellent** | **0.24**                          | **Ticki**
+//! | xxHash      | Excellent     | 0.31                              | Collet
+//! | MetroHash   | Excellent     | 0.35                              | Rogers
+//! | Murmur      | Excellent     | 0.64                              | Appleby
+//! | Rabin       | Medium        | 1.51                              | Rabin
+//! | CityHash    | Excellent     | 1.62                              | Pike, Alakuijala
+//! | LoseLose    | Terrible      | 2.01                              | Kernighan, Ritchie
+//! | FNV         | Poor          | 3.12                              | Fowler, Noll, Vo
+//! | SipHash     | Pseudorandom  | 3.21                              | Aumasson, Bernstein
+//! | CRC         | Good          | 3.91                              | Peterson
+//! | DJB2        | Poor          | 4.13                              | Bernstein
 //!
 //! ## Ideal architecture
 //!
@@ -34,22 +71,6 @@
 //! Secondly, SeaHash achieves the performance by heavily exploiting Instruction-Level Parallelism.
 //! In particular, it fetches 4 integers in every round and independently diffuses them. This
 //! yields four different states, which are finally combined.
-//!
-//! # Advantages over other hash functions
-//!
-//! - Portability: SeaHash always gives the same hash across any platforms, and can thus be used
-//!   for e.g. on-disk structures.
-//! - Performance: SeaHash beats every high-quality (grading 10/10 in smhasher) hash function that
-//!   I know off.
-//! - Hardware accelerateable: SeaHash is designed such that ASICs can implement it with really
-//!   high performance.
-//! - Provable quality guarantees: Contrary to most other non-cryptographic hash function, SeaHash
-//!   can be proved to satisfy the avalanche criterion as well as BIC.
-//!
-//! # Warning!
-//!
-//! This is **not** a cryptographic function, and it certainly should not be used as one. If you
-//! want a good cryptograhic hash function, you should use SHA-3 (Keccak) or BLAKE2.
 //!
 //! # Statistical guarantees
 //!

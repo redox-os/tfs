@@ -98,11 +98,21 @@ pub fn hash(buf: &[u8]) -> u64 {
 /// Hash some buffer according to a chosen seed.
 ///
 /// This is the _keyed_ version of SeaHash, which allows chosing a seed defining the hash function.
-/// It is generally suspected that this is secure (i.e. you cannot deduce the seed, even with
-/// unlimited "black box" access to the function), but it has not yet been subject to proper
-/// cryptoanalysis.
+/// It is generally suspected that this is at least partially secure (i.e. you cannot deduce the
+/// seed, even with unlimited "black box" access to the function), but it has not yet been subject
+/// to proper cryptoanalysis.
 ///
 /// The keys are expected to be chosen from an uniform distribution.
+///
+/// # Known attacks/weaknesses
+///
+/// Following attacks and weaknesses might be exploited by a malicious party:
+///
+/// - An attacker can obtain the XOR of the keys through reverting the diffusion in the hash of the
+///   empty string. It is unknown if this information can be used to generate collisions.
+/// - Certain keys are weaker than others when hashing small buffers.
+///
+/// It shouldn't be considered as strong as e.g. SipHasher as of the current design.
 pub fn hash_seeded(buf: &[u8], mut a: u64, mut b: u64, mut c: u64, mut d: u64) -> u64 {
     unsafe {
         // We use 4 different registers to store seperate hash states, because this allows us to update
