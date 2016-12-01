@@ -1,4 +1,4 @@
-.. image:: icon_small.png
+.. image:: https://rawgit.com/ticki/tfs/master/icon.svg
     :alt: The TFS icon.
     :align: center
 
