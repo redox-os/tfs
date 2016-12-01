@@ -60,13 +60,13 @@
         \end{itemize}
 
     \chapter{Disk header}
-    The first \minimumsectorsize bytes are reserved for the ``disk header''
-    which contains unencrypted configuration and information about the state.
+    The first \clustersize bytes are reserved for the ``disk header'' which
+    contains unencrypted configuration and information about the state.
 
     \section{Introducer}
         \subsection{Magic number (byte 0-8)}
         The first 8 bytes are reserved for a magic number, which is used for
-        determining if it does indeed store TFS. It is specified to store the
+        determining if it does indeed store TFS\@. It is specified to store the
         string ``\texttt{TFS fmt }'' (note the space) in ASCII.
 
         If the format does only partially conform to this specification, the
@@ -82,7 +82,7 @@
         \subsection{Bitwise negation version number (byte 12-16)}
         Repetition of~\ref{header:versionnumber}, bitwise
         negated\footnote{The reason for this negation is if one overwrites it
-        with e.g. all zeros, it should be able to detect this.}.
+        with e.g.\ all zeros, it should be able to detect this.}.
 
         \subsection{Implementation ID (byte 16-24)}
         \label{header:implementationid}
@@ -105,43 +105,55 @@
 
         \begin{description}
             \item [$0$] No encryption (identity function).
-            \item [$1$] SPECK-256 with BLAKE2s key stretching (XEX mode).
+            \item [$1$] SPECK-256 (XEX mode).
                 See~\ref{crypto:speck}.
             \item [$\geq 2^{15}$] Implementation defined.
         \end{description}
 
+        Any data not stored in the introducer is encrypted through the chosen method.
+
         \subsection{Bitwise negation of encryption algorithm (byte 34-36)}
         Repetition of~\ref{header:encryption}, bitwise negated.
 
-    \section{I/O state}
-        \subsection{Consistency flag (byte 64-66)}
+    \section{State}
+        \subsection{State block address (byte 64-72)}
+        \label{header:stateblock}
+        This little-endian integer takes following values:
+
+        \begin{description}
+            \item [$n = 0$]    state block uninitialized.
+            \item [$n \neq 0$] the $n$'th cluster (starting at byte
+                $\clustersize n$) is used as the state block and abides the
+                format set out in~\ref{stateblock}.
+        \end{description}
+
+        \subsection{Bitwise negation of state block address (byte 72-80)}
+        Repetition of~\ref{header:stateblock}, bitwise negated.
+
+        \subsection{Consistency flag (byte 80-82)}
         \label{header:consistency}
         This little-endian integer takes one of the following
         values\footnote{The reason it takes two bytes instead of one is to be
         able to detect errors.}:
 
         \begin{description}
-            \item [$FF00_{16}$] Disk I/O stream was properly closed.
-            \item [$FE01_{16}$] Disk I/O stream was not properly
+            \item [$\texttt{FF00}_{16}$] Disk I/O stream was properly closed.
+            \item [$\texttt{FE01}_{16}$] Disk I/O stream was not properly
                 closed\footnote{This \emph{does not} make the state
                 inconsistent. It simply serves to warn the user that the last
-                writes might have been lost, e.g. the cache didn't flush.}
-            \item [$FD02_{16}$] The disk is in an inconsistent
+                writes might have been lost, e.g.\ the cache didn't flush.}
+            \item [$\texttt{FD02}_{16}$] The disk is in an inconsistent
                 state\footnote{This typically only happen if the user poweroffs
                 his or her computer while reformatting the disk.}
-            \item [$FC03_{16}$] The file system is uninitialized.
+            \item [$\texttt{FC03}_{16}$] The file system is uninitialized.
         \end{description}
 
         Any other values are considered invalid.
 
-    \chapter{State segment}
-    Following the header, a \clustersize bytes segment containing the
-    configuration and state is stored, and is stored encrypted with the
-    encryption method specified in~\ref{header:encryption}.
-
-    For convenience, from now on, we will enumerate the bytes with $0$ mapping
-    to the start of this segment (in absolute values, byte \minimumsectorsize).
-    As such, any address is considered relative to this.
+    \chapter{State block}
+    \label{stateblock}
+    At the address (cluster number) chosen in~\ref{header:stateblock}, a block
+    defining the state of the file system is stored.
 
     \section{Fixed}
         \subsection{Zeros (byte 0-4)}
@@ -207,7 +219,7 @@
     \section{Integrity checking}
         \subsection{Checksum (byte 40-44)}
         This field stores a little-endian integer equal to the checksum of the
-        state segment (excluding this field), calculated by the algorithm
+        state block (excluding this field), calculated by the algorithm
         specified in~\ref{config:checksum}.
 
     \chapter{Disk IO}
@@ -326,7 +338,7 @@
         with $f(n)$ defined by
 
         \begin{align*}
-            p      &=      \texttt{7ed0e9fa0d94a33}_{16} \\
+            p      &=      \texttt{6eed0e9da4d94a4f}_{16} \\
             f_1(x) &\equiv px \pmod{2^{64}} \\
             f_2(x) &=      x \oplus ((x \gg 32) \gg (x \gg 60)) \\
             f(n)   &=      f_1(f_2(f_1(x))))
