@@ -41,7 +41,7 @@ Full-disk compression
     TFS is the first file system to incorporate complete full-disk compression
     through a scheme we call RACC (random-access cluster compression). This
     means that every cluster is compressed only affecting performance slightly.
-    It is estimated that you get 60-100% more usable space.
+    It is estimated that you get 60-120% more usable space.
 O(1) snapshots
     TFS allows full or partial disk revertable and writable snapshots in
     constant-time without clones or the alike.
@@ -52,7 +52,8 @@ Copy-on-write semantics
 Guaranteed atomicity
     The system will never enter an inconsistent state (unless there is hardware
     failure), meaning that unexpected power-off at worst results in a 4 KiB
-    space leak. The system is never damaged by such shutdowns.
+    space leak. The system is never damaged by such shutdowns. The space can be
+    recovered easily by running the GC command.
 Improved caching
     TFS puts a lot of effort into caching the disk to speed up disk accesses.
 Concurrent
@@ -69,3 +70,5 @@ Full coverage testing
     TFS aims to be full coverage with respect to testing. This gives relatively
     strong guarantees on correctness by instantly revealing large classes of
     bugs.
+SSD friendly
+    TFS tries to avoid the write limitation in SSD by repositioning dead sectors.
