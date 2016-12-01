@@ -1,0 +1,10 @@
+[package]
+name = "speck"
+version = "0.1.0"
+authors = ["ticki <Ticki@users.noreply.github.com>"]
+description = "Implementation of the Speck block cipher."
+repository = "https://github.com/ticki/tfs"
+documentation = "https://docs.rs/speck"
+license = "MIT"
+keywords = ["crypto", "cipher", "speck", "block", "simple"]
+exclude = ["target", "Cargo.lock"]
