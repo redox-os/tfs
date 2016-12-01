@@ -7,11 +7,11 @@ TFS: Next-generation file system
 ================================
 
 TFS is a modular, fast, and feature rich next-gen file system, employing
-mordern techniques for high performance, high space efficiency, and high
+modern techniques for high performance, high space efficiency, and high
 scalability.
 
 TFS was created out of the need for a modern file system for Redox OS, as a
-replacement for ZFS, which proved to be slow to be implement because of its
+replacement for ZFS, which proved to be slow to implement because of its
 monolithic design.
 
 TFS is inspired by the ideas behind ZFS, but at the same time it aims to be
@@ -38,7 +38,7 @@ Modular
     any semantic information. This makes TFS relatively straight-forward to
     implement.
 Full-disk compression
-    TFS is the first file system to encorporate complete full-disk compression
+    TFS is the first file system to incorporate complete full-disk compression
     through a scheme we call RACC (random-access cluster compression). This
     means that every cluster is compressed only affecting performance slightly.
     It is estimated that you get 60-100% more usable space.
@@ -57,10 +57,10 @@ Improved caching
     TFS puts a lot of effort into caching the disk to speed up disk accesses.
 Concurrent
     TFS contains very few locks and aims to be as suitable for multithreaded
-    systems as possible. It makes use of multiple truely concurrent structures
+    systems as possible. It makes use of multiple truly concurrent structures
     to manage the data, and scales linearly by the number of cores.
 Better file monitoring
-    COW is very suitable for high-performance, scalable file monitoring, but
+    CoW is very suitable for high-performance, scalable file monitoring, but
     unfortunately only few file systems incorporate that. TFS is one of those.
 All memory safe
     TFS uses only components written in Rust. As such, memory unsafety is only
