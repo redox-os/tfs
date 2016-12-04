@@ -1,6 +1,6 @@
 [package]
 name = "speck"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["ticki <Ticki@users.noreply.github.com>"]
 description = "Implementation of the Speck block cipher."
 repository = "https://github.com/ticki/tfs"

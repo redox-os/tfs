@@ -66,7 +66,7 @@ pub struct Key {
 
 impl Key {
     /// Generate a new key from some seed.
-    pub fn new(mut k1: u64, mut k2: u64) -> Key {
+    pub fn new((mut k1, mut k2): (u64, u64)) -> Key {
         let mut ret = Key {
             schedule: [0; ROUNDS as usize],
         };
@@ -124,7 +124,7 @@ mod tests {
             x = y.wrapping_add(a);
             y = x.wrapping_mul(b | 1);
 
-            let key = Key::new(x, y);
+            let key = Key::new((x, y));
 
             assert_eq!(key.decrypt_block(key.encrypt_block((a, b))), (a, b));
             assert_eq!(key.encrypt_block((a, b)), encrypt_block((a, b), (x, y)));
