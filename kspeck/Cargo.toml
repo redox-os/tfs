@@ -1,7 +1,0 @@
-[package]
-name = "kspeck"
-version = "0.1.0"
-authors = ["ticki <ticki@users.noreply.github.com>"]
-
-[dependencies]
-speck = "^0.1.1"
