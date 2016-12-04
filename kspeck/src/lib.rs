@@ -1,6 +1,6 @@
-//! KSpeck: Bijective key derivation function based on the Speck cipher.
+//! KSpeck: Bijective key derivation function based on the SPECK cipher.
 //!
-//! KSpeck is a tunable bijective KDF based on the Speck block cipher. It's based on the "scrypt"
+//! KSpeck is a tunable bijective KDF based on the SPECK block cipher. It's based on the "scrypt"
 //! paper, but tweaked to use a block cipher instead of a hash function.
 //!
 //! It is collision-free because it is a bijective function. As such, the worst-case is that an
@@ -11,7 +11,7 @@
 //! In short, the algorithm consists of memory-intensive PRF, which maps the seed and round to some
 //! metakey. This metakey is then used to encrypt the key.
 //!
-//! The hardness depends on the security of the underlying cipher (Speck cipher).
+//! The hardness depends on the security of the underlying cipher (SPECK cipher).
 
 extern crate speck;
 

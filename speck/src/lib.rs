@@ -1,13 +1,13 @@
-//! Implementation of the Speck block cipher.
+//! Implementation of the SPECK block cipher.
 //!
-//! Speck is a really simple block cipher designed by the NSA. It is famous for its simple
+//! SPECK is a really simple block cipher designed by the NSA. It is famous for its simple
 //! structure and code size, which can fit in just a couple of lines, while still preserving
 //! security.
 
 /// The number of rounds.
 const ROUNDS: u64 = 32;
 
-/// A single round of Speck.
+/// A single round of SPECK.
 ///
 /// This is a keyed ARX transformation.
 macro_rules! round {
@@ -20,7 +20,7 @@ macro_rules! round {
     }
 }
 
-/// Revert a Speck round given some subkey.
+/// Revert a SPECK round given some subkey.
 macro_rules! inv_round {
     ($x:ident, $y:ident, $k:ident) => {
         $y ^= $x;
@@ -76,7 +76,7 @@ impl Key {
             // Insert the key into the schedule.
             ret.schedule[i as usize] = k2;
 
-            // The beautiful thing about Speck is that it reuses its round function to generate the
+            // The beautiful thing about SPECK is that it reuses its round function to generate the
             // key schedule.
             round!(k1, k2, i);
         }
@@ -133,7 +133,7 @@ mod tests {
 
     #[test]
     fn test_vectors() {
-        // These test vectors are taken from the Speck paper.
+        // These test vectors are taken from the SPECK paper.
         assert_eq!(encrypt_block((0x6c61766975716520, 0x7469206564616d20), (0x0f0e0d0c0b0a0908, 0x0706050403020100)), (0xa65d985179783265, 0x7860fedf5c570d18));
     }
 }
