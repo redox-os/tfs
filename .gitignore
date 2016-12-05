@@ -4,3 +4,4 @@ Cargo.lock
 *.pdf
 *.log
 *.out
+*.pdf_tex
