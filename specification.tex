@@ -13,7 +13,7 @@
 \newcommand{\clusterheader}{8 }
 \newcommand{\clustersize}{4096 }
 \newcommand{\maxpagesincluster}{16 }
-\newcommand{\minimumsectorsize}{512 }
+\newcommand{\minimumsectorsize}{128 }
 \newcommand{\pagesize}{4090 }
 \newcommand{\versionnumber}{0 }
 
@@ -50,13 +50,11 @@
         Provided that following premises hold:
 
         \begin{itemize}
-            \item $n$ bytes can be written atomically if $n$ divides
-                \minimumsectorsize\footnote{Any disks on the market today has
-                sector size of \minimumsectorsize bytes or a multiple thereof,
-                hence the choice of this value.} and $n < \minimumsectorsize$,
-                i.e.\ it is never partially written, and interrupting the
-                write will never render the disk in a state in which it not already
-                is written or retaining the old data.
+            \item Any sector (assumed to be at least of size \minimumsectorsize
+                bytes) can be read and written atomically, i.e.\ it is never
+                partially written, and interrupting the write will never render
+                the disk in a state in which it not already is written or
+                retaining the old data.
         \end{itemize}
 
     \chapter{Disk header}
