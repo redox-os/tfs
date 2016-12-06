@@ -21,11 +21,13 @@
 \newcommand{\concat}{\Vert}
 
 \begin{document}
-    \maketitle
     \begin{abstract}
         We give a complete specification of the on-disk representation of the
         TFS file system. Certain implementation details are covered.
     \end{abstract}
+
+    \maketitle
+    \tableofcontents
 
     \chapter{Introduction}
     This specification should detail the TFS file system such that it can be
@@ -116,7 +118,7 @@
         \subsection{Encryption parameters (byte 68-84)}
         \label{header:encryptionparams}
         These are parameters used differently based on the choice
-        in~\ref{header:encyption}.
+        in~\ref{header:encryption}.
 
         \subsection{Bitwise negation of encryption parameters (byte 84-100)}
         Repetition of~\ref{header:encyptionparams}, bitwise negated.
@@ -128,9 +130,10 @@
 
         \begin{description}
             \item [$n = 0$]    state block uninitialized.
-            \item [$n \neq 0$] the $n$'th cluster (starting at byte
-                $\clustersize n$) is used as the state block and abides the
-                format set out in~\ref{stateblock}.
+            \item [$n \neq 0$] the $n$'th cluster
+                (starting at byte $\clustersize n$) is used
+                as the state block and abides the format set out
+                in~\ref{stateblock}.
         \end{description}
 
         \subsection{Bitwise negation of state block address (byte 136-144)}
@@ -218,8 +221,8 @@
 
         \begin{description}
             \item [$n = 0$]    super-page uninitialized.
-            \item [$n \neq 0$] the $n$'th page is the super-page as
-                defined in~\ref{fs:superpage}.
+            \item [$n \neq 0$] the $n$'th page is the super-page as defined
+                in~\ref{fs:superpage}.
         \end{description}
 
     \section{Integrity checking}
@@ -310,7 +313,7 @@
 
     \section{Checksums}
         \subsection{Constant checksum}
-        \label{checksum:seahash}
+        \label{checksum:constant}
         Constant checksum is independent of the input\footnote{This is used as
         an alternative to storing no checksum, which would make implementation
         harder. Instead, this allows some -- but weak -- protection against failure

@@ -5,3 +5,4 @@ Cargo.lock
 *.log
 *.out
 *.pdf_tex
+*.toc
