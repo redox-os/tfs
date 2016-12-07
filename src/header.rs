@@ -1,12 +1,12 @@
 const DISK_HEADER_SIZE: usize = 4096;
-const DEFAULT_DISK_HEADER: [u8; 146] = [
+const DEFAULT_DISK_HEADER: &'static [u8] = &[
     // The magic number (`TFS fmt `).
     b'T', b'F', b'S', b' ', b'f', b'm', b't', b' ',
     // The version number.
     0x00, 0x00, 0x00, 0x00,
     0xFF, 0xFF, 0xFF, 0xFF,
     // The implementation ID (`official`).
-    b'o', b'f', b'f', b'i', b'c', b'i', b'a', b'l',
+     b'o',  b'f',  b'f',  b'i',  b'c',  b'i',  b'a',  b'l',
     !b'o', !b'f', !b'f', !b'i', !b'c', !b'i', !b'a', !b'l',
     // Encryption algorithm.
     0x00, 0x00,
