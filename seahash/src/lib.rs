@@ -30,6 +30,9 @@
 //! This is **not** a cryptographic function, and it certainly should not be used as one. If you
 //! want a good cryptograhic hash function, you should use SHA-3 (Keccak) or BLAKE2.
 //!
+//! It is not secure, nor does it aim to be. It aims to have high quality pseudorandom output and
+//! few collisions, as well as being fast.
+//!
 //! # Benchmark
 //!
 //! On normal hardware, it is expected to run with a rate around 5.9-6.7 GB/S on a 2.5 GHz CPU.

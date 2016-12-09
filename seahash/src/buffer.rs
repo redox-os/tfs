@@ -97,22 +97,19 @@ pub fn hash(buf: &[u8]) -> u64 {
 
 /// Hash some buffer according to a chosen seed.
 ///
-/// This is the _keyed_ version of SeaHash, which allows chosing a seed defining the hash function.
-/// It is generally suspected that this is at least partially secure (i.e. you cannot deduce the
-/// seed, even with unlimited "black box" access to the function), but it has not yet been subject
-/// to proper cryptoanalysis.
+/// The keys are expected to be chosen from an uniform distribution. The keys should be mutually
+/// distinct to avoid issues with collisions if the lanes are permuted.
 ///
-/// The keys are expected to be chosen from an uniform distribution.
+/// This is not secure, as [the key can be extracted with a bit of computational
+/// work](https://github.com/ticki/tfs/issues/5), as such, it is recommended to have a fallback
+/// hash function (adaptive hashing) in the case of hash flooding. It can be considered unbroken if
+/// the output are not known (i.e. no malicious party has access to the raw values of the keys,
+/// only a permutation thereof).), however I absolutely do not recommend using it for this. If you
+/// want to be strict, this should only be used as a layer of obfustication, such that the fallback
+/// (e.g. SipHash) is harder to trigger.
 ///
-/// # Known attacks/weaknesses
-///
-/// Following attacks and weaknesses might be exploited by a malicious party:
-///
-/// - An attacker can obtain the XOR of the keys through reverting the diffusion in the hash of the
-///   empty string. It is unknown if this information can be used to generate collisions.
-/// - Certain keys are weaker than others when hashing small buffers.
-///
-/// It shouldn't be considered as strong as e.g. SipHasher as of the current design.
+/// In the future, I might strengthen the security if possible while having backward compatibility
+/// with the default initialization vector.
 pub fn hash_seeded(buf: &[u8], mut a: u64, mut b: u64, mut c: u64, mut d: u64) -> u64 {
     unsafe {
         // We use 4 different registers to store seperate hash states, because this allows us to update
