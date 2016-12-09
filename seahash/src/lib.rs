@@ -117,7 +117,7 @@
 //!
 //! ```notest
 //! x ← px
-//! x ← (x ≫ 32) ≫ (x ≫ 60)
+//! x ← x ⊕ ((x ≫ 32) ≫ (x ≫ 60))
 //! x ← px
 //! ```
 //!
@@ -130,6 +130,8 @@
 //! trivially. This might seem irrelavant, as it clearly isn't cryptographically secure, but it
 //! tells us something about the inner semantics. In particular, any diffusion function with
 //! sufficient statistical quality will make up a good hash function in this construction.
+//!
+//! Read [the blog post](http://ticki.github.io/blog/seahash-explained/) for more details.
 //!
 //! # ASIC version
 //!
