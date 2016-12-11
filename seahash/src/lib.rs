@@ -28,7 +28,7 @@
 //! # A word of warning!
 //!
 //! This is **not** a cryptographic function, and it certainly should not be used as one. If you
-//! want a good cryptograhic hash function, you should use SHA-3 (Keccak) or BLAKE2.
+//! want a good cryptographic hash function, you should use SHA-3 (Keccak) or BLAKE2.
 //!
 //! It is not secure, nor does it aim to be. It aims to have high quality pseudorandom output and
 //! few collisions, as well as being fast.
@@ -103,7 +103,7 @@
 //! # Inner workings
 //!
 //! In technical terms, SeaHash follows a alternating 4-state length-padded Merkle–Damgård
-//! construction with an XOR-diffuse compression function (click to enlargen):
+//! construction with an XOR-diffuse compression function (click to enlarge):
 //!
 //! [![A diagram.](http://ticki.github.io/img/seahash_construction_diagram.svg)]
 //! (http://ticki.github.io/img/seahash_construction_diagram.svg)
@@ -127,10 +127,10 @@
 //! The advantage of having four completely segregated (note that there is no mix round, so they're
 //! entirely independent) states is that fast parallelism is possible. For example, if I were to
 //! hash 1 TB, I can spawn up four threads which can run independently without _any_
-//! intercommunication or syncronization before the last round.
+//! intercommunication or synchronization before the last round.
 //!
 //! If the diffusion function (f) was cryptographically secure, it would pass cryptoanalysis
-//! trivially. This might seem irrelavant, as it clearly isn't cryptographically secure, but it
+//! trivially. This might seem irrelevant, as it clearly isn't cryptographically secure, but it
 //! tells us something about the inner semantics. In particular, any diffusion function with
 //! sufficient statistical quality will make up a good hash function in this construction.
 //!

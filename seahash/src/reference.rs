@@ -16,7 +16,7 @@
 //! If a seed is given, each of the initial state component are modularly multiplied by the seed.
 //!
 //! From the stream, we read one 64-bit block (in little-endian) at a time.  This number, `n`,
-//! determines the new the new state by:
+//! determines the new state by:
 //!
 //! ```notest
 //! a' = b
@@ -25,7 +25,7 @@
 //! d  = g(a ⊕ n)
 //! ```
 //!
-//! `g(x)` is defined as `g(x) = j(h(j(x))))` with `h(x) = (x ≫ 32) ≫ (x ≫ 60)` and `j(x) ≡ px (mod
+//! `g(x)` is defined as `g(x) = j(h(j(x)))` with `h(x) = (x ≫ 32) ≫ (x ≫ 60)` and `j(x) ≡ px (mod
 //! 2^64)` with `p = 0x7ed0e9fa0d94a33`.
 //!
 //! Let the final state be `(x, y, z, w)`. Then the final result is given by `H = g(x ⊕ y ⊕ z ⊕ w ⊕
@@ -123,7 +123,7 @@ pub fn hash_seeded(buf: &[u8], k1: u64, k2: u64, k3: u64, k4: u64) -> u64 {
     // Initialize the state.
     let mut state = State::with_seeds(k1, k2, k3, k4);
 
-    // Partition the rounded down buffer to chunks of 8 bytes, and iterate over them. The last
+    // Partition the rounded down buffer into chunks of 8 bytes, and iterate over them. The last
     // block might not be 8 bytes long.
     for int in buf.chunks(8) {
         // Read the chunk into an integer and write into the state.
