@@ -97,15 +97,15 @@ pub fn hash(buf: &[u8]) -> u64 {
 
 /// Hash some buffer according to a chosen seed.
 ///
-/// The keys are expected to be chosen from an uniform distribution. The keys should be mutually
+/// The keys are expected to be chosen from a uniform distribution. The keys should be mutually
 /// distinct to avoid issues with collisions if the lanes are permuted.
 ///
 /// This is not secure, as [the key can be extracted with a bit of computational
 /// work](https://github.com/ticki/tfs/issues/5), as such, it is recommended to have a fallback
 /// hash function (adaptive hashing) in the case of hash flooding. It can be considered unbroken if
-/// the output are not known (i.e. no malicious party has access to the raw values of the keys,
+/// the output is not known (i.e. no malicious party has access to the raw values of the keys,
 /// only a permutation thereof).), however I absolutely do not recommend using it for this. If you
-/// want to be strict, this should only be used as a layer of obfustication, such that the fallback
+/// want to be strict, this should only be used as a layer of obfuscation, such that the fallback
 /// (e.g. SipHash) is harder to trigger.
 ///
 /// In the future, I might strengthen the security if possible while having backward compatibility
