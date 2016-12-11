@@ -13,5 +13,3 @@ impl ClusterPointer {
         }
     }
 }
-
-
