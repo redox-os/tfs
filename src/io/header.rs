@@ -1,4 +1,13 @@
+//! Disk header parsing.
+//!
+//! The disk header provides information on how to read a TFS disk. This module parses and
+//! interprets the disk header so it is meaningful to the programmer.
+
+/// The size of the disk header.
+///
+/// This should be a multiple of the cluster size.
 const DISK_HEADER_SIZE: usize = 4096;
+/// The default disk header.
 const DEFAULT_DISK_HEADER: &'static [u8] = &[
     // The magic number (`TFS fmt `).
     b'T', b'F', b'S', b' ', b'f', b'm', b't', b' ',
@@ -21,17 +30,32 @@ const DEFAULT_DISK_HEADER: &'static [u8] = &[
     0x03, 0xFC,
 ];
 
+/// A disk header reading error.
 enum Error {
+    /// The consistency flag is corrupt.
     CorruptConsistencyFlag,
+    /// The cipher field is corrupt.
     CorruptCipher,
+    /// The encryption parameters is corrupt.
     CorruptEncryptionParameters,
+    /// The implementation ID is corrupt.
     CorruptImplementationId,
+    /// The state block address is corrupt.
     CorruptStateBlockAddress,
+    /// The version number is corrupt.
     CorruptVersionNumber,
+    /// The version is incompatible with this implementation.
+    ///
+    /// The version number is given by some integer. If the higher half of the integer does not
+    /// match, the versions are incompatible and this error is returned.
     IncompatibleVersion,
+    /// Unknown cipher option.
     UnknownCipher,
+    /// Unknown consistency flag value.
     UnknownConsistencyFlag,
+    /// Unknown format (not TFS).
     UnknownFormat,
+    /// A disk I/O error.
     Disk(disk::Error),
 }
 
@@ -41,31 +65,59 @@ impl fmt::Display for Error {
     }
 }
 
+/// TFS magic number.
 enum MagicNumber {
+    /// The image is partially compatible with the official TFS specification.
     PartialCompatibility,
+    /// The image is completely compatible with the official TFS specification.
     TotalCompatibility,
 }
 
+/// Cipher option.
 enum Cipher {
+    /// Disk encryption disabled.
     Identity = 0,
+    /// Use the SPECK cipher.
     Speck128 = 1,
 }
 
+/// Consistency flag.
+///
+/// The consistency flag defines the state of the disk, telling the user if it is in a consistent
+/// state or not. It is important for doing non-trivial things like garbage-collection, where the
+/// disk needs to enter an inconsistent state for a small period of time.
 enum ConsistencyFlag {
+    /// The disk was properly closed and shut down.
     Closed,
+    /// The disk is active/was forcibly shut down.
     StillActive,
+    /// The disk is in an inconsistent state.
+    ///
+    /// Proceed with caution.
     Inconsistent,
+    /// The disk is uninitialized.
     Uninitialized,
 }
 
+/// The disk header.
 #[derive(Default)]
 struct DiskHeader {
+    /// The magic number.
     magic_number: MagicNumber,
+    /// The version number.
     version_number: u32,
+    /// The implementation ID.
     implementation_id: u32,
+    /// The cipher.
     cipher: Cipher,
+    /// The encryption paramters.
+    ///
+    /// These are used as defined by the choice of cipher. Some ciphers might use it for salt or
+    /// settings, and others not use it at all.
     encryption_parameters: [u8; 16],
+    /// The address of the state block.
     state_block_address: ClusterPointer,
+    /// The consistency flag.
     consistency_flag: ConsistencyFlag,
 }
 
