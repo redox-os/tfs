@@ -23,7 +23,7 @@ const DEFAULT_DISK_HEADER: &'static [u8] = &[
 
 enum Error {
     CorruptConsistencyFlag,
-    CorruptEncryptionAlgorithm,
+    CorruptCipher,
     CorruptEncryptionParameters,
     CorruptImplementationId,
     CorruptStateBlockAddress,
@@ -46,7 +46,7 @@ enum MagicNumber {
     TotalCompatibility,
 }
 
-enum EncryptionAlgorithm {
+enum Cipher {
     Identity = 0,
     Speck128 = 1,
 }
@@ -63,7 +63,7 @@ struct DiskHeader {
     magic_number: MagicNumber,
     version_number: u32,
     implementation_id: u32,
-    encryption_algorithm: EncryptionAlgorithm,
+    cipher: Cipher,
     encryption_parameters: [u8; 16],
     state_block_address: ClusterPointer,
     consistency_flag: ConsistencyFlag,
@@ -126,14 +126,14 @@ impl DiskHeader {
             return Err(Error::CorruptImplementationId);
         }
 
-        // == Encryption Section ==
+        //////////////// Encryption Section ////////////////
 
         // Load the encryption algorithm choice.
-        ret.encryption_algorithm = EncryptionAlgorithm::from(LittleEndian::read(buf[64..66]))?;
+        ret.cipher = Cipher::from(LittleEndian::read(buf[64..66]))?;
         // Repeat the bitwise negation.
-        if ret.encryption_algorithm as u16 != !LittleEndian::read(buf[66..68]) {
+        if ret.cipher as u16 != !LittleEndian::read(buf[66..68]) {
             // The implementation ID is corrupt; abort.
-            return Err(Error::CorruptEncryptionAlgorithm);
+            return Err(Error::CorruptCipher);
         }
 
         // Load the encryption parameters (e.g. salt).
@@ -144,7 +144,7 @@ impl DiskHeader {
             return Err(Error::CorruptEncryptionParameters);
         }
 
-        // == State ==
+        //////////////// State ////////////////
 
         // Load the state block pointer.
         ret.state_block_address = ClusterPointer::new(LittleEndian::read(buf[128..136]));

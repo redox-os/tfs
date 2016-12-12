@@ -10,22 +10,17 @@ struct Identity;
 
 struct Encrypted<D, C> {
     inner: D,
-    header: header::DiskHeader,
     cipher: C,
 }
 
 impl<D: Disk> Encrypted<D, Speck128> {
-    pub fn new(disk: D, password: &[u8]) -> Encrypted<D> {
-        // Read the disk header.
-        let header = header::DiskHeader::load(disk);
-
+    pub fn new(disk: D, password: &[u8], seed: &[u8]) -> Encrypted<D> {
         // Use scrypt to generate the key from the password and salt.
         let mut key = [0; 16];
-        scrypt::scrypt(password, header.encryption_parameters, &scrypt::ScryptParams::new(SCRYPT_LOG_N, SCRYPT_R, SCRYPT_P), &mut key);
+        scrypt::scrypt(password, seed, &scrypt::ScryptParams::new(SCRYPT_LOG_N, SCRYPT_R, SCRYPT_P), &mut key);
 
         Encrypted {
             inner: disk,
-            header: header,
             cipher: Speck128 {
                 key: LittleEndian::read(key),
             },
@@ -34,13 +29,9 @@ impl<D: Disk> Encrypted<D, Speck128> {
 }
 
 impl<D: Disk> Encrypted<D, Identity> {
-    pub fn new(disk: D) -> Encrypted<D> {
-        // Read the disk header.
-        let header = header::DiskHeader::load(disk);
-
+    pub fn new() -> Encrypted<D> {
         Encrypted {
             inner: disk,
-            header: header,
             cipher: Identity,
         }
     }
