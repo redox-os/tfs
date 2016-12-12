@@ -2,53 +2,65 @@ const SCRYPT_LOG_N: u8 = 20;
 const SCRYPT_R: u32 = 8;
 const SCRYPT_P: u32 = 1;
 
-struct Speck128 {
-    key: u128,
+enum Cipher {
+    Identity,
+    Speck128 {
+        key: u128,
+    },
 }
 
-struct Identity;
-
-struct Encrypted<D, C> {
+struct Encrypted<D> {
     inner: D,
-    cipher: C,
+    cipher: Cipher,
 }
 
-impl<D: Disk> Encrypted<D, Speck128> {
-    pub fn new(disk: D, password: &[u8], seed: &[u8]) -> Encrypted<D> {
-        // Use scrypt to generate the key from the password and salt.
-        let mut key = [0; 16];
-        scrypt::scrypt(password, seed, &scrypt::ScryptParams::new(SCRYPT_LOG_N, SCRYPT_R, SCRYPT_P), &mut key);
+impl<D: Disk> Encrypted<D> {
+    pub fn new(disk: D, password: &[u8], header: &header::DiskHeader) -> Encrypted<D> {
+        match header.cipher {
+            header::Cipher::Identity => Encrypted {
+                inner: disk,
+                cipher: Identity,
+            },
+            header::Cipher::Speck128 => {
+                // Use scrypt to generate the key from the password and salt.
+                let mut key = [0; 16];
+                scrypt::scrypt(password, seed, &scrypt::ScryptParams::new(SCRYPT_LOG_N, SCRYPT_R, SCRYPT_P), &mut key);
 
-        Encrypted {
-            inner: disk,
-            cipher: Speck128 {
-                key: LittleEndian::read(key),
+                Encrypted {
+                    inner: disk,
+                    cipher: Speck128 {
+                        key: LittleEndian::read(key),
+                    },
+                }
             },
         }
     }
 }
 
-impl<D: Disk> Encrypted<D, Identity> {
-    pub fn new() -> Encrypted<D> {
-        Encrypted {
-            inner: disk,
-            cipher: Identity,
+impl<D: Disk> Disk for Encrypted<D> {
+    fn sector_size(&self) -> SectorOffset {
+        match self.cipher {
+            &Cipher::Identity => self.inner.sector_size(),
+            _ => unimplemented!(),
         }
     }
-}
-
-impl<D: Disk> Disk for Encrypted<D, Identity> {
-    fn sector_size(&self) -> SectorOffset {
-        self.inner.sector_size()
-    }
     fn number_of_sectors(&self) -> Sector {
-        self.inner.number_of_sectors()
+        match self.cipher {
+            &Cipher::Identity => self.inner.number_of_sectors(),
+            _ => unimplemented!(),
+        }
     }
 
     fn write(sector: Sector, offset: SectorOffset, buffer: &[u8]) -> Result<(), Error> {
-        self.inner.write(sector, offset, buffer)
+        match self.cipher {
+            &Cipher::Identity => self.inner.write(sector, offset, buffer),
+            _ => unimplemented!(),
+        }
     }
     fn read(sector: Sector, offset: SectorOffset, buffer: &mut [u8]) -> Result<(), Error> {
-        self.inner.read(sector, offset, buffer)
+        match self.cipher {
+            &Cipher::Identity => self.inner.read(sector, offset, buffer),
+            _ => unimplemented!(),
+        }
     }
 }
