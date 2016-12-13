@@ -164,13 +164,8 @@
     At the address (cluster number) chosen in~\ref{header:stateblock}, a block
     defining the state of the file system is stored.
 
-    \section{Fixed}
-        \subsection{Zeros (byte 0-4)}
-        These bytes are zero. They are used to make sure the password was
-        correctly given and the decryption was correct.
-
     \section{Configuration}
-        \subsection{Checksum algorithm (byte 16-18)}
+        \subsection{Checksum algorithm (byte 0-2)}
         \label{config:checksum}
         This field stores a number in little-endian defining checksum algorithm
         in use.
@@ -183,7 +178,7 @@
             \item [$\geq 2^{15}$] Implementation defined.
         \end{description}
 
-        \subsection{Compression algorithm (byte 18-20)}
+        \subsection{Compression algorithm (byte 2-4)}
         \label{config:compression}
         This field stores a number in little-endian defining compression
         algorithm in use.
@@ -207,7 +202,7 @@
         $$\forall x, y \  \exists k \quad x = c^{-1}(x') \implies x \concat y = c^{-1}(x' \concat k)$$
 
     \section{State}
-        \subsection{Head freelist pointer (byte 32-40)}
+        \subsection{Head freelist pointer (byte 16-24)}
         This field stores some number (in little-endian), which takes values
 
         \begin{description}
@@ -216,7 +211,7 @@
                 to~\ref{cluster:metacluster}.
         \end{description}
 
-        \subsection{Super-page pointer (byte 40-48)}
+        \subsection{Super-page pointer (byte 24-30)}
         This field stores some number (in little-endian), which takes values
 
         \begin{description}
@@ -226,12 +221,12 @@
         \end{description}
 
     \section{Integrity checking}
-        \subsection{Checksum (byte 40-44)}
+        \subsection{Checksum (byte 32-36)}
         This field stores a little-endian integer equal to the checksum of the
         state block (excluding this field), calculated by the algorithm
         specified in~\ref{config:checksum}.
 
-    \chapter{Disk IO}
+    \chapter{Cluster management}
 
     \section{Clusters and pages}
         The disk is divided into clusters of \clustersize bytes each.
