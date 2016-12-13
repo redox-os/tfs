@@ -116,7 +116,7 @@ struct DiskHeader {
     /// settings, and others not use it at all.
     encryption_parameters: [u8; 16],
     /// The address of the state block.
-    state_block_address: ClusterPointer,
+    state_block_address: clusters::Pointer,
     /// The consistency flag.
     consistency_flag: ConsistencyFlag,
 }
@@ -201,7 +201,7 @@ impl DiskHeader {
         //////////////// State ////////////////
 
         // Load the state block pointer.
-        ret.state_block_address = ClusterPointer::new(LittleEndian::read(buf[128..136]));
+        ret.state_block_address = clusters::Pointer::new(LittleEndian::read(buf[128..136]));
         // Repeat the bitwise negation.
         if ret.state_block_address as u64 != !LittleEndian::read(buf[136..144]) {
             // The state block address is corrupt; abort.

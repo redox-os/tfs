@@ -3,7 +3,7 @@
 use std::NonZero;
 
 /// A pointer to some cluster.
-pub struct ClusterPointer(NonZero<u64>);
+pub struct Pointer(NonZero<u64>);
 
 impl ClusterPointer {
     /// Create a new `ClusterPointer` to the `x`'th cluster.
