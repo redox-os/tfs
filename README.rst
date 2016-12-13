@@ -73,6 +73,44 @@ Full coverage testing
 SSD friendly
     TFS tries to avoid the write limitation in SSD by repositioning dead sectors.
 
+FAQ
+---
+
+Why do you use SPECK as the default cipher?
+    SPECK is a relatively young cipher, yet it has been subject to a lot of
+    (ineffective) cryptanalysis, so it is quite secure, but more importantly is
+    that it has really good performance and a simple implementation.
+    Portability is an important part of the TFS design, and truely portable AES
+    implementations without side-channel attacks is harder than many think
+    (particularly, there are issues with `SubBytes` in most portable
+    implementations). SPECK does not have this issue, and can be implemented
+    portably with minimal effort.
+How similar is TFS and ZFS?
+    Not that similar, actually. The share many of the basic ideas, but
+    otherwise they are essentially unconnected.
+Is TFS Redox-only?
+    No, and it was never planned to be Redox-only.
+How does whole-disk compression work?
+    Whole-disk compression is -- to my knowledge -- exclusive to TFS. It works
+    by collecting as many "pages" (virtual data blocks) into a "cluster"
+    (allocation unit). By doing this, the pages can be read by simply
+    decompressing the respective cluster.
+
+Resources on design
+-------------------
+
+I've written a number of pieces on the design of TFS:
+
+- [SeaHash: Explained](http://ticki.github.io/blog/seahash-explained/). This
+  describes the default checksum algorithm designed for TFS.
+- [On Random-Access Compression](http://ticki.github.io/blog/ternary-as-a-prediction-residue-code/).
+  This post describes the algorithm used for random-access compression.
+- [Ternary as a prediction residue code](http://ticki.github.io/blog/ternary-as-a-prediction-residue-code/). The
+  use of this is related to creating a good adaptive (headerless) entropy
+  compressor.
+- [How LZ4 works](http://ticki.github.io/blog/how-lz4-works/). This describes
+  how the LZ4 compression algorithm works.
+
 Specification
 -------------
 
