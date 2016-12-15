@@ -1,6 +1,6 @@
 //! Page management.
 //!
-//! Pages are virtual data units of size 4090 bytes. They're represented on disk somewhat
+//! Pages are virtual data units of size 4088 bytes. They're represented on disk somewhat
 //! non-obviously, since clusters can hold more than one page at once (compression). Every cluster
 //! will maximize the number of pages held and when it's filled up, a new cluster will be fetched.
 
