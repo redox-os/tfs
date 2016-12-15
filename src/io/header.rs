@@ -49,8 +49,13 @@ enum Error {
     /// The version number is given by some integer. If the higher half of the integer does not
     /// match, the versions are incompatible and this error is returned.
     IncompatibleVersion,
-    /// Unknown cipher option.
+    /// Unknown/unsupported (implementation-specific) cipher option.
     UnknownCipher,
+    /// Invalid/nonexistent cipher option.
+    ///
+    /// Note that this is different from `UnknownCipher`, as it is necessarily invalid and not just
+    /// implementation-specific.
+    InvalidCipher,
     /// Unknown consistency flag value.
     UnknownConsistencyFlag,
     /// Unknown format (not TFS).
@@ -79,6 +84,24 @@ enum Cipher {
     Identity = 0,
     /// Use the SPECK cipher.
     Speck128 = 1,
+}
+
+impl TryFrom<u16> for Cipher {
+    type Err = Error;
+
+    fn try_from(from: u16) -> Result<Cipher, Error> {
+        match from {
+            // Aye aye, encryption is disabled.
+            0 => Ok(Cipher::Identity),
+            // Wooh! Encryption on.
+            1 => Ok(Cipher::Speck128),
+            // These are implementation-specific ciphers which are unsupported in this (official)
+            // implementation.
+            1 << 15... => Err(Error::UnknownCipher),
+            // This cipher is invalid by current revision.
+            _ => Err(Error::InvalidCipher),
+        }
+    }
 }
 
 /// Consistency flag.
@@ -183,7 +206,7 @@ impl DiskHeader {
         //////////////// Encryption Section ////////////////
 
         // Load the encryption algorithm choice.
-        ret.cipher = Cipher::from(LittleEndian::read(buf[64..66]))?;
+        ret.cipher = Cipher::try_from(LittleEndian::read(buf[64..66]))?;
         // Repeat the bitwise negation.
         if ret.cipher as u16 != !LittleEndian::read(buf[66..68]) {
             // The implementation ID is corrupt; abort.
