@@ -60,8 +60,6 @@ enum Error {
     UnknownConsistencyFlag,
     /// Unknown format (not TFS).
     UnknownFormat,
-    /// A disk I/O error.
-    Disk(disk::Error),
 }
 
 impl fmt::Display for Error {
@@ -145,20 +143,11 @@ struct DiskHeader {
 }
 
 impl DiskHeader {
-    /// Load the disk header from some disk.
+    /// Parse the disk header from some sequence of bytes.
     ///
     /// This will construct it into memory while performing error checks on the header to ensure
     /// correctness.
-    fn load<D: Disk>(disk: &mut D) -> Result<DiskHeader, Error> {
-        // Load the disk header into a buffer in memory.
-        let mut buf = [0; DISK_HEADER_SIZE];
-        // Fetch the sector size.
-        let sector_size = disk.sector_size();
-        // Load the first couple of sectors into `buf`.
-        for sector in 0..DISK_HEADER_SIZE / sector_size {
-            disk.read(sector, 0, &mut buf[sector * sector_size..])?;
-        }
-
+    fn parse(buf: &[u8]) -> Result<DiskHeader, Error> {
         // Start with some default value, which will be filled out later.
         let mut ret = DiskHeader::default();
 
