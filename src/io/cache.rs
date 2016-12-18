@@ -24,8 +24,8 @@ struct WriteQuery<'a> {
 struct Cached<D> {
     disk: D,
     cache_tracker: plru::DynamicCache,
-    line_map: HashMap<disk::Sector, LineNumber>,
-    lines: Vec<[Line]>,
+    line_map: RwLock<HashMap<disk::Sector, LineNumber>>,
+    lines: RwLock<Vec<[RwLock<Line>]>>,
 }
 
 impl<D: Disk> Cached<D> {
@@ -85,6 +85,8 @@ impl<D: Disk> Cached<D> {
 
         // Update the sector number.
         line.sector = sector;
+        // Mark dirty.
+        line.dirty = true;
 
         // Update the cache line map with the new line.
         self.line_map.insert(sector, line_number);
