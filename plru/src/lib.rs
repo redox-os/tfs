@@ -100,12 +100,14 @@ pub type MediumCache = Cache<[AtomicU64; 4]>;
 pub type BigCache = Cache<[AtomicU64; 8]>;
 /// A huge cache (2048 lines).
 pub type HugeCache = Cache<[AtomicU64; 32]>;
+/// A dynamic cache.
+pub type DynamicCache = Cache<Box<[AtomicU64]>>;
 
 /// Create a heap allocated cache of a fixed (but dynamic) number of cache lines.
 ///
 /// Ideally, 64 should divide `len` to optimize space efficiency.
 #[cfg(not(features = "no_std"))]
-pub fn create(lines: usize) -> Cache<Box<[AtomicU64]>> {
+pub fn create(lines: usize) -> DynamicCache {
     // Unfortunately, `AtomicU64` doesn't implement `Clone`, so we cannot use the `vec![]` macro.
     // We need to manually construct our vector.
 

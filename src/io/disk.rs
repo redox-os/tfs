@@ -1,7 +1,5 @@
 /// A disk sector number.
 type Sector = u64;
-/// An offset into a sector (in bytes).
-type SectorOffset = u16;
 
 /// A disk I/O error.
 enum Error {
@@ -23,25 +21,24 @@ trait Disk {
     /// The size (in bytes) of a disk sector.
     ///
     /// This might vary across disks, but TFS requires it to be at least 128 bytes.
-    fn sector_size(&self) -> SectorOffset;
+    fn sector_size(&self) -> usize;
     /// The number of sectors on this disk.
     fn number_of_sectors(&self) -> Sector;
 
     /// Write data to the disk.
     ///
-    /// This writes `buffer` into sector `sector` starting at `offset` bytes into the sector.
-    fn write(sector: Sector, offset: SectorOffset, buffer: &[u8]) -> Result<(), Error>;
+    /// This writes `buffer` into sector `sector`.
+    fn write(sector: Sector, buffer: &[u8]) -> Result<(), Error>;
     /// Read data from the disk.
     ///
-    /// This reads `buffer.len()` bytes into `buffer` from sector `sector` starting at `offset`
-    /// bytes.
-    fn read(sector: Sector, offset: SectorOffset, buffer: &mut [u8]) -> Result<(), Error>;
+    /// This reads `buffer.len()` bytes into `buffer` from sector `sector`.
+    fn read(sector: Sector, buffer: &mut [u8]) -> Result<(), Error>;
 }
 
 /// For testing, we allow byte slices to act as disks.
 #[cfg(tests)]
 impl Disk for &mut [u8] {
-    fn sector_size(&self) -> SectorOffset {
+    fn sector_size(&self) -> usize {
         512
     }
 
@@ -49,20 +46,20 @@ impl Disk for &mut [u8] {
         self.len() as Sector / self.sector_size()
     }
 
-    fn write(sector: Sector, offset: SectorOffset, buffer: &[u8]) -> Result<(), Error> {
-        if offset + buffer.len() > self.sector_size() {
+    fn write(sector: Sector, buffer: &[u8]) -> Result<(), Error> {
+        if sector as usize >= self.number_of_sectors() {
             Err(Error::OutOfBounds)
         } else {
-            Ok(self[(sector / self.sector_size() + offset as Sector) as usize..][..buffer.len()]
+            Ok(self[sector as usize / self.sector_size() as usize..][..buffer.len()]
                .copy_from_slice(buffer))
         }
     }
 
-    fn read(sector: Sector, offset: SectorOffset, buffer: &mut [u8]) -> Result<(), Error> {
-        if offset + buffer.len() > self.sector_size() {
+    fn read(sector: Sector, buffer: &mut [u8]) -> Result<(), Error> {
+        if sector as usize >= self.number_of_sectors() {
             Err(Error::OutOfBounds)
         } else {
-            Ok(buffer.copy_from_slice(self[(sector / self.sector_size() + offset as Sector) as usize..][..buffer.len()]))
+            Ok(buffer.copy_from_slice(self[sector as usize / self.sector_size() as usize..][..buffer.len()]))
         }
     }
 }

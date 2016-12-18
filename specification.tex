@@ -246,7 +246,8 @@
                 the cluster are not included in the checksum.
             \item [16-bit occupied space] This little-endian integer defines
                 how much of the cluster is used. Any data in the cluster beyond
-                this length is never read and can be freely overwritten.
+                this length is never read and can be freely overwritten. If
+                this is zero, then the cluster is treated uncompressed.
             \item [2 bytes of implementation defined use] These are left to the
                 implementation\footnote{Our implementation uses these for
                 mark-and-sweep garbage collection colors.}.
