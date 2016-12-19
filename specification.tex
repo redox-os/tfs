@@ -279,9 +279,11 @@
 
         \begin{description}
             \item [32-bit checksum] This is the 32 last bits of the
-                little-endian checksum of the metacluster (algorithm chosen
-                in~\ref{config:checksum}). The first 4 bytes of the cluster are
-                not included in the checksum.
+                little-endian checksum of the metacluster data (algorithm
+                chosen in~\ref{config:checksum}). The first 4 bytes of the
+                cluster are not included in the checksum (i.e., it only
+                contains the cluster counter, implementation defined value, and
+                the pointers up to the last active pointer).
             \item [16-bit cluster counter] This 16-bit little-endian integer
                 defines the number of free clusters stored in the data section.
                 Call this value $n$.

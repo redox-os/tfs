@@ -16,11 +16,19 @@ struct Metacluster {
 struct Manager<D> {
     /// The cached disk header.
     ///
+    /// The disk header contains various very basic information about the disk and how to interact
+    /// with it.
+    ///
     /// In reality, we could fetch this from the `disk` field as-we-go, but that hurts performance,
     /// so we cache it in memory.
     header: header::DiskHeader,
+    /// The state block.
+    ///
+    /// The state block stores the state of the file system including allocation state,
+    /// configuration, and more.
+    state_bock: state_block::StateBlock,
     /// The inner disk.
-    disk: D,
+    disk: Cached<D>,
     /// The head of the freelist.
     ///
     /// This list is used as the allocation primitive of TFS. It is a simple freelist-based extent
@@ -30,10 +38,5 @@ struct Manager<D> {
 }
 
 impl<D: Disk> Manager<D> {
-    fn flush_freelist(&mut self) -> Result<(), disk::Error> {
-        let mut buf = [0]
-        self.header
-    }
-
     fn alloc(&mut self)
 }
