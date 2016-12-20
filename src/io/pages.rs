@@ -38,5 +38,9 @@ struct Manager<D> {
 }
 
 impl<D: Disk> Manager<D> {
-    fn alloc(&mut self)
+    fn freelist_pop(&mut self) -> cluster::Pointer {
+        let cluster = self.freelist_head[self.freelist_head.counter];
+        self.freelist_head.counter -= 1;
+        self.header.freelist_head
+    }
 }

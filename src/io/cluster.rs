@@ -2,6 +2,9 @@
 
 use std::NonZero;
 
+/// The size of a cluster.
+const SIZE: usize = 4096;
+
 /// A pointer to some cluster.
 pub struct Pointer(NonZero<u64>);
 

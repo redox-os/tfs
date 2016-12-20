@@ -1,5 +1,5 @@
 /// A disk sector number.
-type Sector = u64;
+type Sector = usize;
 
 /// A disk I/O error.
 enum Error {
