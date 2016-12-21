@@ -154,43 +154,10 @@
 #![no_std]
 #![warn(missing_docs)]
 
-pub use buffer::{hash, hash_seeded};
+pub use buffer::{hash, hash_seeded, State};
 pub use stream::SeaHasher;
 
 pub mod reference;
 mod buffer;
+mod helper;
 mod stream;
-
-/// The diffusion function.
-///
-/// This is a bijective function emitting chaotic behavior. Such functions are used as building
-/// blocks for hash functions.
-fn diffuse(mut x: u64) -> u64 {
-    // These are derived from the PCG RNG's round. Thanks to @Veedrac for proposing this. The basic
-    // idea is that we use dynamic shifts, which are determined by the input itself. The shift is
-    // chosen by the higher bits, which means that changing those flips the lower bits, which
-    // scatters upwards because of the multiplication.
-
-    x = x.wrapping_mul(0x6eed0e9da4d94a4f);
-    let a = x >> 32;
-    let b = x >> 60;
-    x ^= a >> b;
-    x = x.wrapping_mul(0x6eed0e9da4d94a4f);
-
-    x
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn values() {
-        assert_eq!(diffuse(94203824938), 17289265692384716055);
-        assert_eq!(diffuse(0xDEADBEEF), 12110756357096144265);
-        assert_eq!(diffuse(0), 0);
-        assert_eq!(diffuse(1), 15197155197312260123);
-        assert_eq!(diffuse(2), 1571904453004118546);
-        assert_eq!(diffuse(3), 16467633989910088880);
-    }
-}

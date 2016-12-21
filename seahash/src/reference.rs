@@ -31,7 +31,7 @@
 //! Let the final state be `(x, y, z, w)`. Then the final result is given by `H = g(x ⊕ y ⊕ z ⊕ w ⊕
 //! l)` where `l` is the number of bytes in the original buffer.
 
-use diffuse;
+use helper;
 
 /// Read an integer in little-endian.
 fn read_int(int: &[u8]) -> u64 {
@@ -68,7 +68,7 @@ impl State {
         let mut a = self.a;
 
         // Mix `x` into `a`.
-        a = diffuse(a ^ x);
+        a = helper::diffuse(a ^ x);
 
         //  Rotate around.
         //  _______________________
@@ -86,7 +86,7 @@ impl State {
         // components are mutually distinct, and thus swapping even and odd chunks will affect the
         // result, because it is sensitive to the initial condition. To add discreteness, we
         // diffuse.
-        diffuse(self.a
+        helper::diffuse(self.a
             ^ self.b
             ^ self.c
             ^ self.d

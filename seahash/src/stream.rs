@@ -1,6 +1,6 @@
 use core::hash::Hasher;
 
-use {hash_seeded, diffuse};
+use {hash_seeded, helper};
 
 /// The streaming version of the algorithm.
 pub struct SeaHasher {
@@ -46,18 +46,18 @@ impl SeaHasher {
     /// This applies XEX key whitening with the keys given as argument.
     fn write(&mut self, n: u64, k1: u64, k2: u64) {
         self.state ^= n ^ k1;
-        self.state = diffuse(self.state) ^ k2;
+        self.state = helper::diffuse(self.state) ^ k2;
     }
 }
 
 impl Hasher for SeaHasher {
     fn finish(&self) -> u64 {
-        diffuse(self.state ^ self.k3) ^ self.k4
+        helper::diffuse(self.state ^ self.k3) ^ self.k4
     }
 
     fn write(&mut self, bytes: &[u8]) {
         self.state ^= hash_seeded(bytes, self.k1, self.k2, self.k3, self.k4);
-        self.state = diffuse(self.state);
+        self.state = helper::diffuse(self.state);
     }
 
     fn write_u64(&mut self, n: u64) {
