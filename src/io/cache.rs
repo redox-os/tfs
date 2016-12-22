@@ -70,8 +70,6 @@ impl Block {
 struct Cache<D> {
     /// The raw disk.
     disk: D,
-    /// The disk sector size.
-    sector_size: usize,
     /// The cache replacement tracker.
     ///
     /// This tracks the state of the replacement algorithm, which chooses which cache block shall
@@ -131,7 +129,7 @@ impl<D: Disk> Cached<D> {
             // push.
             self.blocks.push(Block {
                 sector: sector,
-                data: vec![0; self.disk.sector_size],
+                data: vec![0; disk::SECTOR_SIZE],
                 dirty: false,
                 flush_dependencies: Vec::new(),
             });
@@ -236,10 +234,10 @@ impl<T: Transaction, U: Tranaction> Transaction for Sequential<T, U> {
     }
 }
 
-/// A write transaction.
+/// A sector write transaction.
 ///
 /// This is a transaction to commit some new data to a sector, either in memory or on disk.
-struct Write<'a> {
+struct WriteSector<'a> {
     /// The sector to write.
     sector: disk::Sector,
     /// The data to write.
@@ -248,7 +246,7 @@ struct Write<'a> {
     data: &'a [u8],
 }
 
-impl<T: Transaction, U: Tranaction> Transaction for Write<T, U> {
+impl<T: Transaction, U: Tranaction> Transaction for WriteSector<T, U> {
     fn execute<D: Disk>(self, cache: &mut Cache<D>, dependency: Option<BlockNumber>)
         -> Result<&mut Block, disk::Error> {
         // Allocate a new cache block.
@@ -287,7 +285,7 @@ struct WriteU64 {
 impl<T: Transaction, U: Tranaction> Transaction for Write<T, U> {
     fn execute<D: Disk>(self, cache: &mut Cache<D>, dependency: Option<BlockNumber>) -> Result<&mut Block, disk::Error> {
         // Calculate the sector for the cluster.
-        let sector = self.cluster * cluster::SIZE / cache.sector_size + self.offset / cache.sector_size;
+        let sector = self.cluster * cluster::SIZE / disk::SECTOR_SIZE + self.offset / disk::SECTOR_SIZE;
 
         // Read the cache block of the sector.
         let block = cache.get(sector)?;
@@ -299,6 +297,6 @@ impl<T: Transaction, U: Tranaction> Transaction for Write<T, U> {
         block.dirty = true;
 
         // Write the integer into the data buffer.
-        LittleEndian::write(block.data[self.offset % cache.sector_size..], x);
+        LittleEndian::write(block.data[self.offset % disk::SECTOR_SIZE..], x);
     }
 }

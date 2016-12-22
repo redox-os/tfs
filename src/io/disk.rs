@@ -1,5 +1,14 @@
+//! Disk I/O
+//!
+//! This module provides primitives for disk I/O.
+//!
+//! We fix the sector size to 512, since it can be emulated by virtually any disk in use today.
+
 /// A disk sector number.
 type Sector = usize;
+
+/// The logical sector size.
+const SECTOR_SIZE: usize = 512;
 
 /// A disk I/O error.
 enum Error {
@@ -18,10 +27,6 @@ enum Error {
 ///
 /// This trait acts similarly to `std::io::{Read, Write}`, but is designed specifically for disks.
 trait Disk {
-    /// The size (in bytes) of a disk sector.
-    ///
-    /// This might vary across disks, but TFS requires it to be at least 128 bytes.
-    fn sector_size(&self) -> usize;
     /// The number of sectors on this disk.
     fn number_of_sectors(&self) -> Sector;
 
@@ -38,19 +43,15 @@ trait Disk {
 /// For testing, we allow byte slices to act as disks.
 #[cfg(tests)]
 impl Disk for &mut [u8] {
-    fn sector_size(&self) -> usize {
-        512
-    }
-
     fn number_of_sectors(&self) -> Sector {
-        self.len() as Sector / self.sector_size()
+        self.len() as Sector / SECTOR_SIZE
     }
 
     fn write(sector: Sector, buffer: &[u8]) -> Result<(), Error> {
         if sector as usize >= self.number_of_sectors() {
             Err(Error::OutOfBounds)
         } else {
-            Ok(self[sector as usize / self.sector_size() as usize..][..buffer.len()]
+            Ok(self[sector as usize / SECTOR_SIZE as usize..][..buffer.len()]
                .copy_from_slice(buffer))
         }
     }
@@ -59,7 +60,7 @@ impl Disk for &mut [u8] {
         if sector as usize >= self.number_of_sectors() {
             Err(Error::OutOfBounds)
         } else {
-            Ok(buffer.copy_from_slice(self[sector as usize / self.sector_size() as usize..][..buffer.len()]))
+            Ok(buffer.copy_from_slice(self[sector as usize / SECTOR_SIZE as usize..][..buffer.len()]))
         }
     }
 }

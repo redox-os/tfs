@@ -10,11 +10,11 @@
 \date{\today}
 
 % Constants
-\newcommand{\clusterheader}{8 }
-\newcommand{\clustersize}{4096 }
-\newcommand{\maxpagesincluster}{16 }
-\newcommand{\minimumsectorsize}{128 }
-\newcommand{\pagesize}{4088 } % \clustersize - \clusterheader
+\newcommand{\clusterheader}{4 }
+\newcommand{\clustersize}{512 }
+\newcommand{\maxpagesincluster}{256 }
+\newcommand{\minimumsectorsize}{512 }
+\newcommand{\pagesize}{508 } % \clustersize - \clusterheader
 \newcommand{\versionnumber}{0 }
 
 % Math
@@ -121,7 +121,7 @@
         in~\ref{header:encryption}.
 
         \subsection{Bitwise negation of encryption parameters (byte 84-100)}
-        Repetition of~\ref{header:encyptionparams}, bitwise negated.
+        Repetition of~\ref{header:encryptionparams}, bitwise negated.
 
         \section{State (128-192)}
         \subsection{State block address (byte 128-136)}
@@ -195,17 +195,6 @@
             \item [$\geq 2^{15}$] Implementation defined.
         \end{description}
 
-        In order to provide the guarantees given
-        in~\ref{assumptions_guarantees}, one constraint\footnote{It is
-        necessary because it allows first writing and then extending the
-        cluster, i.e.\ no data is corrupted on poweroff.  This is achieved
-        by most algorithms relevant for this usecase (particularly
-        streaming dictionary coders and adaptive entropy coders).} is put to
-        the compressions algorithms: It should be possible to extend the input
-        by appending some sequence of bytes to the compressed data, or
-
-        $$\forall x, y \  \exists k \quad x = c^{-1}(x') \implies x \concat y = c^{-1}(x' \concat k)$$
-
     \section{State}
         \subsection{Freelist head pointer (byte 32-40)}
         This field stores some number (in little-endian), which takes values
@@ -236,25 +225,28 @@
     \section{Clusters and pages}
         The disk is divided into clusters of \clustersize bytes each.
 
-        \subsection{Cluster format}
-        Each cluster has a header of \clusterheader bytes:
+        \subsection{General cluster format}
+        Every cluster starts with a single 16-bit little-endian integer being
+        the 16 least significant bits of the checksum of the rest of the
+        cluster.
+
+        This metadata will not be described in the individual cluster format
+        definitions.
+
+        \subsection{Data cluster format}
+        Each cluster has a header of \clusterheader bytes. The additional
+        fields are:
 
         \begin{description}
-            \item [32-bit checksum] This is the 32 last bits of the
-                little-endian checksum of the cluster (algorithm
-                chosen in~\ref{config:checksum}). The first 4 bytes of
-                the cluster are not included in the checksum.
-            \item [16-bit occupied space] This little-endian integer defines
-                how much of the cluster is used. Any data in the cluster beyond
-                this length is never read and can be freely overwritten. If
-                this is zero, then the cluster is treated uncompressed.
-            \item [2 bytes of implementation defined use] These are left to the
+            \item [8-bit page counter] This field counts the number of pages
+                stored in this cluster.
+            \item [1 byte of implementation defined use] These are left to the
                 implementation\footnote{Our implementation uses these for
                 mark-and-sweep garbage collection colors.}.
         \end{description}
 
-        A cluster contain up to \maxpagesincluster of \pagesize bytes blocks
-        called ``pages''. The decompressed data (algorithm defined
+        A data cluster contain up to \maxpagesincluster of \pagesize bytes
+        blocks called ``pages''. The decompressed data (algorithm defined
         in~\ref{config:compression}) is the contained pages concatenated.
 
         Pointers to pages uses the first 60 bits to define the cluster number,
@@ -271,23 +263,16 @@
         in~\ref{config:compression}). If this fails, it proceeds to pop
         from the top of the freelist.}.
 
-        \subsection{Meta-clusters}
+        \subsection{Meta-cluster format}
         \label{cluster:metacluster}
         The head of the freelist is a metacluster, which itself is a collection
         of other free clusters. Similarly to used clusters, metaclusters
         contain a 8 byte header:
 
         \begin{description}
-            \item [32-bit checksum] This is the 32 last bits of the
-                little-endian checksum of the metacluster data (algorithm
-                chosen in~\ref{config:checksum}). The first 4 bytes of the
-                cluster are not included in the checksum (i.e., it only
-                contains the cluster counter, implementation defined value, and
-                the pointers up to the last active pointer).
-            \item [16-bit cluster counter] This 16-bit little-endian integer
-                defines the number of free clusters stored in the data section.
-                Call this value $n$.
-            \item [2 bytes for implementation defined usage] This is
+            \item [8-bit cluster counter] This integer defines the number of
+                free clusters stored in the data section.  Call this value $n$.
+            \item [1 bytes for implementation defined usage] This is
                 left to the implementation.
         \end{description}
 

@@ -88,9 +88,28 @@ pub fn diffuse(mut x: u64) -> u64 {
     x
 }
 
+/// Reverse the `diffuse` function.
+pub fn undiffuse(mut x: u64) -> u64 {
+    // 0x2f72b4215a3d8caf is the modular multiplicative inverse of the constant used in `diffuse`.
+
+    x = x.wrapping_mul(0x2f72b4215a3d8caf);
+    let a = x >> 32;
+    let b = x >> 60;
+    x ^= a >> b;
+    x = x.wrapping_mul(0x2f72b4215a3d8caf);
+
+    x
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn diffuse_test(x: u64, y: u64) {
+        assert_eq!(diffuse(x), y);
+        assert_eq!(x, undiffuse(y));
+        assert_eq!(undiffuse(diffuse(x)), x);
+    }
 
     #[test]
     fn read_int_() {
@@ -109,11 +128,11 @@ mod tests {
 
     #[test]
     fn diffuse_test_vectors() {
-        assert_eq!(diffuse(94203824938), 17289265692384716055);
-        assert_eq!(diffuse(0xDEADBEEF), 12110756357096144265);
-        assert_eq!(diffuse(0), 0);
-        assert_eq!(diffuse(1), 15197155197312260123);
-        assert_eq!(diffuse(2), 1571904453004118546);
-        assert_eq!(diffuse(3), 16467633989910088880);
+        diffuse_test(94203824938, 17289265692384716055);
+        diffuse_test(0xDEADBEEF, 12110756357096144265);
+        diffuse_test(0, 0);
+        diffuse_test(1, 15197155197312260123);
+        diffuse_test(2, 1571904453004118546);
+        diffuse_test(3, 16467633989910088880);
     }
 }

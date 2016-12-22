@@ -5,8 +5,13 @@
 //! will maximize the number of pages held and when it's filled up, a new cluster will be fetched.
 
 struct Metacluster {
-    counter: usize,
-    free: [cluster::Pointer; cluster::SIZE / cluster::POINTER_SIZE],
+    free: Vec<cluster::Pointer>,
+}
+
+impl Metacluster {
+    fn checksum(&self) -> u32 {
+
+    }
 }
 
 /// The page manager.
@@ -28,7 +33,7 @@ struct Manager<D> {
     /// configuration, and more.
     state_bock: state_block::StateBlock,
     /// The inner disk.
-    disk: Cached<D>,
+    disk: Cache<D>,
     /// The head of the freelist.
     ///
     /// This list is used as the allocation primitive of TFS. It is a simple freelist-based extent
@@ -41,6 +46,8 @@ impl<D: Disk> Manager<D> {
     fn freelist_pop(&mut self) -> cluster::Pointer {
         let cluster = self.freelist_head[self.freelist_head.counter];
         self.freelist_head.counter -= 1;
+        self
+
         self.header.freelist_head
     }
 }

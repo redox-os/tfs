@@ -190,6 +190,28 @@ impl State {
         self.written += 8;
     }
 
+    /// Remove the most recently written 64-bit integer from the state.
+    ///
+    /// Given the value of the most recently written u64 `last`, remove it from the state.
+    pub fn pop(&mut self, last: u64) {
+        // Decrese the written bytes counter.
+        self.written -= 8;
+
+        // Remove the recently written data.
+        self.d = helper::undiffuse(self.d) ^ last;
+
+        let mut a = self.a;
+
+        //  Rotate back.
+        //  _______________________
+        // v                       |
+        // a ----> b ----> c ----> d
+        self.a = self.d;
+        self.b = a;
+        self.c = self.b;
+        self.d = self.c;
+    }
+
     /// Finalize the state.
     #[inline]
     pub fn finalize(self) -> u64 {
@@ -337,5 +359,15 @@ mod tests {
         state.push(0);
 
         assert_eq!(hash_seeded(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0], 1, 2, 3, 4), state.finalize());
+    }
+
+    #[test]
+    fn pop() {
+        let mut state = State::new(1, 2, 3, 4);
+        state.push(!0);
+        state.push(0);
+        state.pop(0);
+
+        assert_eq!(hash_seeded(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF], 1, 2, 3, 4), state.finalize());
     }
 }
