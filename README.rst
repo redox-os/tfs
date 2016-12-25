@@ -56,6 +56,8 @@ Guaranteed atomicity
     recovered easily by running the GC command.
 Improved caching
     TFS puts a lot of effort into caching the disk to speed up disk accesses.
+    It uses machine learning to learn patterns and predict future uses to
+    reduce the number of cache misses.
 Concurrent
     TFS contains very few locks and aims to be as suitable for multithreaded
     systems as possible. It makes use of multiple truly concurrent structures
