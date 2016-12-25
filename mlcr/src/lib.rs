@@ -12,7 +12,7 @@
 extern crate nn;
 use nn::NN;
 
-use std::cmp;
+use std::{cmp, f64};
 use std::collections::{BinaryHeap, HashMap};
 
 /// A clock tick count.
@@ -54,17 +54,23 @@ impl Block {
 ///
 /// This contains a prediction produced by the neural network, estimating when is the next tick,
 /// the block will be touched.
-#[derive(Eq, PartialEq)]
+#[derive(PartialEq)]
 struct Prediction {
     /// The ID of the block we're predicting.
     id: Id,
-    /// The expected tick where the block will be used next time.
-    expected_tick: Tick,
+    /// The prediction produced by the neural network.
+    ///
+    /// Note that this does not represent a tick, but rather a monotone function thereof.
+    prediction: f64,
 }
 
 impl cmp::Ord for Prediction {
     fn cmp(&self, other: &Prediction) -> cmp::Ordering {
-        self.expected_tick.cmp(&other.expected_tick)
+        if self.prediction < other.prediction {
+            cmp::Ordering::Less
+        } else {
+            cmp::Ordering::Greater
+        }
     }
 }
 
@@ -73,6 +79,8 @@ impl cmp::PartialOrd for Prediction {
         Some(self.cmp(other))
     }
 }
+
+impl cmp::Eq for Prediction {}
 
 /// An iterator over the coldest (best candidates for replacement) to hotter cache objects.
 ///
@@ -131,7 +139,7 @@ impl Cache {
     pub fn new() -> Cache {
         Cache {
             blocks: HashMap::new(),
-            nn: NN::new(&[5, 7, 4, 1]),
+            nn: NN::new(&[5, 6, 1]),
             clock: 0,
         }
     }
@@ -146,8 +154,11 @@ impl Cache {
             // Get the block we need.
             let block = self.blocks.get_mut(&id).unwrap();
 
+            // Apply a bijective map from the clock to a float on the range (0,1), which can be
+            // fed to the network.
+            let goal = (self.clock as f64 * 0.01).tanh();
             // Train the neural network with the existing data against the clock.
-            self.nn.train(&[(block.as_vec(id), vec![self.clock as f64])]);
+            self.nn.train(&[(block.as_vec(id), vec![goal])]);
 
             // Update the block with last used data.
             block.last_used[0] = block.last_used[1];
@@ -179,10 +190,13 @@ impl Cache {
         // Build a heap over the predictions.
         let mut heap = BinaryHeap::new();
         for (&id, block) in self.blocks.iter() {
-            // Create a prediction of the next use and push it to the heap.
+            // Predict the next use.
+            let prediction = self.nn.run(&block.as_vec(id))[0];
+            println!("{} - {}", id, prediction);
+            // Push the prediction to the heap.
             heap.push(Prediction {
                 id: id,
-                expected_tick: self.nn.run(&block.as_vec(id))[0] as Tick,
+                prediction: prediction,
             });
         }
 
