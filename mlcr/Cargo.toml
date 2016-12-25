@@ -2,6 +2,12 @@
 name = "mlcr"
 version = "0.1.0"
 authors = ["ticki <ticki@users.noreply.github.com>"]
+description = "An adaptive machine-learning-based cache tracker/replacement policy."
+repository = "https://github.com/ticki/tfs"
+documentation = "https://docs.rs/mlcr"
+license = "MIT"
+keywords = ["cache", "replacement", "machine", "neural", "lru"]
+exclude = ["target", "Cargo.lock"]
 
 [dependencies]
 nn = "0.1"
