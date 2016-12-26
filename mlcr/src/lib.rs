@@ -192,7 +192,6 @@ impl Cache {
         for (&id, block) in self.blocks.iter() {
             // Predict the next use.
             let prediction = self.nn.run(&block.as_vec(id))[0];
-            println!("{} - {}", id, prediction);
             // Push the prediction to the heap.
             heap.push(Prediction {
                 id: id,
