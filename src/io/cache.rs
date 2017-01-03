@@ -84,7 +84,7 @@ struct Cache<D> {
     blocks: RwLock<Vec<[RwLock<Block>]>>,
     /// The pipeline of writes to-be-committed.
     ///
-    /// These are not commited to the block map yet and will not be until `.commit()` is called.
+    /// These are not committed to the block map yet and will not be until `.commit()` is called.
     /// They are ensured to be written to the disk in the order of the pipeline.
     pipeline: Vec<(disk::Sector, Box<[u8]>)>,
 }
@@ -131,6 +131,14 @@ impl<D: Disk> Cached<D> {
     /// This pushes a transaction to the pipeline, which can be committed through `.commit()`.
     pub fn queue(&mut self, sector: disk::Sector, buf: Box<[u8]>) {
         self.pipeline.push((sector, buf));
+    }
+
+    /// Revert the pipeline and drop the transactions.
+    ///
+    /// This clears the transactions in the pipeline without commiting them. It can be used when an
+    /// operation fails and you need to return to a consistent state.
+    pub fn revert(&mut self) {
+        self.pipeline.clear();
     }
 
     /// Commit the transactions in the pipeline to the cache.
