@@ -4,12 +4,24 @@
 //! non-obviously, since clusters can hold more than one page at once (compression). Every cluster
 //! will maximize the number of pages held and when it's filled up, a new cluster will be fetched.
 
+/// A metacluster.
+///
+/// Metaclusters holds some number of links to other clusters, forming a link in an unrolled
+/// freelist.
 struct Metacluster {
+    /// The free clusters in this metacluster.
+    ///
+    /// If any, the bottom pointer points to another metacluster.
     free: Vec<cluster::Pointer>,
 }
 
+/// A page management error.
 enum Error {
+    /// No clusters left in the freelist.
+    ///
+    /// This is the equivalent to OOM, but with disk space.
     OutOfClusters,
+    /// A disk error.
     Disk(disk::Error),
 }
 
@@ -53,6 +65,11 @@ struct Manager<D> {
 }
 
 impl<D: Disk> Manager<D> {
+    /// Commit the transactions in the pipeline to the cache.
+    ///
+    /// This runs over the transactions in the pipeline and applies them to the cache. In a sense,
+    /// it can be seen as a form of checkpoint as you can revert to the last commit through
+    /// `.revert()`, as it stores the old state.
     fn commit(&mut self) {
         // Update the stored committed state to the current state, which we will commit.
         self.committed_state = self.state.clone();
@@ -60,6 +77,9 @@ impl<D: Disk> Manager<D> {
         self.disk.commit();
     }
 
+    /// Revert to the last commit.
+    ///
+    /// This will reset the state to after the previous cache commit.
     fn revert(&mut self) {
         // Revert the state to when it was committed last time.
         self.state = self.committed_state.clone();
@@ -67,6 +87,10 @@ impl<D: Disk> Manager<D> {
         self.disk.revert();
     }
 
+    /// Queue a pop from the freelist.
+    ///
+    /// This adds a new transaction to the cache pipeline, which will pop from the top of the
+    /// freelist and return the result.
     fn queue_freelist_pop(&mut self) -> Result<cluster::Pointer, Error> {
         // Pop from the metacluster.
         if let Some(cluster) = self.freelist_head.free.pop() {
@@ -91,6 +115,10 @@ impl<D: Disk> Manager<D> {
         }
     }
 
+    /// Queue a push to the freelist.
+    ///
+    /// This adds a new transaction to the cache pipeline, which will push some free cluster to the
+    /// top of the freelist.
     fn queue_freelist_push(&mut self, cluster: cluster::Pointer) -> Result<(), Error> {
         if self.state.freelist_head.free.len() == cluster::SIZE / cluster::POINTER_SIZE {
             // The freelist head is full, and therefore we use following algorithm:
@@ -122,6 +150,9 @@ impl<D: Disk> Manager<D> {
             self.state.freelist_head.free.push(cluster);
             // Queue a flush of the new freelist head.
             self.queue_freelist_head_flush();
+
+            // lulz @ these comments. like shit, ticki, they add basically nothing you fuking dumb
+            // monkey. seriously stop it
         }
     }
 }
