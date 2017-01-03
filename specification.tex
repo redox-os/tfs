@@ -263,30 +263,16 @@
         \subsection{Meta-cluster format}
         \label{cluster:metacluster}
         The head of the freelist is a metacluster, which itself is a collection
-        of other free clusters. Similarly to used clusters, metaclusters
-        contain a 8 byte header:
+        of other free clusters.
 
-        \begin{description}
-            \item [8-bit cluster counter] This integer defines the number of
-                free clusters stored in the data section.  Call this value $n$.
-            \item [1 bytes for implementation defined usage] This is
-                left to the implementation.
-        \end{description}
+        A meta-cluster starts with a 2 byte implementation defined header.
 
-        This is followed by $n$ 64-bit little-endian pointers to other free
-        clusters.
+        This is followed by some number of 64-bit little-endian pointers to
+        other free clusters.
 
-        The first pointer is either a null pointer, meaning that there are no
-        more free clusters, or non-null, in which case it points to another
-        metacluster\footnote{Popping a cluster is often done by decrementing
-        $n$ and returning the respective pointer, unless $n = 0$, which means
-        that the head pointer is set to the next metacluster and the current
-        metacluster is returned.}.
+        If any, the first pointer must point to another meta-cluster.
 
-        Although not a requirement, it is generally recommended that
-        the freelist is kept as monotone as possible\footnote{That is,
-        sequential allocations should be local as often as possible in
-        order to improve compression ratio.}.
+        The rest of the cluster is padded with zeros.
 
         \subsection{Allocation and deallocation}
         The algorithm for allocation and deallocation is implementation
@@ -304,7 +290,7 @@
         harder. Instead, this allows some -- but weak -- protection against failure
         with virtually no effort.}, yielding a constant value,
 
-        $$c = 2^{32} - 1$$
+        $$c = 2^{16} - 1$$
 
         \subsection{SeaHash}
         \label{checksum:seahash}
