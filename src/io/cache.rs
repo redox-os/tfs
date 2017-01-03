@@ -82,17 +82,19 @@ struct Cache<D> {
     block_map: RwLock<HashMap<disk::Sector, BlockNumber>>,
     /// The cache blocks.
     blocks: RwLock<Vec<[RwLock<Block>]>>,
+    /// The pipeline of writes to-be-committed.
+    ///
+    /// These are not commited to the block map yet and will not be until `.commit()` is called.
+    /// They are ensured to be written to the disk in the order of the pipeline.
+    pipeline: Vec<(disk::Sector, Box<[u8]>)>,
 }
 
 impl<D: Disk> Cached<D> {
-    /// Execute a transaction on the cache.
-    pub fn run<T: Transaction>(&mut self, transaction: T) -> Result<(), disk::Error> {
-        transaction.execute(self, None)?;
-    }
-
     /// Flush a cache block to the disk.
     ///
     /// This can potentially trigger outer flushes if the cache block has flush dependencies.
+    ///
+    /// Note that this doesn't commit the pipeline.
     pub fn flush(&mut self, block: BlockNumber) -> Result<(), disk::Error> {
         // Read the block.
         let block = &mut self.blocks[block];
@@ -115,6 +117,63 @@ impl<D: Disk> Cached<D> {
             // Unset the dirty flag.
             block.dirty = false;
         }
+    }
+
+    /// Read a sector from the disk.
+    ///
+    /// Note that this does not respond to writes in the pipeline, only committed transactions.
+    pub fn read(&self, sector: disk::Sector) -> Result<&[u8], disk::Error> {
+        Ok(self.get(sector)?.data)
+    }
+
+    /// Queue a write to the pipeline.
+    ///
+    /// This pushes a transaction to the pipeline, which can be committed through `.commit()`.
+    pub fn queue(&mut self, sector: disk::Sector, buf: Box<[u8]>) {
+        self.pipeline.push((sector, buf));
+    }
+
+    /// Commit the transactions in the pipeline to the cache.
+    ///
+    /// This commits the sectors and data given in the pipeline in the specified order enforcing
+    /// consistency with respect to the flush order.
+    pub fn commit(&mut self) {
+        if Some((first_sector, first_buf)) = writes.next() {
+            // Write the first block which has no dependencies.
+            let mut block = self.commit_write(first_sector, first_buf, None);
+
+            // Write the rest with the previous write as dependency.
+            for (sector, buf) in self.pipeline.drain() {
+                block = self.commit_write(sector, buf, Some(block.sector));
+            }
+        }
+    }
+
+    /// Commits a sector write with some dependency.
+    ///
+    /// This writes `buf` into sector `sector` in the cache, ensuring that the sector (if any)
+    /// `dependency` is flushed to the disk prior to `sector`.
+    fn commit_write(&mut self, sector: cluster::Pointer, buf: Box<[u8]>, dependency: Option<disk::Sector>) -> &mut Block {
+        // Allocate a new cache block.
+        let block_number = cache.alloc_block();
+        let block = &mut cache.blocks[block_number];
+
+        // Put the data into the freshly allocated cache block.
+        block.data = buf;
+
+        // Update the sector number.
+        block.sector = sector;
+        // Add the potential dependency to the cache block.
+        if let Some(dependency) = dependency {
+            block.add_dependency(dependency)
+        }
+        // Mark dirty.
+        block.dirty = true;
+
+        // Update the cache block map with the new block.
+        cache.block_map.insert(sector, block_number);
+
+        block
     }
 
     /// Allocate (or find replacement) for a new cache block.
@@ -188,115 +247,5 @@ impl<D: Disk> Cached<D> {
             // It didn't, so we read it from the disk:
             self.fetch_fresh(sector)
         }
-    }
-}
-
-/// A cache transaction.
-///
-/// This refer an atomic instruction for modifying the cache.
-///
-/// Transactions are said to _depend_ on another transaction if the other transaction ought to be
-/// commited to the disk prior to the transaction itself.
-trait Transaction {
-    /// Execute a transaction on a cache.
-    ///
-    /// This executes a transaction into a cache `cache`. The transaction depends on the cache
-    /// block specified in `dependency`, if any. `dependency` shall be flushed before the
-    /// transaction is committed to the disk.
-    ///
-    /// The returned value (if it suceeds) is a cache block number specifying the cache block that
-    /// was modified in the transaction. If multiple blocks were modified, they shall depend on
-    /// each other and the returned value should be the last block in the dependency chain.
-    fn execute<D: Disk>(self, cache: &mut Cache<D>, dependency: Option<BlockNumber>)
-        -> Result<BlockNumber, disk::Error>;
-
-    /// Append another transaction to be executed sequentially.
-    ///
-    /// This adapter takes some transaction `next` and produces a new transaction, which will run
-    /// the two transactions sequentially such that `next` depends on `self`.
-    fn then<T: Transaction>(self, next: T) -> impl Transaction {
-        Sequential(self, next)
-    }
-}
-
-/// An adapter than runs two transactions sequentially.
-///
-/// This will make sure `T` is committed to the disk before `U`.
-struct Sequential<T: Tranaction, U: Transaction>(T, U);
-
-impl<T: Transaction, U: Tranaction> Transaction for Sequential<T, U> {
-    fn execute<D: Disk>(self, cache: &mut Cache<D>, dependency: Option<BlockNumber>)
-        -> Result<&mut Block, disk::Error> {
-        // Execute the first transaction.
-        let block_number = self.0.execute(dependency, cache)?;
-        // Execute the second transaction to depend on the first transaction.
-        self.1.execute(cache, Some(block_number))
-    }
-}
-
-/// A sector write transaction.
-///
-/// This is a transaction to commit some new data to a sector, either in memory or on disk.
-struct WriteSector<'a> {
-    /// The sector to write.
-    sector: disk::Sector,
-    /// The data to write.
-    ///
-    /// This buffer must be of the sector size.
-    data: &'a [u8],
-}
-
-impl<T: Transaction, U: Tranaction> Transaction for WriteSector<T, U> {
-    fn execute<D: Disk>(self, cache: &mut Cache<D>, dependency: Option<BlockNumber>)
-        -> Result<&mut Block, disk::Error> {
-        // Allocate a new cache block.
-        let block_number = cache.alloc_block();
-        let block = &mut cache.blocks[block_number];
-
-        // Copy the data into the freshly allocated cache block.
-        block.data.copy_from_slice(data);
-
-        // Update the sector number.
-        block.sector = sector;
-        // Add the potential dependency to the cache block.
-        if let Some(dependency) = dependency {
-            block.add_dependency(dependency)
-        }
-        // Mark dirty.
-        block.dirty = true;
-
-        // Update the cache block map with the new block.
-        cache.block_map.insert(sector, block_number);
-
-        block
-    }
-}
-
-/// A transaction to write a 64-bit little-endian integer.
-struct WriteU64 {
-    /// The cluster to write the integer in.
-    cluster: cluster::Pointer,
-    /// The offset byte in which the integer will be written.
-    offset: usize,
-    /// The integer to be written.
-    x: u64,
-}
-
-impl<T: Transaction, U: Tranaction> Transaction for Write<T, U> {
-    fn execute<D: Disk>(self, cache: &mut Cache<D>, dependency: Option<BlockNumber>) -> Result<&mut Block, disk::Error> {
-        // Calculate the sector for the cluster.
-        let sector = self.cluster * cluster::SIZE / disk::SECTOR_SIZE + self.offset / disk::SECTOR_SIZE;
-
-        // Read the cache block of the sector.
-        let block = cache.get(sector)?;
-        // Add the potential dependency to the cache block.
-        if let Some(dependency) = dependency {
-            block.add_dependency(dependency)
-        }
-        // Mark dirty.
-        block.dirty = true;
-
-        // Write the integer into the data buffer.
-        LittleEndian::write(block.data[self.offset % disk::SECTOR_SIZE..], x);
     }
 }
