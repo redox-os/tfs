@@ -48,6 +48,7 @@ impl Disk for &mut [u8] {
     }
 
     fn write(sector: Sector, buffer: &[u8]) -> Result<(), Error> {
+        // Check if the sector is within bounds.
         if sector as usize >= self.number_of_sectors() {
             Err(Error::OutOfBounds)
         } else {
@@ -57,6 +58,7 @@ impl Disk for &mut [u8] {
     }
 
     fn read(sector: Sector, buffer: &mut [u8]) -> Result<(), Error> {
+        // Check if the sector is within bounds.
         if sector as usize >= self.number_of_sectors() {
             Err(Error::OutOfBounds)
         } else {

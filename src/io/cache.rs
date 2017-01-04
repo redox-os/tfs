@@ -1,8 +1,3 @@
-/// A cache block number.
-///
-/// Every cache block is assigned a number which is associated with the block in memory.
-type BlockNumber = usize;
-
 /// A cache block.
 ///
 /// This stores a single sector in memory, for more performant reads and writes.
@@ -74,14 +69,10 @@ struct Cache<D> {
     ///
     /// This tracks the state of the replacement algorithm, which chooses which cache block shall
     /// be replaced in favor of a new cache. It serves to estimate/guess which block is likely not
-    /// used in the near future. This guessed block is then replaced by a fresh new cache block.
-    cache_tracker: plru::DynamicCache,
-    /// The sector-to-cache-block map.
-    ///
-    /// This associates the disk sector with its respective cache block.
-    block_map: RwLock<HashMap<disk::Sector, BlockNumber>>,
+    /// used in the near future.
+    cache_tracker: mlcr::Cache,
     /// The cache blocks.
-    blocks: RwLock<Vec<[RwLock<Block>]>>,
+    blocks: HashMap<disk::Sector, Block>,
     /// The pipeline of writes to-be-committed.
     ///
     /// These are not committed to the block map yet and will not be until `.commit()` is called.
@@ -95,15 +86,14 @@ impl<D: Disk> Cached<D> {
     /// This can potentially trigger outer flushes if the cache block has flush dependencies.
     ///
     /// Note that this doesn't commit the pipeline.
-    pub fn flush(&mut self, block: BlockNumber) -> Result<(), disk::Error> {
+    pub fn flush(&mut self, sector: disk::Sector) -> Result<(), disk::Error> {
         // Read the block.
         let block = &mut self.blocks[block];
 
         // Flush all the dependencies. This is important for correct ordering!
-        for sector_dep in block.flush_dependencies {
-            if let Some(block_dep) = self.block_map.get(sector_dep) {
-                self.flush(block_dep)?;
-            }
+        for dep in block.flush_dependencies {
+            self.flush(dep)?;
+
             // It could happen naturally that the dependent sector was not found in the block
             // map. Namely, if the sector was replaced by another cache block. In such case, the
             // sector is naturally already flushed (during replacement) and thus there is no
@@ -167,29 +157,54 @@ impl<D: Disk> Cached<D> {
         }
     }
 
+    /// Trim the cache to reduce memory.
+    ///
+    /// This reduces the cache to some fixed number of cache blocks, if the number of blocks is
+    /// above some fixed limit.
+    pub fn trim(&mut self) -> Result<(), disk::Error> {
+        /// The maximum number of blocks before a trim will occur.
+        const MAX_BLOCKS: usize = 500000;
+        /// The minimum number of blocks after a trim has occured.
+        ///
+        /// If the number of cache blocks
+        const MIN_BLOCKS: usize = 300000;
+
+        // Make sure that there are enough blocks before trimming.
+        if self.blocks.len() > MAX_BLOCKS {
+            // Find candidates for trimming and remove them.
+            for sector in self.cache_tracker.trim(MIN_BLOCKS) {
+                self.remove(sector)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Remove some sector from the trash.
+    fn remove(&mut self, sector: disk::Sector) -> Result<(), disk::Error> {
+        self.flush(block)?;
+        self.blocks.remove(sector);
+
+        Ok(())
+    }
+
     /// Commits a sector write with some dependency.
     ///
     /// This writes `buf` into sector `sector` in the cache, ensuring that the sector (if any)
     /// `dependency` is flushed to the disk prior to `sector`.
     fn commit_write(&mut self, sector: cluster::Pointer, buf: Box<[u8]>, dependency: Option<disk::Sector>) -> &mut Block {
         // Allocate a new cache block.
-        let block_number = cache.alloc_block();
-        let block = &mut cache.blocks[block_number];
+        let block = cache.alloc_block(sector);
 
         // Put the data into the freshly allocated cache block.
         block.data = buf;
 
-        // Update the sector number.
-        block.sector = sector;
         // Add the potential dependency to the cache block.
         if let Some(dependency) = dependency {
             block.add_dependency(dependency)
         }
         // Mark dirty.
         block.dirty = true;
-
-        // Update the cache block map with the new block.
-        cache.block_map.insert(sector, block_number);
 
         block
     }
@@ -199,35 +214,17 @@ impl<D: Disk> Cached<D> {
     /// This finds a cache block which can be used for new objects.
     ///
     /// It will reset and flush the block and update the block map.
-    fn alloc_block(&mut self) -> BlockNumber {
-        // Test if the cache is filled.
-        if self.blocks.len() < self.cache_tracker.len() {
-            // The cache is not filled, so we don't need to replace any cache block, we can simply
-            // push.
-            self.blocks.push(Block {
-                sector: sector,
-                data: vec![0; disk::SECTOR_SIZE],
-                dirty: false,
-                flush_dependencies: Vec::new(),
-            });
+    fn alloc_block(&mut self, sector: disk::Sector) -> &mut Block {
+        // Note that we simply insert letting the cache grow. We will incidentally "trim" the cache
+        // to reduce memory usage.
+        self.blocks.insert(sector, Block {
+            data: vec![0; disk::SECTOR_SIZE],
+            dirty: false,
+            flush_dependencies: Vec::new(),
+        });
 
-            self.blocks.len() - 1
-        } else {
-            // Find a candidate for replacement.
-            let block_number = self.cache_tracker.replace();
-
-            // Flush it to the disk before throwing the data away.
-            self.flush(block_number);
-
-            // Remove the old sector from the cache block map.
-            let block = &mut self.blocks[block_number];
-            self.block_map.remove(block.sector);
-
-            // Reset the cache block.
-            block.reset();
-
-            block_number
-        }
+        // I wish there was a method to bypass this lookup, but there isn't, so we simply index.
+        &mut self.blocks[sector]
     }
 
     /// Fetch an uncached disk sector to the cache.
@@ -235,17 +232,13 @@ impl<D: Disk> Cached<D> {
     /// This will fetch `sector` from the disk to store it in the in-memory cache structure.
     fn fetch_fresh(&mut self, sector: disk::Sector) -> Result<&mut Block, disk::Error> {
         // Allocate a new cache block.
-        let block_number = self.alloc_block();
-        let block = &mut self.blocks[block_number];
+        let block = self.alloc_block(sector);
 
         // Read the sector from the disk.
         self.disk.read(sector, &mut block.data)?;
 
-        // Update the sector number.
-        block.sector = sector;
-
-        // Update the cache block map with the new block.
-        self.block_map.insert(sector, block_number);
+        // Add the cache block to the cache tracker.
+        self.cache_tracker.insert(sector);
     }
 
     /// Get the cache block for a sector.
@@ -253,11 +246,11 @@ impl<D: Disk> Cached<D> {
     /// This grabs the sector from the cache or from the disk, if necessary.
     fn get(&mut self, sector: disk::Sector) -> Result<&mut Block, disk::Error> {
         // Check if the sector already exists in the cache.
-        if let Some(block) = self.block_map.get_mut(sector) {
+        if let Some(block) = self.blocks.get_mut(sector) {
             // It did!
 
             // Touch the cache block.
-            self.cache_tracker.touch(block);
+            self.cache_tracker.touch(sector);
 
             // Read the block.
             Ok(&mut self.blocks[block])
