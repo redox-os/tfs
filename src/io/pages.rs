@@ -4,17 +4,6 @@
 //! non-obviously, since clusters can hold more than one page at once (compression). Every cluster
 //! will maximize the number of pages held and when it's filled up, a new cluster will be fetched.
 
-/// A metacluster.
-///
-/// Metaclusters holds some number of links to other clusters, forming a link in an unrolled
-/// freelist.
-struct Metacluster {
-    /// The free clusters in this metacluster.
-    ///
-    /// If any, the bottom pointer points to another metacluster.
-    free: Vec<cluster::Pointer>,
-}
-
 /// A page management error.
 enum Error {
     /// No clusters left in the freelist.
@@ -32,12 +21,15 @@ struct State {
     /// The state block stores the state of the file system including allocation state,
     /// configuration, and more.
     state_block: state_block::StateBlock,
-    /// The head of the freelist.
+    /// The first chunk of the freelist.
     ///
     /// This list is used as the allocation primitive of TFS. It is a simple freelist-based extent
     /// allocation system, but there is one twist: To optimize the data locality, the list is
     /// unrolled.
-    freelist_head: Metacluster,
+    ///
+    /// The first element (if any) points to _another_ freelist chunk (a "metacluster"), which can
+    /// be used to traverse to the next metacluster when needed.
+    freelist: Vec<cluster::Pointer>,
 }
 
 /// The page manager.
@@ -87,19 +79,60 @@ impl<D: Disk> Manager<D> {
         self.disk.revert();
     }
 
+    /// Calculate the checksum of some buffer, based on the user configuration.
+    fn checksum(&self, buf: &[u8]) -> u16 {
+        // The behavior depends on the chosen checksum algorithm.
+        match self.state.state_block.checksum {
+            // Constant checksums. These are a bit weird, but in the end it makes sense: a number
+            // is fixed to some value (in this case, the highest 16-bit integer), under the
+            // assumption that if a sector is damaged, all of it is affected, hence the number
+            // shouldn't match. Obviously, this isn't true for every disk, therefore one must
+            // be careful before using this.
+            ChecksumAlgorithm::Constant => 0xFFFF,
+            // Hash the thing via SeaHash, then take the 16 lowest bits (truncating cast).
+            ChecksumAlgorithm::SeaHash => seahash::hash(buf) as u16,
+        }
+    }
+
+    /// Queue a state block flush.
+    ///
+    /// This queues a new transaction flushing the state block.
+    fn queue_state_block_flush(&mut self) {
+        self.disk.queue(self.header.state_block_address, self.state.state_block.into());
+    }
+
+    /// Queue a freelist head flush.
+    ///
+    /// This queues a new transaction flushing the freelist head.
+    fn queue_freelist_head_flush(&mut self) {
+        // Start with an all-null cluster buffer.
+        let mut buf = Box::new([0; disk::SECTOR_SIZE]);
+
+        // Write every pointer of the freelist into the buffer.
+        for (n, i) in self.free.iter().enumerate() {
+            LittleEndian::write(&mut buf[cluster::POINTER_SIZE * i], i);
+        }
+
+        // Checksum the non-checksum part of the buffer, and write it at the start of the buffer.
+        LittleEndian::write(&mut buf, self.checksum(&buf[2..]));
+
+        // Queue the write of the updated buffer.
+        self.disk.queue(self.state.state_block.freelist_head, buf);
+    }
+
     /// Queue a pop from the freelist.
     ///
     /// This adds a new transaction to the cache pipeline, which will pop from the top of the
     /// freelist and return the result.
     fn queue_freelist_pop(&mut self) -> Result<cluster::Pointer, Error> {
         // Pop from the metacluster.
-        if let Some(cluster) = self.freelist_head.free.pop() {
+        if let Some(cluster) = self.state.freelist.pop() {
             if self.freelist.head.free.is_empty() {
                 // The head metacluster is exhausted, so we load the next metacluster (specified to be
                 // the last pointer in the metacluster), i.e. `cluster`. The old metacluster is then
                 // used as the popped cluster.
                 mem::swap(&mut self.state.state_block.cluster, &mut cluster);
-                self.state.freelist_head.update(self.disk.read(self.state.freelist_head.cluster)?);
+                self.state.load_freelist(self.disk.read(self.state_block.freelist_head)?);
 
                 // We've updated the state block, so we queue a flush to the disk.
                 self.queue_state_block_flush();
@@ -120,7 +153,7 @@ impl<D: Disk> Manager<D> {
     /// This adds a new transaction to the cache pipeline, which will push some free cluster to the
     /// top of the freelist.
     fn queue_freelist_push(&mut self, cluster: cluster::Pointer) -> Result<(), Error> {
-        if self.state.freelist_head.free.len() == cluster::SIZE / cluster::POINTER_SIZE {
+        if self.state.freelist.len() == cluster::SIZE / cluster::POINTER_SIZE {
             // The freelist head is full, and therefore we use following algorithm:
             //
             // 1. Create a new metacluster at `cluster`.
@@ -128,9 +161,9 @@ impl<D: Disk> Manager<D> {
             // 3. Queue a flush.
 
             // Clear the in-memory freelist head mirror.
-            self.state.freelist_head.free.clear();
+            self.state.freelist.clear();
             // Put the link to the old freelist head into the new metacluster.
-            self.state.freelist_head.push(state_block.freelist_head);
+            self.state.freelist.push(state_block.freelist_head);
 
             // Update the freelist head pointer to point to the new metacluster.
             self.state.state_block.freelist_head = cluster;
@@ -147,7 +180,7 @@ impl<D: Disk> Manager<D> {
             // There is space for more clusters in the head metacluster.
 
             // Push the cluster pointer to the freelist head.
-            self.state.freelist_head.free.push(cluster);
+            self.state.freelist.push(cluster);
             // Queue a flush of the new freelist head.
             self.queue_freelist_head_flush();
 
