@@ -144,7 +144,17 @@ impl<D: Disk> Cached<D> {
     /// Commit the transactions in the pipeline to the cache.
     ///
     /// This commits the sectors and data given in the pipeline in the specified order enforcing
-    /// consistency with respect to the flush order.
+    /// consistency with respect to the flush order. To understand what this means, one must see
+    /// writes as a function from a valid state to another together with the constraint that
+    /// another function is applied prior to that. In other words, it does not enforce that they're
+    /// written sequentially — or even written at all. Transactions can be forwarded backwards and
+    /// merged with other transactions, but this should not leave the system inconsistent, since
+    /// the _ordering_ is still enforced.
+    ///
+    /// More formally, we can think of the pipeline as a totally ordered set. When it is committed,
+    /// every transaction is put into totally ordered set of transactions, such that the
+    /// transactions preserving their order in the pipeline. If two transactions "collide" (are
+    /// writing to the same sector), the newest one is picked and the old one is thrown away.
     pub fn commit(&mut self) {
         if Some((first_sector, first_buf)) = writes.next() {
             // Write the first block which has no dependencies.
