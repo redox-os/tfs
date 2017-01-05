@@ -94,6 +94,19 @@ impl<D: Disk> Manager<D> {
         }
     }
 
+    /// Compress some data based on the compression configuration option.
+    ///
+    /// This compresses `source` into `target` based on the chosen configuration method, defined in
+    /// the state block.
+    fn compress(&self, source: &[u8], target: &mut Vec<u8>) {
+        match self.state.state_block.compression_algorithm {
+            // Memcpy as a compression algorithm!!!11!
+            CompressionAlgorithm::Identity => target.extend_from_slice(source),
+            // Compress via LZ4.
+            CompressionAlgorithm::Lz4 => lz4_compress::compress(source, target),
+        }
+    }
+
     /// Queue a state block flush.
     ///
     /// This queues a new transaction flushing the state block.
