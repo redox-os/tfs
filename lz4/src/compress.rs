@@ -254,17 +254,24 @@ impl<'a> Encoder<'a> {
     }
 }
 
+/// Compress all bytes of `input` into `output`.
+pub fn compress_into(input: &[u8], output: &mut Vec<u8>) {
+    Encoder {
+        input: input,
+        output: output,
+        cur: 0,
+        dict: [!0; DICTIONARY_SIZE],
+    }.complete();
+
+    vec
+}
+
 /// Compress all bytes of `input`.
 pub fn compress(input: &[u8]) -> Vec<u8> {
     // In most cases, the compression won't expand the size, so we set the input size as capacity.
     let mut vec = Vec::with_capacity(input.len());
 
-    Encoder {
-        input: input,
-        output: &mut vec,
-        cur: 0,
-        dict: [!0; DICTIONARY_SIZE],
-    }.complete();
+    compress_into(input, &mut vec);
 
     vec
 }

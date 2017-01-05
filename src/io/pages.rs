@@ -10,6 +10,18 @@ enum Error {
     ///
     /// This is the equivalent to OOM, but with disk space.
     OutOfClusters,
+    /// The checksum of the data and the provided checksum does not match.
+    ///
+    /// This indicates some form of data corruption.
+    ChecksumMismatch,
+    /// The compressed data is invalid and cannot be decompressed.
+    ///
+    /// Multiple reasons exists for this to happen:
+    ///
+    /// 1. The compression configuration option has been changed without recompressing clusters.
+    /// 2. Silent data corruption occured, and did the unlikely thing to has the right checksum.
+    /// 3. There is a bug in compression or decompression.
+    InvalidCompression,
     /// A disk error.
     Disk(disk::Error),
 }
@@ -103,8 +115,19 @@ impl<D: Disk> Manager<D> {
             // Memcpy as a compression algorithm!!!11!
             CompressionAlgorithm::Identity => target.extend_from_slice(source),
             // Compress via LZ4.
-            CompressionAlgorithm::Lz4 => lz4_compress::compress(source, target),
+            CompressionAlgorithm::Lz4 => lz4_compress::compress_into(source, target),
         }
+    }
+
+    fn decompress(&self, source: &[u8], target: &mut Vec<u8>) -> Result<(), Error> {
+        match self.state.state_block.compression_algorithm {
+            // Memcpy as a compression algorithm!!!11!
+            CompressionAlgorithm::Identity => target.extend_from_slice(source),
+            // Decompress from LZ4.
+            CompressionAlgorithm::Lz4 => lz4_compress::decompress_from(source, target)?,
+        }
+
+        Ok(())
     }
 
     /// Queue a state block flush.

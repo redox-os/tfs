@@ -1,7 +1,32 @@
 //! The decompression algorithm.
 
-use std::io;
+use std::{fmt, error};
 use byteorder::{LittleEndian, ByteOrder};
+
+/// An error representing invalid compressed data.
+#[derive(Debug)]
+struct Error {
+    /// Expected another byte, but none found.
+    ExpectedAnotherByte,
+    /// Deduplication offset out of bounds (not in buffer).
+    OffsetOutOfBounds,
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.description());
+    }
+}
+
+impl error::Error for Error {
+    fn description(&self) -> &str {
+        match self {
+            &Error::ExpectedAnotherByte => "Expected another byte, found none.",
+            &Error::OffsetOutOfBounds => "The offset to copy is not contained in the \
+                                                      decompressed buffer."
+        }
+    }
+}
 
 /// A LZ4 decoder.
 ///
@@ -23,11 +48,11 @@ struct Decoder<'a> {
 impl<'a> Decoder<'a> {
     /// Internal (partial) function for `take`.
     #[inline]
-    fn take_imp(input: &mut &'a [u8], n: usize) -> io::Result<&'a [u8]> {
+    fn take_imp(input: &mut &'a [u8], n: usize) -> Result<&'a [u8], Error> {
         // Check if we have enough bytes left.
         if input.len() < n {
             // No extra bytes. This is clearly not expected, so we return an error.
-            Err(io::Error::new(io::ErrorKind::InvalidData, "Expected another byte, found none."))
+            Err(Error::ExpectedAnotherByte)
         } else {
             // Take the first n bytes.
             let res = Ok(&input[..n]);
@@ -40,7 +65,7 @@ impl<'a> Decoder<'a> {
     }
 
     /// Pop n bytes from the start of the input stream.
-    fn take(&mut self, n: usize) -> io::Result<&[u8]> {
+    fn take(&mut self, n: usize) -> Result<&[u8], Error> {
         Self::take_imp(&mut self.input, n)
     }
 
@@ -83,7 +108,7 @@ impl<'a> Decoder<'a> {
     /// is encoded to _255 + 255 + 255 + 4 = 769_. The bytes after the first 4 is ignored, because
     /// 4 is the first non-0xFF byte.
     #[inline]
-    fn read_integer(&mut self) -> io::Result<usize> {
+    fn read_integer(&mut self) -> Result<usize, Error> {
         // We start at zero and count upwards.
         let mut n = 0;
         // If this byte takes value 255 (the maximum value it can take), another byte is read
@@ -102,7 +127,7 @@ impl<'a> Decoder<'a> {
 
     /// Read a little-endian 16-bit integer from the input stream.
     #[inline]
-    fn read_u16(&mut self) -> io::Result<u16> {
+    fn read_u16(&mut self) -> Result<u16, Error> {
         // We use byteorder to read an u16 in little endian.
         Ok(LittleEndian::read_u16(self.take(2)?))
     }
@@ -117,7 +142,7 @@ impl<'a> Decoder<'a> {
     /// 1. An LSIC integer extension to the literals length as defined by the first part of the
     ///    token, if it takes the highest value (15).
     /// 2. The literals themself.
-    fn read_literal_section(&mut self) -> io::Result<()> {
+    fn read_literal_section(&mut self) -> Result<(), Error> {
         // The higher token is the literals part of the token. It takes a value from 0 to 15.
         let mut literal = (self.token >> 4) as usize;
         // If the initial value is 15, it is indicated that another byte will be read and added to
@@ -146,7 +171,7 @@ impl<'a> Decoder<'a> {
     ///    in the decoded buffer and copy.
     /// 2. An LSIC integer extension to the duplicate length as defined by the first part of the
     ///    token, if it takes the highest value (15).
-    fn read_duplicate_section(&mut self) -> io::Result<()> {
+    fn read_duplicate_section(&mut self) -> Result<(), Error> {
         // Now, we will obtain the offset which we will use to copy from the output. It is an
         // 16-bit integer.
         let offset = self.read_u16()?;
@@ -180,8 +205,7 @@ impl<'a> Decoder<'a> {
 
             Ok(())
         } else {
-            Err(io::Error::new(io::ErrorKind::InvalidData, "The offset to copy is not contained in \
-                               the decompressed buffer."))
+            Err(Error::OffsetOutOfBounds)
         }
     }
 
@@ -205,7 +229,7 @@ impl<'a> Decoder<'a> {
     /// at position $a + 4$ and appended to the output buffer. Note that this copy can be
     /// overlapping.
     #[inline]
-    fn complete(&mut self) -> io::Result<()> {
+    fn complete(&mut self) -> Result<(), Error> {
         // Exhaust the decoder by reading and decompressing all blocks until the remaining buffer
         // is empty.
         while !self.input.is_empty() {
@@ -228,17 +252,24 @@ impl<'a> Decoder<'a> {
     }
 }
 
-/// Decompress all bytes of `input`.
-pub fn decompress(input: &[u8]) -> io::Result<Vec<u8>> {
-    // Allocate a vector to contain the decompressed stream.
-    let mut vec = Vec::with_capacity(4096);
-
+/// Decompress all bytes of `input` into `output`.
+pub fn decompress_into(input: &[u8], output: &mut Vec<u8>) -> Result<(), Error> {
     // Decode into our vector.
     Decoder {
         input: input,
-        output: &mut vec,
+        output: &mut output,
         token: 0,
     }.complete()?;
+
+    Ok(())
+}
+
+/// Decompress all bytes of `input`.
+pub fn decompress(input: &[u8]) -> Result<Vec<u8>, Error> {
+    // Allocate a vector to contain the decompressed stream.
+    let mut vec = Vec::with_capacity(4096);
+
+    decompress_into(input, &mut vec)?;
 
     Ok(vec)
 }
