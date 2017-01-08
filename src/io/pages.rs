@@ -4,6 +4,13 @@
 //! non-obviously, since clusters can hold more than one page at once (compression). Every cluster
 //! will maximize the number of pages held and when it's filled up, a new cluster will be fetched.
 
+/// The size (in bytes) of the general cluster header, shared by data clusters and metaclusters.
+const GENERAL_CLUSTER_HEADER: usize = 2;
+/// The size (in bytes) of the metacluster header.
+///
+/// This includes the general cluster header.
+const METACLUSTER_HEADER: usize = GENERAL_CLUSTER_HEADER + 2;
+
 /// A page management error.
 enum Error {
     /// No clusters left in the freelist.
@@ -119,6 +126,10 @@ impl<D: Disk> Manager<D> {
         }
     }
 
+    /// Decompress some data based on the compression configuration option.
+    ///
+    /// This decompresses `source` into `target` based on the chosen configuration method, defined
+    /// in the state block.
     fn decompress(&self, source: &[u8], target: &mut Vec<u8>) -> Result<(), Error> {
         match self.state.state_block.compression_algorithm {
             // Memcpy as a compression algorithm!!!11!
@@ -146,7 +157,7 @@ impl<D: Disk> Manager<D> {
 
         // Write every pointer of the freelist into the buffer.
         for (n, i) in self.free.iter().enumerate() {
-            LittleEndian::write(&mut buf[cluster::POINTER_SIZE * i], i);
+            LittleEndian::write(&mut buf[cluster::POINTER_SIZE * i + METACLUSTER_HEADER..], i);
         }
 
         // Checksum the non-checksum part of the buffer, and write it at the start of the buffer.
