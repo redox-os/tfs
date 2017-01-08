@@ -68,7 +68,7 @@ impl Range {
         //     - Shift 32 bits downwards (equivalent to floored division by the maximal
         //       unnormalized probability).
         // - Cast back to 32-bit integer truncating only 0s because of the above bit shift.
-        let mut len_0 = ((len as u64 * pr_0 as u64 + 0x7FFFFFFF) >> 32) as u32;
+        let mut len_0 = ((len as u64 * pr_0 as u64 + 0x80000000) >> 32) as u32;
 
         // Normalize len_0 to avoid zero intervals.
         if len_0 == 0 {
@@ -84,6 +84,9 @@ impl Range {
             len_0 = len - 1;
         }
 
+        debug_assert!(len_0 < len, "The length of the left subrange must be smaller than the \
+                      current range's length.");
+
         if bit {
             // The bit was 1.
 
@@ -95,19 +98,16 @@ impl Range {
             //                 This is the new range
             self.len   -= len_0;
             self.start += len_0;
-
-            // It's not exhausted if the length is stil above one.
-            self.len > 1
         } else {
             // The bit was 0.
 
             // The start of the range is fixed, but update the length of the range.
             self.len = len_0;
-
-            // We do the same as above, but for microoptimization we use len_0 instead as it could
-            // have been register allocated.
-            len_0 > 1
         }
+
+
+        // It's not exhausted if the length is stil above one.
+        self.len > 1
     }
 
     /// Read a bit from the range.
@@ -115,39 +115,35 @@ impl Range {
     /// This reads the top bit (first written bit) with probability `pr_0` from the range, and
     /// updates the range such that the second bit is the new first (similar to `pop` but FIFO).
     ///
+    /// `pr_0` must not be 0xFFFFFFFF or 0.
+    ///
     /// The probability `pr_0` **must** match the probability given when the bit was written into
     /// the range.
     ///
     /// `None` is returned if the range is exhausted and no more bits are stored in the range.
     fn read(&mut self, pr_0: u32) -> Option<bool> {
         debug_assert!(self.len != 0, "Zero-sized ranges are invalid.");
+        debug_assert!(pr_0 != 0, "Pr(0) can't be 0.");
+        debug_assert!(pr_0 != !0, "Pr(0) can't be 1.");
 
         if self.len == !0 {
             // The range cannot contain more information, so no more bits can be extracted from
             // this range.
             None
         } else {
-            debug_assert!(self.len != 0, "Zero-sized ranges are invalid.");
-
-            // Construct the left half subrange of the full range according to the given
-            // probability of 0 occuring.
-            let mut left_half = Range::full();
-            left_half.write(false, pr_0);
-
-            // Determine if the start false on the left or right half.
-            if self.start < left_half.len {
+            // Determine if the start false on the left or right half (simply compare to the
+            // probability).
+            if self.start < pr_0 {
                 // The bit is 0.
 
                 // Rescale the length to get the left superrange:
                 //
-                //     [ full range           ]
-                //         [ rescaled range ]
-                //         [ left ][  right ]
+                //     [ rescaled range ]
+                //     [ left ][  right ]
                 //
-                // The left range is `left_half`, which is relative to the full range. Now, we
-                // divide by the size of this range, but we double the width to get the desired
-                // precision.
-                self.len = (((self.len as u64) << 32) / left_half.len as u64) as u32;
+                // The left range is of size `pr_0`. Now, we divide by this number, but we double
+                // the width to get the desired precision.
+                self.len = (((self.len as u64) << 32) / pr_0 as u64) as u32;
 
                 // The start of the range is fixed, because the read bit is zer.
 
@@ -155,15 +151,16 @@ impl Range {
             } else {
                 // The bit is 1.
 
-                // Negate the range to get the right half of the range.
-                let right_half = !0 - left_half.len;
-                // We repeat the same as above conditional.
-                self.len = (((self.len as u64) << 32) / right_half as u64) as u32;
+                // Negate the probability to get Pr(1).
+                let pr_1 = !0 - pr_0;
+                // We repeat the same as above conditional, except that we use `pr_1` instead of
+                // `pr_0`.
+                self.len = (((self.len as u64) << 32) / pr_1 as u64) as u32;
 
                 // Subtract the length of the left half to "shift" the range towards the left in
                 // order to complete the transformation. This means that the new offset is the
                 // start of the right range.
-                self.start -= left_half.len;
+                self.start -= pr_0;
 
                 Some(true)
             }
@@ -183,12 +180,13 @@ mod tests {
         range.write(true, 2999);
         range.write(false, 5000000000);
         range.write(false, 50000000);
-        assert!(range.write(true, 333333332999));
+        range.write(true, 333333332999);
 
         assert!( range.read(5000000).unwrap());
         assert!( range.read(2999).unwrap());
         assert!(!range.read(5000000000).unwrap());
         assert!(!range.read(50000000).unwrap());
+        assert!( range.read(333333332999).unwrap());
     }
 
     #[test]
@@ -205,5 +203,29 @@ mod tests {
         }
 
         assert_eq!(range.read(500), None);
+    }
+
+    #[test]
+    fn balanced_ones() {
+        let mut range = Range::full();
+
+        while range.write(true, 0x80000000) {
+            println!("start = {:x}", range.start);
+            println!("len   = {:x}", range.len);
+        }
+
+            println!("start = {:x}", range.start);
+            println!("len   = {:x}", range.len);
+
+        assert_eq!(range.start, 0xFFFFFFFF);
+    }
+
+    #[test]
+    fn balanced_zeros() {
+        let mut range = Range::full();
+
+        while range.write(false, 0x80000000) {}
+
+        assert_eq!(range.start, 0);
     }
 }
