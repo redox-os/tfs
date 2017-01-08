@@ -22,7 +22,7 @@
 ///
 /// As such, the efficiency depends entirely on the predictor, and the only theoretical bound that
 /// exists is the state space.
-struct Range {
+pub struct Range {
     /// The start of the range.
     start: u32,
     /// The length of the range, minus one.
@@ -34,7 +34,7 @@ struct Range {
 
 impl Range {
     /// Create a full size range.
-    fn full() -> Range {
+    pub fn full() -> Range {
         Range {
             start: 0,
             len_minus_one: !0,
@@ -51,7 +51,7 @@ impl Range {
     /// and 0 corresponds to 0.
     ///
     /// The returned boolean is true if there is space for more bits.
-    fn write(&mut self, bit: bool, pr_0: u32) -> bool {
+    pub fn write(&mut self, bit: bool, pr_0: u32) -> bool {
         // Fetch the length for performance reasons.
         let len_minus_one = self.len_minus_one;
 
@@ -118,7 +118,7 @@ impl Range {
     /// the range.
     ///
     /// `None` is returned if the range is exhausted and no more bits are stored in the range.
-    fn read(&mut self, pr_0: u32) -> Option<bool> {
+    pub fn read(&mut self, pr_0: u32) -> Option<bool> {
         debug_assert!(pr_0 != 0, "Pr(0) can't be 0.");
         debug_assert!(pr_0 != !0, "Pr(0) can't be 1.");
 
@@ -174,15 +174,15 @@ mod tests {
 
         range.write(true, 5000000);
         range.write(true, 2999);
-        range.write(false, 5000000000);
+        range.write(false, 500000);
         range.write(false, 50000000);
-        range.write(true, 333333332999);
+        range.write(true, 333333);
 
         assert!( range.read(5000000).unwrap());
         assert!( range.read(2999).unwrap());
-        assert!(!range.read(5000000000).unwrap());
+        assert!(!range.read(500000).unwrap());
         assert!(!range.read(50000000).unwrap());
-        assert!( range.read(333333332999).unwrap());
+        assert!( range.read(333333).unwrap());
     }
 
     #[test]
@@ -194,7 +194,7 @@ mod tests {
             n += 1;
         }
 
-        for i in 0..n {
+        for _ in 0..n {
             assert_eq!(range.read(500), Some(true));
         }
 
