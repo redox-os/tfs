@@ -25,8 +25,11 @@
 struct Range {
     /// The start of the range.
     start: u32,
-    /// The length of the range.
-    len: u32,
+    /// The length of the range, minus one.
+    ///
+    /// The reason it is one below the logical size is that we need to be able to represent the
+    /// full range.
+    len_minus_one: u32,
 }
 
 impl Range {
@@ -34,7 +37,7 @@ impl Range {
     fn full() -> Range {
         Range {
             start: 0,
-            len: !0,
+            len_minus_one: !0,
         }
     }
 
@@ -50,10 +53,7 @@ impl Range {
     /// The returned boolean is true if there is space for more bits.
     fn write(&mut self, bit: bool, pr_0: u32) -> bool {
         // Fetch the length for performance reasons.
-        let len = self.len;
-
-        debug_assert!(len > 1, "The current length of the range is too small to contain more \
-                      bits, please renormalize/flush.");
+        let len_minus_one = self.len_minus_one;
 
         // Calculate the new length of the left subrange (i.e. the length of the range if the bit
         // is 0):
@@ -68,7 +68,7 @@ impl Range {
         //     - Shift 32 bits downwards (equivalent to floored division by the maximal
         //       unnormalized probability).
         // - Cast back to 32-bit integer truncating only 0s because of the above bit shift.
-        let mut len_0 = ((len as u64 * pr_0 as u64 + 0x80000000) >> 32) as u32;
+        let mut len_0 = (((len_minus_one as u64 + 1) * pr_0 as u64 + 0x80000000) >> 32) as u32;
 
         // Normalize len_0 to avoid zero intervals.
         if len_0 == 0 {
@@ -76,38 +76,35 @@ impl Range {
             // empty, and thus not representable. For this reason, we round up to 1 just to make
             // the subrange representable.
             len_0 = 1;
-        } else if len_0 == len {
+        } else if len_0 - 1 == len_minus_one {
             // len_0 rounded up to the length of the current range. This means that the right
             // subrange for bit 1 will be empty, and thus not representable. For this reason, we
             // leap to a range which is one unit shorter than the current one, leaving a right
             // subrange of length 1.
-            len_0 = len - 1;
+            len_0 = len_minus_one;
         }
-
-        debug_assert!(len_0 < len, "The length of the left subrange must be smaller than the \
-                      current range's length.");
 
         if bit {
             // The bit was 1.
 
             // Refine the range to the second half:
             //
-            //     [            self.len           ]
-            //     [  len_0  ][  self.len - len_0  ]
-            //                \~~~~~~~~~~~~~~~~~~~~/
-            //                 This is the new range
-            self.len   -= len_0;
+            //     [            len           ]
+            //     [  len_0  ][  len - len_0  ]
+            //                \~~~~~~~~~~~~~~~/
+            //              This is the new range
+            self.len_minus_one -= len_0;
             self.start += len_0;
         } else {
             // The bit was 0.
 
             // The start of the range is fixed, but update the length of the range.
-            self.len = len_0;
+            self.len_minus_one = len_0 - 1;
         }
 
 
         // It's not exhausted if the length is stil above one.
-        self.len > 1
+        self.len_minus_one != 0
     }
 
     /// Read a bit from the range.
@@ -122,11 +119,10 @@ impl Range {
     ///
     /// `None` is returned if the range is exhausted and no more bits are stored in the range.
     fn read(&mut self, pr_0: u32) -> Option<bool> {
-        debug_assert!(self.len != 0, "Zero-sized ranges are invalid.");
         debug_assert!(pr_0 != 0, "Pr(0) can't be 0.");
         debug_assert!(pr_0 != !0, "Pr(0) can't be 1.");
 
-        if self.len == !0 {
+        if self.len_minus_one == !0 {
             // The range cannot contain more information, so no more bits can be extracted from
             // this range.
             None
@@ -143,7 +139,7 @@ impl Range {
                 //
                 // The left range is of size `pr_0`. Now, we divide by this number, but we double
                 // the width to get the desired precision.
-                self.len = (((self.len as u64) << 32) / pr_0 as u64) as u32;
+                self.len_minus_one = (((self.len_minus_one as u64 + 1) << 32) / pr_0 as u64) as u32 - 1;
 
                 // The start of the range is fixed, because the read bit is zer.
 
@@ -155,7 +151,7 @@ impl Range {
                 let pr_1 = !0 - pr_0;
                 // We repeat the same as above conditional, except that we use `pr_1` instead of
                 // `pr_0`.
-                self.len = (((self.len as u64) << 32) / pr_1 as u64) as u32;
+                self.len_minus_one = (((self.len_minus_one as u64 + 1) << 32) / pr_1 as u64) as u32 - 1;
 
                 // Subtract the length of the left half to "shift" the range towards the left in
                 // order to complete the transformation. This means that the new offset is the
@@ -209,13 +205,7 @@ mod tests {
     fn balanced_ones() {
         let mut range = Range::full();
 
-        while range.write(true, 0x80000000) {
-            println!("start = {:x}", range.start);
-            println!("len   = {:x}", range.len);
-        }
-
-            println!("start = {:x}", range.start);
-            println!("len   = {:x}", range.len);
+        while range.write(true, 0x80000000) {}
 
         assert_eq!(range.start, 0xFFFFFFFF);
     }
@@ -227,5 +217,14 @@ mod tests {
         while range.write(false, 0x80000000) {}
 
         assert_eq!(range.start, 0);
+    }
+
+    #[test]
+    fn unbalanced_ones() {
+        let mut range = Range::full();
+
+        while range.write(true, 30482) {}
+
+        assert_eq!(range.start, 0xFFFFFFFF);
     }
 }
