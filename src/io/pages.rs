@@ -24,6 +24,13 @@ quick_error! {
         ///
         /// This indicates some form of data corruption.
         ChecksumMismatch {
+            cluster: cluster::Pointer,
+            /// The checksum of the data.
+            expected: u16,
+            /// The expected/stored value of the checksum.
+            found: u16,
+        } {
+            display("Mismatching checksums in cluster {} - expected {:x}, found {:x}.", cluster, expected, found)
             description("Mismatching checksum.")
         }
         /// The compressed data is invalid and cannot be decompressed.
@@ -34,6 +41,9 @@ quick_error! {
         /// 2. Silent data corruption occured, and did the unlikely thing to has the right checksum.
         /// 3. There is a bug in compression or decompression.
         InvalidCompression {
+            cluster: cluster::Pointer,
+        } {
+            display("Unable to decompress data from cluster {}.", cluster)
             description("Unable to decompress data.")
         }
         /// A disk error.

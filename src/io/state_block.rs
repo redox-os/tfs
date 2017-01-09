@@ -22,7 +22,13 @@ quick_error! {
             description("Invalid compression algorithm option.")
         }
         /// The checksums doesn't match.
-        InvalidChecksum {
+        ChecksumMismatch {
+            /// The checksum of the data.
+            expected: u16,
+            /// The expected/stored value of the checksum.
+            found: u16,
+        } {
+            display("Mismatching checksums in the state block - expected {:x}, found {:x}.", expected, found)
             description("Mismatching checksum.")
         }
     }
@@ -106,8 +112,13 @@ impl StateBlock {
         let checksum_algorithm = ChecksumAlgorithm::try_from(LittleEndian::read(buf[16..18]))?;
 
         // Make sure that the checksum of the state block matches the 4 byte number following it.
-        if checksum_algorithm.hash(&buf[..40]) != LittleEndian::read(&buf[40..44]) {
-            return Err(Error::InvalidChecksum);
+        let expected = LittleEndian::read(&buf[40..44]);
+        let found = checksum_algorithm.hash(&buf[..40]);
+        if expected != found {
+            return Err(Error::ChecksumMismatch {
+                expected: expected,
+                found: found,
+            });
         }
 
         StateBlock {
