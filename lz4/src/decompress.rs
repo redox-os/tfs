@@ -1,29 +1,18 @@
 //! The decompression algorithm.
 
-use std::{fmt, error};
 use byteorder::{LittleEndian, ByteOrder};
 
-/// An error representing invalid compressed data.
-#[derive(Debug)]
-struct Error {
-    /// Expected another byte, but none found.
-    ExpectedAnotherByte,
-    /// Deduplication offset out of bounds (not in buffer).
-    OffsetOutOfBounds,
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.description());
-    }
-}
-
-impl error::Error for Error {
-    fn description(&self) -> &str {
-        match self {
-            &Error::ExpectedAnotherByte => "Expected another byte, found none.",
-            &Error::OffsetOutOfBounds => "The offset to copy is not contained in the \
-                                                      decompressed buffer."
+quick_error! {
+    /// An error representing invalid compressed data.
+    #[derive(Debug)]
+    pub enum Error {
+        /// Expected another byte, but none found.
+        ExpectedAnotherByte {
+            description("Expected another byte, found none.")
+        }
+        /// Deduplication offset out of bounds (not in buffer).
+        OffsetOutOfBounds {
+            description("The offset to copy is not contained in the decompressed buffer.")
         }
     }
 }
@@ -257,7 +246,7 @@ pub fn decompress_into(input: &[u8], output: &mut Vec<u8>) -> Result<(), Error> 
     // Decode into our vector.
     Decoder {
         input: input,
-        output: &mut output,
+        output: output,
         token: 0,
     }.complete()?;
 

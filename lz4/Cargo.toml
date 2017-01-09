@@ -11,3 +11,4 @@ exclude = ["target", "CHANGELOG.md", "Cargo.lock"]
 
 [dependencies]
 byteorder = "0.5"
+quick-error = "1"

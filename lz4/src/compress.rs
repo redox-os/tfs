@@ -262,8 +262,6 @@ pub fn compress_into(input: &[u8], output: &mut Vec<u8>) {
         cur: 0,
         dict: [!0; DICTIONARY_SIZE],
     }.complete();
-
-    vec
 }
 
 /// Compress all bytes of `input`.

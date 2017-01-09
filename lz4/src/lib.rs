@@ -5,6 +5,8 @@
 #![warn(missing_docs)]
 
 extern crate byteorder;
+#[macro_use]
+extern crate quick_error;
 
 mod decompress;
 mod compress;
