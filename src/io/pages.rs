@@ -11,26 +11,38 @@ const GENERAL_CLUSTER_HEADER: usize = 2;
 /// This includes the general cluster header.
 const METACLUSTER_HEADER: usize = GENERAL_CLUSTER_HEADER + 2;
 
-/// A page management error.
-enum Error {
-    /// No clusters left in the freelist.
-    ///
-    /// This is the equivalent to OOM, but with disk space.
-    OutOfClusters,
-    /// The checksum of the data and the provided checksum does not match.
-    ///
-    /// This indicates some form of data corruption.
-    ChecksumMismatch,
-    /// The compressed data is invalid and cannot be decompressed.
-    ///
-    /// Multiple reasons exists for this to happen:
-    ///
-    /// 1. The compression configuration option has been changed without recompressing clusters.
-    /// 2. Silent data corruption occured, and did the unlikely thing to has the right checksum.
-    /// 3. There is a bug in compression or decompression.
-    InvalidCompression,
-    /// A disk error.
-    Disk(disk::Error),
+quick_error! {
+    /// A page management error.
+    enum Error {
+        /// No clusters left in the freelist.
+        ///
+        /// This is the equivalent to OOM, but with disk space.
+        OutOfClusters {
+            description("Out of free clusters.")
+        }
+        /// The checksum of the data and the provided checksum does not match.
+        ///
+        /// This indicates some form of data corruption.
+        ChecksumMismatch {
+            description("Mismatching checksum.")
+        }
+        /// The compressed data is invalid and cannot be decompressed.
+        ///
+        /// Multiple reasons exists for this to happen:
+        ///
+        /// 1. The compression configuration option has been changed without recompressing clusters.
+        /// 2. Silent data corruption occured, and did the unlikely thing to has the right checksum.
+        /// 3. There is a bug in compression or decompression.
+        InvalidCompression {
+            description("Unable to decompress data.")
+        }
+        /// A disk error.
+        Disk(err: disk::Error) {
+            from()
+            description("Disk I/O error")
+            display("Disk I/O error: {}", err)
+        }
+    }
 }
 
 /// A state of a page manager.

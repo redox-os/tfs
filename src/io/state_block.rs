@@ -1,17 +1,31 @@
-/// A state block parsing error.
-enum Error {
-    /// Wrong password or corrupt state block.
-    WrongPassword,
-    /// Unknown or implementation-specific checksum algorithm.
-    UnknownChecksumAlgorithm,
-    /// Invalid checksum algorithm.
-    InvalidChecksumAlgorithm,
-    /// Unknown or implementation-specific compression algorithm.
-    UnknownCompressionAlgorithm,
-    /// Invalid compression algorithm.
-    InvalidCompressionAlgorithm,
-    /// The checksums doesn't match.
-    InvalidChecksum,
+quick_error! {
+    /// A state block parsing error.
+    enum Error {
+        /// Wrong password or corrupt state block.
+        WrongPassword {
+            description("Invalid password or corrupt salt.")
+        }
+        /// Unknown or implementation-specific checksum algorithm.
+        UnknownChecksumAlgorithm {
+            description("Unknown checksum algorithm option.")
+        }
+        /// Invalid checksum algorithm.
+        InvalidChecksumAlgorithm {
+            description("Invalid checksum algorithm option.")
+        }
+        /// Unknown or implementation-specific compression algorithm.
+        UnknownCompressionAlgorithm {
+            description("Unknown compression algorithm option.")
+        }
+        /// Invalid compression algorithm.
+        InvalidCompressionAlgorithm {
+            description("Invalid compression algorithm option.")
+        }
+        /// The checksums doesn't match.
+        InvalidChecksum {
+            description("Mismatching checksum.")
+        }
+    }
 }
 
 /// A checksum algorithm configuration option.

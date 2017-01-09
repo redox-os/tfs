@@ -97,6 +97,15 @@ How does whole-disk compression work?
     by collecting as many "pages" (virtual data blocks) into a "cluster"
     (allocation unit). By doing this, the pages can be read by simply
     decompressing the respective cluster.
+Why is ZMicro so slow? Will it affect the performance of TFS?
+    The reason ZMicro is so slow is because it works on a bit level, giving
+    excellent compression ratio on the cost of performance. This horribly slow
+    performance is paid back by the reduced number of writes. In fact, more
+    than 50% of the allocations with ZMicro will only write one sector, as
+    opposed to 3. Secondly, no matter how fast your disk is, it will not get
+    anywhere near the performance of ZMicro, because disk operations are
+    inheritly slow, and when put in perspective, the performance of the
+    compression is really unimportant.
 
 Resources on design
 -------------------

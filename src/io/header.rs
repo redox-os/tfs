@@ -30,41 +30,59 @@ const DEFAULT_DISK_HEADER: &'static [u8] = &[
     ConsistencyFlag::Uninitialized as u8, !ConsistencyFlag::Uninitialized as u8,
 ];
 
-/// A disk header reading error.
-enum Error {
-    /// The consistency flag is corrupt.
-    CorruptConsistencyFlag,
-    /// The cipher field is corrupt.
-    CorruptCipher,
-    /// The encryption parameters is corrupt.
-    CorruptEncryptionParameters,
-    /// The implementation ID is corrupt.
-    CorruptImplementationId,
-    /// The state block address is corrupt.
-    CorruptStateBlockAddress,
-    /// The version number is corrupt.
-    CorruptVersionNumber,
-    /// The version is incompatible with this implementation.
-    ///
-    /// The version number is given by some integer. If the higher half of the integer does not
-    /// match, the versions are incompatible and this error is returned.
-    IncompatibleVersion,
-    /// Unknown/unsupported (implementation-specific) cipher option.
-    UnknownCipher,
-    /// Invalid/nonexistent cipher option.
-    ///
-    /// Note that this is different from `UnknownCipher`, as it is necessarily invalid and not just
-    /// implementation-specific.
-    InvalidCipher,
-    /// Unknown consistency flag value.
-    UnknownConsistencyFlag,
-    /// Unknown format (not TFS).
-    UnknownFormat,
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), Error> {
-        write!(f, )
+quick_error! {
+    /// A disk header reading error.
+    enum Error {
+        /// Unknown format (not TFS).
+        UnknownFormat {
+            description("Unknown format (not TFS).")
+        }
+        /// The consistency flag is corrupt.
+        CorruptConsistencyFlag {
+            description("Corrupt consistency flag.")
+        }
+        /// The cipher field is corrupt.
+        CorruptCipher {
+            description("Corrupt cipher option.")
+        }
+        /// The encryption parameters is corrupt.
+        CorruptEncryptionParameters {
+            description("Corrupt encryption paramters.")
+        }
+        /// The implementation ID is corrupt.
+        CorruptImplementationId {
+            description("Corrupt implementation ID field.")
+        }
+        /// The state block address is corrupt.
+        CorruptStateBlockAddress {
+            description("Corrupt state block address.")
+        }
+        /// The version number is corrupt.
+        CorruptVersionNumber {
+            description("Corrupt version number.")
+        }
+        /// The version is incompatible with this implementation.
+        ///
+        /// The version number is given by some integer. If the higher half of the integer does not
+        /// match, the versions are incompatible and this error is returned.
+        IncompatibleVersion {
+            description("Incompatible version.")
+        }
+        /// Unknown/unsupported (implementation-specific) cipher option.
+        UnknownCipher {
+            description("Unknown cipher option.")
+        }
+        /// Invalid/nonexistent cipher option.
+        ///
+        /// Note that this is different from `UnknownCipher`, as it is necessarily invalid and not just
+        /// implementation-specific.
+        InvalidCipher {
+            description("Invalid cipher option.")
+        }
+        /// Unknown consistency flag value.
+        UnknownConsistencyFlag {
+            description("Unknown consistency flag.")
+        }
     }
 }
 

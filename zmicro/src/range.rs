@@ -127,7 +127,7 @@ impl Range {
             // this range.
             None
         } else {
-            // Determine if the start false on the left or right half (simply compare to the
+            // Determine if the start falls on the left or right half (simply compare to the
             // probability).
             if self.start < pr_0 {
                 // The bit is 0.

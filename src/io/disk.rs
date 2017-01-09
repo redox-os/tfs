@@ -10,17 +10,23 @@ type Sector = usize;
 /// The logical sector size.
 const SECTOR_SIZE: usize = 512;
 
-/// A disk I/O error.
-enum Error {
-    /// The read or write exceeded the address space of the disk.
-    ///
-    /// This is triggered when the sector read or written to does not exist.
-    OutOfBounds,
-    /// The sector is determined to be corrupted per the hardware checks.
-    ///
-    /// Most modern hard disks implement some form of consistency checks. If said check fails, this
-    /// error shall be returned.
-    SectorCorrupted,
+quick_error! {
+    /// A disk I/O error.
+    enum Error {
+        /// The read or write exceeded the address space of the disk.
+        ///
+        /// This is triggered when the sector read or written to does not exist.
+        OutOfBounds {
+            description("Disk sector past end of disk.")
+        }
+        /// The sector is determined to be corrupted per the hardware checks.
+        ///
+        /// Most modern hard disks implement some form of consistency checks. If said check fails, this
+        /// error shall be returned.
+        SectorCorrupted {
+            description("Corrupt disk sector.")
+        }
+    }
 }
 
 /// A storage device.
