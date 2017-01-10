@@ -230,17 +230,7 @@
         This metadata will not be described in the individual cluster format
         definitions.
 
-        \subsection{Data cluster format}
-        Each cluster has a header of \clusterheader bytes. The additional
-        fields are:
-
-        \begin{description}
-            \item [8-bit page counter] This field counts the number of pages
-                stored in this cluster.
-            \item [1 byte of implementation defined use] These are left to the
-                implementation.
-        \end{description}
-
+        \subsection{Data clusters}
         A data cluster contain up to \maxpagesincluster of \pagesize bytes
         blocks called ``pages''. The decompressed data (algorithm defined
         in~\ref{config:compression}) is the contained pages concatenated.
@@ -262,11 +252,7 @@
         \subsection{Meta-cluster format}
         \label{cluster:metacluster}
         The head of the freelist is a metacluster, which itself is a collection
-        of other free clusters.
-
-        A meta-cluster starts with a 2 byte implementation defined header.
-
-        This is followed by some number of 64-bit little-endian pointers to
+        of other free clusters. It stores 64-bit little-endian pointers to
         other free clusters.
 
         If any, the first pointer must point to another meta-cluster.
