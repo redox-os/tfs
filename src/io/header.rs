@@ -17,7 +17,7 @@ const DISK_HEADER_SIZE: usize = 4096;
 /// 2. A and B must have equal higher parts.
 const VERSION_NUMBER: u32 = 0;
 /// The magic number of images with partial TFS compatibility.
-const PARTIAL_COMPATIBILITY_MAGIC_NUMBER: &[u8] = b"TFS fmt~";
+const PARTIAL_COMPATIBILITY_MAGIC_NUMBER: &[u8] = b"~TFS fmt";
 /// The magic number of images with total TFS compatibility.
 const TOTAL_COMPATIBILITY_MAGIC_NUMBER: &[u8] = b"TFS fmt ";
 
