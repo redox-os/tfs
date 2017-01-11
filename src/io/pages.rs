@@ -6,8 +6,12 @@
 
 /// The size (in bytes) of the metacluster header.
 const METACLUSTER_HEADER: usize = 8;
-/// The size (in bytes) of the metacluster's non-checksum section.
+/// The size (in bytes) of the metacluster's non-header section.
 const METACLUSTER_SIZE: usize = disk::SECTOR - METACLUSTER_HEADER;
+/// The size (in bytes) of the data cluster header.
+const DATA_CLUSTER_HEADER: usize = 2;
+/// The size (in bytes) of the data cluster's non-header section.
+const DATA_CLUSTER_SIZE: usize = disk::SECTOR - DATA_CLUSTER_HEADER;
 
 quick_error! {
     /// A page management error.
@@ -69,6 +73,14 @@ struct State {
     /// The first element (if any) points to _another_ freelist chunk (a "metacluster"), which can
     /// be used to traverse to the next metacluster when needed.
     freelist: Vec<cluster::Pointer>,
+    /// The last allocated cluster.
+    last_cluster: cluster::Pointer,
+    /// The last allocated cluster's data decompressed.
+    ///
+    /// This is used for packing pages into the cluster, by appending the new page to this vector
+    /// and then compressing it to see if it fits into the cluster. If it fails to fit, the vector
+    /// is reset and a new cluster is allocated.
+    last_cluster_data: Vec<u8>,
 }
 
 /// The page manager.
@@ -116,6 +128,60 @@ impl<D: Disk> Manager<D> {
         self.state = self.committed_state.clone();
         // Revert the cache pipeline.
         self.disk.revert();
+    }
+
+    /// Allocate a page.
+    ///
+    /// This adds a transaction to the cache pipeline to allocate a page. It can be committed
+    /// through `.commit()`.
+    fn alloc(&mut self, buf: &[u8]) -> Result<Pointer, Error> {
+        // Allocate a buffer for constructing the cluster.
+        let mut cluster = vec![0; DATA_CLUSTER_HEADER];
+        // Extend the last allocated cluster with the new page.
+        self.state.last_cluster_data.extend_from_slice(buf);
+        // Compress the last allocated cluster.
+        self.compress(self.state.last_cluster_data, &mut cluster);
+
+        if cluster.len() <= disk::SECTOR_SIZE {
+            // The pages could fit in the cluster.
+
+            // Pad with zeros until the sector is full.
+            while cluster.len() != disk::SECTOR_SIZE {
+                cluster.push(0);
+            }
+
+            // Calculate and write the checksum.
+            LittleEndian::write(&mut cluster, self.checksum(cluster[DATA_CLUSTER_HEADER..]) as u16);
+            // Set the compression flag in the checksum field.
+            cluster[1] <<= 1;
+            cluster[1] |= 1;
+
+            // Queue the write of the recompress cluster.
+            self.state.queue(self.state.last_cluster, cluster.into_boxed_slice());
+        } else {
+            // Unable to fit the pages into the cluster.
+
+            // Truncate the unusable compressed buffer.
+            cluster.truncate(DATA_CLUSTER_HEADER);
+            // Extend the cluster with the buffer to allocate.
+            cluster.extend_from_slice(&buf);
+
+            // Calculate and write the checksum.
+            LittleEndian::write(&mut cluster, self.checksum(cluster[DATA_CLUSTER_HEADER..]) as u16);
+            // Set the compression flag in the checksum field to zero (i.e. uncompressed).
+            cluster[1] <<= 1;
+
+            // We cannot fit more into the last allocated cluster, so we clear it.
+            self.state.last_cluster_data.clear();
+            // Update it with the new given data.
+            self.state.last_cluster_data.extend_from_slice(&buf);
+
+            // Pop from the freelist and set this as the new last allocated cluster.
+            self.state.last_cluster = self.queue_freelist_pop()?;
+
+            // Queue a write to the new cluster.
+            self.disk.queue(self.state.last_cluster, cluster);
+        }
     }
 
     /// Calculate the checksum of some buffer, based on the user configuration.
