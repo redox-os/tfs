@@ -1,10 +1,6 @@
 quick_error! {
     /// A state block parsing error.
     enum Error {
-        /// Wrong password or corrupt state block.
-        WrongPassword {
-            description("Invalid password or corrupt salt.")
-        }
         /// Unknown or implementation-specific checksum algorithm.
         UnknownChecksumAlgorithm {
             description("Unknown checksum algorithm option.")
@@ -99,21 +95,13 @@ struct StateBlock {
 
 impl StateBlock {
     /// Parse a sequence of bytes.
-    fn parse(buf: &[u8]) -> Result<(), Error> {
-        // The zeros field is used for making sure that the decryption was successful. If it fails,
-        // the field should be uniformly distributed, and thus 2^-32 probability that the field is
-        // wrongly decrypted to zeros. However, if the password is correct, it should decrypt to
-        // the zeros. This is a simple form of MAC.
-        if &buf[..4] != &[0, 0, 0, 0] {
-            return Err(Error::WrongPassword);
-        }
-
+    fn decode(buf: &[u8]) -> Result<(), Error> {
         // Load the checksum algorithm config field.
-        let checksum_algorithm = ChecksumAlgorithm::try_from(LittleEndian::read(buf[16..18]))?;
+        let checksum_algorithm = ChecksumAlgorithm::try_from(LittleEndian::read(buf[0..2]))?;
 
-        // Make sure that the checksum of the state block matches the 4 byte number following it.
-        let expected = LittleEndian::read(&buf[40..44]);
-        let found = checksum_algorithm.hash(&buf[..40]);
+        // Make sure that the checksum of the state block matches the 4 byte field in the start.
+        let expected = LittleEndian::read(&buf[64..70]);
+        let found = checksum_algorithm.hash(&buf[..64]);
         if expected != found {
             return Err(Error::ChecksumMismatch {
                 expected: expected,
@@ -124,11 +112,32 @@ impl StateBlock {
         StateBlock {
             checksum_algorithm: checksum_algorithm,
             // Load the compression algorithm config field.
-            compression_algorithm: CompressionAlgorithm::try_from(LittleEndian::read(buf[18..20]))?,
+            compression_algorithm: CompressionAlgorithm::try_from(LittleEndian::read(buf[2..4]))?,
             // Load the freelist head pointer.
             freelist_head: LittleEndian::read(buf[32..40]),
             // Load the superpage pointer.
             superpage: LittleEndian::read(buf[40..48]),
         }
+    }
+
+    /// Encode the state block into a sector-sized buffer.
+    fn encode(&self) -> Box<[u8]> {
+        // Allocate a buffer to hold the data.
+        let mut vec = vec![0; disk::SECTOR_SIZE];
+
+        // Write the checksum algorithm.
+        LittleEndian::write(&mut vec[0..], self.checksum_algorithm as u16);
+        // Write the compression algorithm.
+        LittleEndian::write(&mut vec[2..], self.compression_algorithm as u16);
+        // Write the freelist head pointer.
+        LittleEndian::write(&mut vec[32..], self.freelist_head);
+        // Write the superpage pointer.
+        LittleEndian::write(&mut vec[40..], self.superpage);
+
+        // Calculate and store the checksum.
+        let cksum = self.checksum_algorithm.hash(&vec[..64]);
+        LittleEndian::write(&mut vec[64..], cksum);
+
+        vec.into_boxed_slice()
     }
 }
