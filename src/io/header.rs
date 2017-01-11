@@ -7,28 +7,19 @@
 ///
 /// This should be a multiple of the cluster size.
 const DISK_HEADER_SIZE: usize = 4096;
-/// The default disk header.
-const DEFAULT_DISK_HEADER: &'static [u8] = &[
-    // The magic number (`TFS fmt `).
-    b'T', b'F', b'S', b' ', b'f', b'm', b't', b' ',
-    // The version number.
-    0x00, 0x00, 0x00, 0x00,
-    0xFF, 0xFF, 0xFF, 0xFF,
-    // The implementation ID (`official`).
-     b'o',  b'f',  b'f',  b'i',  b'c',  b'i',  b'a',  b'l',
-    !b'o', !b'f', !b'f', !b'i', !b'c', !b'i', !b'a', !b'l',
-    // Encryption algorithm.
-    0x00, CompressionAlgorithm::Identity as u8,
-    0xFF, !CompressionAlgorithm::Identity as u8,
-    // Encryption parameters.
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-    // State block address (uninitialized).
-    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    // Consistency flag.
-    ConsistencyFlag::Uninitialized as u8, !ConsistencyFlag::Uninitialized as u8,
-];
+/// The current version number.
+///
+/// The versioning scheme divides this number into two parts. The 16 most significant bits identify
+/// breaking changes. For two version A to be able to read an image written by version B, two
+/// requirements must hold true:
+///
+/// 1. A must be greater than or equal to B.
+/// 2. A and B must have equal higher parts.
+const VERSION_NUMBER: u32 = 0;
+/// The magic number of images with partial TFS compatibility.
+const PARTIAL_COMPATIBILITY_MAGIC_NUMBER: &[u8] = b"TFS fmt~";
+/// The magic number of images with total TFS compatibility.
+const TOTAL_COMPATIBILITY_MAGIC_NUMBER: &[u8] = b"TFS fmt ";
 
 quick_error! {
     /// A disk header reading error.
@@ -48,10 +39,6 @@ quick_error! {
         /// The encryption parameters is corrupt.
         CorruptEncryptionParameters {
             description("Corrupt encryption paramters.")
-        }
-        /// The implementation ID is corrupt.
-        CorruptImplementationId {
-            description("Corrupt implementation ID field.")
         }
         /// The state block address is corrupt.
         CorruptStateBlockAddress {
@@ -87,6 +74,7 @@ quick_error! {
 }
 
 /// TFS magic number.
+#[derive(PartialEq, Eq, Clone, Copy)]
 enum MagicNumber {
     /// The image is partially compatible with the official TFS specification.
     PartialCompatibility,
@@ -94,7 +82,32 @@ enum MagicNumber {
     TotalCompatibility,
 }
 
+impl TryFrom<&[u8]> for MagicNumber {
+    type Err = Error;
+
+    fn from(string: &[u8]) -> Result<MagicNumber, Error> {
+        match string {
+            // Partial compatibility.
+            PARTIAL_COMPATIBILITY_MAGIC_NUMBER => Ok(MagicNumber::PartialCompatibility),
+            // Total compatibility.
+            TOTAL_COMPATIBILITY_MAGIC_NUMBER => Ok(MagicNumber::TotalCompatibility),
+            // Unknown format; abort.
+            _ => Err(Error::UnknownFormat),
+        }
+    }
+}
+
+impl Into<&'static [u8]> for MagicNumber {
+    fn into(self) -> &[u8] {
+        match self {
+            MagicNumber::TotalCompatibility => TOTAL_COMPATIBILITY_MAGIC_NUMBER,
+            MagicNumber::PartialCompatibility => PARTIAL_COMPATIBILITY_MAGIC_NUMBER,
+        }
+    }
+}
+
 /// Cipher option.
+#[derive(PartialEq, Eq, Clone, Copy)]
 enum Cipher {
     /// Disk encryption disabled.
     Identity = 0,
@@ -125,28 +138,27 @@ impl TryFrom<u16> for Cipher {
 /// The consistency flag defines the state of the disk, telling the user if it is in a consistent
 /// state or not. It is important for doing non-trivial things like garbage-collection, where the
 /// disk needs to enter an inconsistent state for a small period of time.
+#[derive(PartialEq, Eq, Clone, Copy)]
 enum ConsistencyFlag {
     /// The disk was properly closed and shut down.
-    Closed,
+    Closed = 0,
     /// The disk is active/was forcibly shut down.
-    StillActive,
+    StillActive = 1,
     /// The disk is in an inconsistent state.
     ///
     /// Proceed with caution.
-    Inconsistent,
+    Inconsistent = 2,
     /// The disk is uninitialized.
-    Uninitialized,
+    Uninitialized = 3,
 }
 
 /// The disk header.
-#[derive(Default)]
+#[derive(Default, PartialEq, Eq, Clone, Copy)]
 struct DiskHeader {
     /// The magic number.
     magic_number: MagicNumber,
     /// The version number.
     version_number: u32,
-    /// The implementation ID.
-    implementation_id: u32,
     /// The cipher.
     cipher: Cipher,
     /// The encryption paramters.
@@ -165,7 +177,7 @@ impl DiskHeader {
     ///
     /// This will construct it into memory while performing error checks on the header to ensure
     /// correctness.
-    fn parse(buf: &[u8]) -> Result<DiskHeader, Error> {
+    fn decode(buf: &[u8]) -> Result<DiskHeader, Error> {
         // Start with some default value, which will be filled out later.
         let mut ret = DiskHeader::default();
 
@@ -175,24 +187,19 @@ impl DiskHeader {
         // disk image. It is rarely changed unless updates or reformatting happens.
 
         // Load the magic number.
-        ret.magic_number = match buf[..8] {
-            // Total compatibility.
-            b"TFS fmt " => MagicNumber::TotalCompatibility,
-            // Partial compatibility.
-            b"~TFS fmt" => MagicNumber::PartialCompatibility,
-            // Unknown format; abort.
-            _ => return Err(Error::UnknownFormat),
-        };
+        ret.magic_number = MagicNumber::try_from(&buf[..8])?;
 
         // Load the version number.
-        ret.version_number = LittleEndian::read(buf[8..12]);
+        ret.version_number = LittleEndian::read(buf[8..]);
         // Right after the version number, the same number follows, but bitwise negated. Make sure
         // that these numbers match (if it is bitwise negated). The reason for using this form of
         // code rather than just repeating it as-is is that if one overwrites all bytes with a
         // constant value, like zero, it won't be detected.
-        if ret.version_number == !LittleEndian::read(buf[12..16]) {
-            // Check if the version is compatible.
-            if ret.version_number >> 16 > 0 {
+        if ret.version_number == !LittleEndian::read(buf[12..]) {
+            // Check if the version is compatible. If the higher half doesn't match, there were a
+            // breaking change. Otherwise, if the version number is lower or equal to the current
+            // version, it's compatible.
+            if ret.version_number >> 16 != VERSION_NUMBER >> 16 || ret.version_number > VERSION_NUMBER {
                 // The version is not compatible; abort.
                 return Err(Error::IncompatibleVersion);
             }
@@ -201,22 +208,15 @@ impl DiskHeader {
             return Err(Error::CorruptVersionNumber);
         }
 
-        // Load the implementation ID.
-        ret.implementation_id = LittleEndian::read(buf[16..24]);
-        // Similarly to the version number, a bitwise negated repetition follows. Make sure it
-        // matches.
-        if ret.implementation_id != !LittleEndian::read(buf[24..32]) {
-            // The implementation ID is corrupt; abort.
-            return Err(Error::CorruptImplementationId);
-        }
-
-        //////////////// Encryption Section ////////////////
+        // # Encryption section
+        //
+        // This section contains information about how the disk was encrypted, if at all.
 
         // Load the encryption algorithm choice.
-        ret.cipher = Cipher::try_from(LittleEndian::read(buf[64..66]))?;
+        ret.cipher = Cipher::try_from(LittleEndian::read(buf[64..]))?;
         // Repeat the bitwise negation.
-        if ret.cipher as u16 != !LittleEndian::read(buf[66..68]) {
-            // The implementation ID is corrupt; abort.
+        if ret.cipher as u16 != !LittleEndian::read(buf[66..]) {
+            // The cipher option is corrupt; abort.
             return Err(Error::CorruptCipher);
         }
 
@@ -228,12 +228,15 @@ impl DiskHeader {
             return Err(Error::CorruptEncryptionParameters);
         }
 
-        //////////////// State ////////////////
+        // # State section
+        //
+        // This section holds the state of disk and pointers to information on the state of the
+        // file system.
 
         // Load the state block pointer.
-        ret.state_block_address = clusters::Pointer::new(LittleEndian::read(buf[128..136]));
+        ret.state_block_address = clusters::Pointer::new(LittleEndian::read(buf[128..]));
         // Repeat the bitwise negation.
-        if ret.state_block_address as u64 != !LittleEndian::read(buf[136..144]) {
+        if ret.state_block_address as u64 != !LittleEndian::read(buf[136..]) {
             // The state block address is corrupt; abort.
             return Err(Error::CorruptStateBlockAddress);
         }
@@ -245,5 +248,153 @@ impl DiskHeader {
             // The consistency flag is corrupt; abort.
             return Err(Error::CorruptConsistencyFlag);
         }
+    }
+
+    /// Encode the header into a sector-sized buffer.
+    fn encode(&self) -> Box<[u8]> {
+        // Allocate a buffer to hold the data.
+        let mut vec = vec![0; disk::SECTOR_SIZE];
+
+        // Write the magic number.
+        vec[..8].copy_from_slice(self.magic_number.into());
+
+        // Write the current version number.
+        LittleEndian::write(&mut vec[8..], VERSION_NUMBER);
+        LittleEndian::write(&mut vec[12..], !VERSION_NUMBER);
+
+        // Write the cipher algorithm.
+        LittleEndian::write(&mut vec[64..], self.cipher as u16);
+        LittleEndian::write(&mut vec[66..], !self.cipher as u16);
+
+        // Write the encryption parameters.
+        vec[68..84].copy_from_slice(self.encryption_parameters);
+        for (a, b) in vec[84..100].iter_mut().zip(self.encryption_parameters) {
+            *a = !b;
+        };
+
+        // Write the state block address.
+        LittleEndian::write(&mut vec[128..], self.state_block_address);
+        LittleEndian::write(&mut vec[136..], !self.state_block_address);
+
+        // Write the consistency flag.
+        vec[144] = self.consistency_flag as u8;
+        vec[145] = !self.consistency_flag as u8;
+
+        vec.into_boxed_slice()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inverse_identity() {
+        let mut header = DiskHeader::default();
+        assert_eq!(DiskHeader::decode(header.encode()).unwrap(), header);
+
+        header.version_number = 1;
+        assert_eq!(DiskHeader::decode(header.encode()).unwrap(), header);
+
+        header.cipher = Cipher::Speck;
+        assert_eq!(DiskHeader::decode(header.encode()).unwrap(), header);
+
+        header.consistency_flag = ConsistencyFlag::Inconsistent;
+        assert_eq!(DiskHeader::decode(header.encode()).unwrap(), header);
+
+        header.state_block_address = 500;
+        assert_eq!(DiskHeader::decode(header.encode()).unwrap(), header);
+    }
+
+    #[test]
+    fn manual_mutation() {
+        let mut header = DiskHeader::default();
+        let mut sector = header.encode();
+
+        header.magic_number = MagicNumber::PartialCompatibility;
+        sector[7] = b'~';
+
+        assert_eq!(sector, header.encode());
+
+        header.version_number |= 0xFF;
+        sector[8] = 0xFF;
+
+        assert_eq!(sector, header.encode());
+
+        header.cipher = Cipher::Speck;
+        sector[64] = 1;
+        sector[65] = !1;
+
+        assert_eq!(sector, header.encode());
+
+        header.encryption_parameters[0] = 52;
+        sector[68] = 52;
+        sector[84] = !52;
+
+        assert_eq!(sector, header.encode());
+
+        header.state_block_address |= 0xFF;
+        sector[128] = 0xFF;
+
+        assert_eq!(sector, header.encode());
+
+        header.consistency_flag = ConsistencyFlag::StillActive;
+        sector[144] = 1;
+        sector[145] = !1;
+
+        assert_eq!(sector, header.encode());
+    }
+
+    #[test]
+    fn corrupt_extra() {
+        let mut sector = DiskHeader::default().encode();
+        sector[12] ^= 2;
+        assert_eq!(DiskHeader::decode(sector), Err(Error::CorruptVersionNumber));
+
+        let mut sector = DiskHeader::default().encode();
+        sector[65] ^= 1;
+        assert_eq!(DiskHeader::decode(sector), Err(Error::CorruptCipher));
+
+        let mut sector = DiskHeader::default().encode();
+        sector[84] ^= 1;
+        assert_eq!(DiskHeader::decode(sector), Err(Error::CorruptEncryptionParameters));
+
+        let mut sector = DiskHeader::default().encode();
+        sector[128] ^= 1;
+        assert_eq!(DiskHeader::decode(sector), Err(Error::CorruptStateBlockAddress));
+
+        let mut sector = DiskHeader::default().encode();
+        sector[145] ^= 1;
+        assert_eq!(DiskHeader::decode(sector), Err(Error::CorruptConsistencyFlag));
+    }
+
+    #[test]
+    fn unknown_format() {
+        let mut sector = DiskHeader::default().encode();
+        sector[0] = b'A';
+        assert_eq!(DiskHeader::decode(sector), Err(Error::UnknownFormat));
+    }
+
+    #[test]
+    fn incompatible_version() {
+        let mut sector = DiskHeader::default().encode();
+        sector[11] = 0xFF;
+        assert_eq!(DiskHeader::decode(sector), Err(Error::IncompatibleVersion));
+    }
+
+    #[test]
+    fn wrong_cipher() {
+        let mut sector = DiskHeader::default().encode();
+        sector[64] = 0xFF;
+        assert_eq!(DiskHeader::decode(sector), Err(Error::InvalidCipher));
+        sector[65] = 0xFF;
+        assert_eq!(DiskHeader::decode(sector), Err(Error::UnknownCipher));
+    }
+
+    #[test]
+    fn unknown_consistency_flag() {
+        let mut sector = DiskHeader::default().encode();
+        sector[144] = 6;
+        assert_eq!(DiskHeader::decode(sector), Err(Error::UnknownConsistencyFlag));
     }
 }
