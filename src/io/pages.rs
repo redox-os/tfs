@@ -120,17 +120,7 @@ impl<D: Disk> Manager<D> {
 
     /// Calculate the checksum of some buffer, based on the user configuration.
     fn checksum(&self, buf: &[u8]) -> u64 {
-        // The behavior depends on the chosen checksum algorithm.
-        match self.state.state_block.checksum {
-            // Constant checksums. These are a bit weird, but in the end it makes sense: a number
-            // is fixed to some value (in this case, the highest 16-bit integer), under the
-            // assumption that if a sector is damaged, all of it is affected, hence the number
-            // shouldn't match. Obviously, this isn't true for every disk, therefore one must
-            // be careful before using this.
-            ChecksumAlgorithm::Constant => !0,
-            // Hash the thing via SeaHash, then take the 16 lowest bits (truncating cast).
-            ChecksumAlgorithm::SeaHash => seahash::hash(buf),
-        }
+        self.state.state_block.checksum_algorithm.hash(buf)
     }
 
     /// Compress some data based on the compression configuration option.

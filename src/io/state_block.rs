@@ -43,6 +43,23 @@ enum ChecksumAlgorithm {
     SeaHash = 1,
 }
 
+impl ChecksumAlgorithm {
+    /// Produce the checksum of the buffer through the algorithm.
+    pub fn hash(self, buf: &[u8]) -> u64 {
+        // The behavior depends on the chosen checksum algorithm.
+        match self.state.state_block.checksum {
+            // Constant checksums. These are a bit weird, but in the end it makes sense: a number
+            // is fixed to some value (in this case, the highest 16-bit integer), under the
+            // assumption that if a sector is damaged, all of it is affected, hence the number
+            // shouldn't match. Obviously, this isn't true for every disk, therefore one must
+            // be careful before using this.
+            ChecksumAlgorithm::Constant => !0,
+            // Hash the thing via SeaHash, then take the 16 lowest bits (truncating cast).
+            ChecksumAlgorithm::SeaHash => seahash::hash(buf),
+        }
+    }
+}
+
 impl TryFrom<u16> for ChecksumAlgorithm {
     type Err = Error;
 
@@ -139,5 +156,81 @@ impl StateBlock {
         LittleEndian::write(&mut vec[64..], cksum);
 
         vec.into_boxed_slice()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inverse_identity() {
+        let mut block = StateBlock::default();
+        assert_eq!(StateBlock::decode(block.encode()).unwrap(), block);
+
+        block.checksum_algorithm = ChecksumAlgorithm::Constant;
+        assert_eq!(StateBlock::decode(block.encode()).unwrap(), block);
+
+        block.compression_algorithm = CompressionAlgorithm::Identity;
+        assert_eq!(StateBlock::decode(block.encode()).unwrap(), block);
+
+        block.freelist_head = 2000;
+        assert_eq!(StateBlock::decode(block.encode()).unwrap(), block);
+
+        block.superpage = 200;
+        assert_eq!(StateBlock::decode(block.encode()).unwrap(), block);
+    }
+
+    #[test]
+    fn manual_mutation() {
+        let mut block = StateBlock::default();
+        let mut sector = block.encode();
+
+        block.checksum_algorithm = ChecksumAlgorithm::Constant;
+        sector[0] = 0;
+        LittleEndian::write(&mut sector[64..], 0xFFFFFFFFFFFFFFFF);
+
+        assert_eq!(sector, block.encode());
+
+        block.compression_algorithm = CompressionAlgorithm::Identity;
+        sector[2] = 0;
+
+        assert_eq!(sector, block.encode());
+
+        block.freelist_head = 52;
+        sector[32] = 52;
+
+        assert_eq!(sector, block.encode());
+
+        block.superpage = 29;
+        sector[40] = 29;
+
+        assert_eq!(sector, block.encode());
+    }
+
+    #[test]
+    fn mismatching_checksum() {
+        let mut sector = StateBlock::default().encode();
+        sector[2] = 20;
+        if let Err(Error::ChecksumMismatch { .. }) = StateBlock::decode(sector) {} else {
+            panic!();
+        }
+    }
+
+    #[test]
+    fn unknown_invalid_options() {
+        let mut sector = StateBlock::default().encode();
+
+        sector[0] = 0xFF;
+        assert_eq!(StateBlock::decode(sector), Err(Error::InvalidChecksumAlgorithm));
+        sector[1] = 0xFF;
+        assert_eq!(StateBlock::decode(sector), Err(Error::UnknownChecksumAlgorithm));
+
+        sector = StateBlock::default().encode();
+
+        sector[2] = 0xFF;
+        assert_eq!(StateBlock::decode(sector), Err(Error::InvalidCompression));
+        sector[3] = 0xFF;
+        assert_eq!(StateBlock::decode(sector), Err(Error::UnknownChecksumAlgorithm));
     }
 }
