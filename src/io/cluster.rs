@@ -2,10 +2,6 @@
 
 use std::NonZero;
 
-/// The size (in bytes) of the cluster header.
-const HEADER: usize = 4;
-/// The size (in bytes) of a cluster (without header).
-const SIZE: usize = disk::SECTOR_SIZE - HEADER;
 /// The size (in bytes) of a cluster pointer.
 const POINTER_SIZE: usize = 8;
 

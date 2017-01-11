@@ -4,12 +4,10 @@
 //! non-obviously, since clusters can hold more than one page at once (compression). Every cluster
 //! will maximize the number of pages held and when it's filled up, a new cluster will be fetched.
 
-/// The size (in bytes) of the general cluster header, shared by data clusters and metaclusters.
-const GENERAL_CLUSTER_HEADER: usize = 2;
 /// The size (in bytes) of the metacluster header.
-///
-/// This includes the general cluster header.
-const METACLUSTER_HEADER: usize = GENERAL_CLUSTER_HEADER + 2;
+const METACLUSTER_HEADER: usize = 8;
+/// The size (in bytes) of the metacluster's non-checksum section.
+const METACLUSTER_SIZE: usize = disk::SECTOR - METACLUSTER_HEADER;
 
 quick_error! {
     /// A page management error.
@@ -26,9 +24,9 @@ quick_error! {
         ChecksumMismatch {
             cluster: cluster::Pointer,
             /// The checksum of the data.
-            expected: u16,
+            expected: u64,
             /// The expected/stored value of the checksum.
-            found: u16,
+            found: u64,
         } {
             display("Mismatching checksums in cluster {} - expected {:x}, found {:x}.", cluster, expected, found)
             description("Mismatching checksum.")
@@ -121,7 +119,7 @@ impl<D: Disk> Manager<D> {
     }
 
     /// Calculate the checksum of some buffer, based on the user configuration.
-    fn checksum(&self, buf: &[u8]) -> u16 {
+    fn checksum(&self, buf: &[u8]) -> u64 {
         // The behavior depends on the chosen checksum algorithm.
         match self.state.state_block.checksum {
             // Constant checksums. These are a bit weird, but in the end it makes sense: a number
@@ -129,9 +127,9 @@ impl<D: Disk> Manager<D> {
             // assumption that if a sector is damaged, all of it is affected, hence the number
             // shouldn't match. Obviously, this isn't true for every disk, therefore one must
             // be careful before using this.
-            ChecksumAlgorithm::Constant => 0xFFFF,
+            ChecksumAlgorithm::Constant => !0,
             // Hash the thing via SeaHash, then take the 16 lowest bits (truncating cast).
-            ChecksumAlgorithm::SeaHash => seahash::hash(buf) as u16,
+            ChecksumAlgorithm::SeaHash => seahash::hash(buf),
         }
     }
 
@@ -222,7 +220,7 @@ impl<D: Disk> Manager<D> {
     /// This adds a new transaction to the cache pipeline, which will push some free cluster to the
     /// top of the freelist.
     fn queue_freelist_push(&mut self, cluster: cluster::Pointer) -> Result<(), Error> {
-        if self.state.freelist.len() == cluster::SIZE / cluster::POINTER_SIZE {
+        if self.state.freelist.len() == METACLUSTER_SIZE / cluster::POINTER_SIZE {
             // The freelist head is full, and therefore we use following algorithm:
             //
             // 1. Create a new metacluster at `cluster`.

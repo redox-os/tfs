@@ -10,11 +10,12 @@
 \date{\today}
 
 % Constants
-\newcommand{\clusterheader}{4 }
+\newcommand{\clusterheader}{2 }
 \newcommand{\clustersize}{512 }
 \newcommand{\maxpagesincluster}{256 }
+\newcommand{\metaclustercksum}{8 }
 \newcommand{\minimumsectorsize}{512 }
-\newcommand{\pagesize}{508 } % \clustersize - \clusterheader
+\newcommand{\pagesize}{510 } % \clustersize - \clusterheader
 \newcommand{\versionnumber}{0 }
 
 \begin{document}
@@ -222,15 +223,16 @@
     \section{Clusters and pages}
         The disk is divided into clusters of \clustersize bytes each.
 
-        \subsection{General cluster format}
-        Every cluster starts with a single 16-bit little-endian integer being
-        the 16 least significant bits of the checksum of the rest of the
-        cluster.
-
-        This metadata will not be described in the individual cluster format
-        definitions.
-
         \subsection{Data clusters}
+        Data cluster has a two bytes header in the start:
+
+        \begin{description}
+            \item [15-bit checksum] This is the 15 least-significant bits of
+                the checksum of the non-header data, stored in little-endian.
+            \item [1-bit compression flag] If this bit is 1, the data following
+                the header is compressed. Otherwise, it is read uncompressed.
+        \end{description}
+
         A data cluster contain up to \maxpagesincluster of \pagesize bytes
         blocks called ``pages''. The decompressed data (algorithm defined
         in~\ref{config:compression}) is the contained pages concatenated.
@@ -242,6 +244,8 @@
 
         $$r = \maxpagesincluster c + p$$
 
+        If the cluster is uncompressed, $p = 0$.
+
         Allocation is done in implementation defined manner\footnote{Our
         implementation first tries to fit it into the next cluster by
         appending it (all this can be done atomically by updating the
@@ -252,8 +256,11 @@
         \subsection{Meta-cluster format}
         \label{cluster:metacluster}
         The head of the freelist is a metacluster, which itself is a collection
-        of other free clusters. It stores 64-bit little-endian pointers to
-        other free clusters.
+        of other free clusters. It starts with a \metaclustercksum byte
+        checksum of the non-header part of the metacluster.
+
+        Following this, there is some number of 64-bit little-endian pointers
+        to other free clusters.
 
         If any, the first pointer must point to another meta-cluster.
 
