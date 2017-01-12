@@ -88,16 +88,8 @@ struct State {
 /// This is the center point of the I/O stack, providing allocation, deallocation, compression,
 /// etc. It manages the clusters (with the page abstraction) and caches the disks.
 struct Manager<D> {
-    /// The cached disk header.
-    ///
-    /// The disk header contains various very basic information about the disk and how to interact
-    /// with it.
-    ///
-    /// In reality, we could fetch this from the `disk` field as-we-go, but that hurts performance,
-    /// so we cache it in memory.
-    header: header::DiskHeader,
     /// The inner disk.
-    disk: Cache<D>,
+    disk: Cache<header::Driver<D>>,
     /// The state of the manager.
     state: State,
     /// The state of the manager on the time of last cache commit.

@@ -23,14 +23,14 @@ const TOTAL_COMPATIBILITY_MAGIC_NUMBER: &[u8] = b"TFS fmt ";
 
 quick_error! {
     /// A disk header reading error.
-    enum Error {
+    enum ParseError {
         /// Unknown format (not TFS).
         UnknownFormat {
             description("Unknown format (not TFS).")
         }
-        /// The consistency flag is corrupt.
-        CorruptConsistencyFlag {
-            description("Corrupt consistency flag.")
+        /// The state flag is corrupt.
+        CorruptStateFlag {
+            description("Corrupt state flag.")
         }
         /// The cipher field is corrupt.
         CorruptCipher {
@@ -66,9 +66,9 @@ quick_error! {
         InvalidCipher {
             description("Invalid cipher option.")
         }
-        /// Unknown consistency flag value.
-        UnknownConsistencyFlag {
-            description("Unknown consistency flag.")
+        /// Unknown state flag value.
+        UnknownStateFlag {
+            description("Unknown state flag.")
         }
     }
 }
@@ -83,16 +83,16 @@ enum MagicNumber {
 }
 
 impl TryFrom<&[u8]> for MagicNumber {
-    type Err = Error;
+    type Err = ParseError;
 
-    fn from(string: &[u8]) -> Result<MagicNumber, Error> {
+    fn from(string: &[u8]) -> Result<MagicNumber, ParseError> {
         match string {
             // Partial compatibility.
             PARTIAL_COMPATIBILITY_MAGIC_NUMBER => Ok(MagicNumber::PartialCompatibility),
             // Total compatibility.
             TOTAL_COMPATIBILITY_MAGIC_NUMBER => Ok(MagicNumber::TotalCompatibility),
             // Unknown format; abort.
-            _ => Err(Error::UnknownFormat),
+            _ => Err(ParseError::UnknownFormat),
         }
     }
 }
@@ -116,9 +116,9 @@ enum Cipher {
 }
 
 impl TryFrom<u16> for Cipher {
-    type Err = Error;
+    type Err = ParseError;
 
-    fn try_from(from: u16) -> Result<Cipher, Error> {
+    fn try_from(from: u16) -> Result<Cipher, ParseError> {
         match from {
             // Aye aye, encryption is disabled.
             0 => Ok(Cipher::Identity),
@@ -126,30 +126,28 @@ impl TryFrom<u16> for Cipher {
             1 => Ok(Cipher::Speck128),
             // These are implementation-specific ciphers which are unsupported in this (official)
             // implementation.
-            1 << 15... => Err(Error::UnknownCipher),
+            1 << 15... => Err(ParseError::UnknownCipher),
             // This cipher is invalid by current revision.
-            _ => Err(Error::InvalidCipher),
+            _ => Err(ParseError::InvalidCipher),
         }
     }
 }
 
-/// Consistency flag.
+/// State flag.
 ///
-/// The consistency flag defines the state of the disk, telling the user if it is in a consistent
+/// The state flag defines the state of the disk, telling the user if it is in a consistent
 /// state or not. It is important for doing non-trivial things like garbage-collection, where the
 /// disk needs to enter an inconsistent state for a small period of time.
 #[derive(PartialEq, Eq, Clone, Copy)]
-enum ConsistencyFlag {
+enum StateFlag {
     /// The disk was properly closed and shut down.
     Closed = 0,
     /// The disk is active/was forcibly shut down.
-    StillActive = 1,
+    Open = 1,
     /// The disk is in an inconsistent state.
     ///
     /// Proceed with caution.
     Inconsistent = 2,
-    /// The disk is uninitialized.
-    Uninitialized = 3,
 }
 
 /// The disk header.
@@ -168,8 +166,8 @@ struct DiskHeader {
     encryption_parameters: [u8; 16],
     /// The address of the state block.
     state_block_address: clusters::Pointer,
-    /// The consistency flag.
-    consistency_flag: ConsistencyFlag,
+    /// The state flag.
+    consistency_flag: StateFlag,
 }
 
 impl DiskHeader {
@@ -177,7 +175,7 @@ impl DiskHeader {
     ///
     /// This will construct it into memory while performing error checks on the header to ensure
     /// correctness.
-    fn decode(buf: &[u8]) -> Result<DiskHeader, Error> {
+    fn decode(buf: &[u8]) -> Result<DiskHeader, ParseError> {
         // Start with some default value, which will be filled out later.
         let mut ret = DiskHeader::default();
 
@@ -201,11 +199,11 @@ impl DiskHeader {
             // version, it's compatible.
             if ret.version_number >> 16 != VERSION_NUMBER >> 16 || ret.version_number > VERSION_NUMBER {
                 // The version is not compatible; abort.
-                return Err(Error::IncompatibleVersion);
+                return Err(ParseError::IncompatibleVersion);
             }
         } else {
             // The version number is corrupt; abort.
-            return Err(Error::CorruptVersionNumber);
+            return Err(ParseError::CorruptVersionNumber);
         }
 
         // # Encryption section
@@ -217,7 +215,7 @@ impl DiskHeader {
         // Repeat the bitwise negation.
         if ret.cipher as u16 != !LittleEndian::read(buf[66..]) {
             // The cipher option is corrupt; abort.
-            return Err(Error::CorruptCipher);
+            return Err(ParseError::CorruptCipher);
         }
 
         // Load the encryption parameters (e.g. salt).
@@ -225,7 +223,7 @@ impl DiskHeader {
         // Repeat the bitwise negation.
         if self.encryption_parameters.iter().eq(buf[84..100].iter().map(|x| !x)) {
             // The encryption parameters are corrupt; abort.
-            return Err(Error::CorruptEncryptionParameters);
+            return Err(ParseError::CorruptEncryptionParameters);
         }
 
         // # State section
@@ -238,15 +236,15 @@ impl DiskHeader {
         // Repeat the bitwise negation.
         if ret.state_block_address as u64 != !LittleEndian::read(buf[136..]) {
             // The state block address is corrupt; abort.
-            return Err(Error::CorruptStateBlockAddress);
+            return Err(ParseError::CorruptStateBlockAddress);
         }
 
-        // Load the consistency flag.
-        self.consistency_flag = ConsistencyFlag::from(buf[144])?;
+        // Load the state flag.
+        self.consistency_flag = StateFlag::from(buf[144])?;
         // Repeat the bitwise negation.
         if self.consistency_flag as u8 != !buf[145] {
-            // The consistency flag is corrupt; abort.
-            return Err(Error::CorruptConsistencyFlag);
+            // The state flag is corrupt; abort.
+            return Err(ParseError::CorruptStateFlag);
         }
     }
 
@@ -276,11 +274,131 @@ impl DiskHeader {
         LittleEndian::write(&mut vec[128..], self.state_block_address);
         LittleEndian::write(&mut vec[136..], !self.state_block_address);
 
-        // Write the consistency flag.
+        // Write the state flag.
         vec[144] = self.consistency_flag as u8;
         vec[145] = !self.consistency_flag as u8;
 
         vec.into_boxed_slice()
+    }
+}
+
+/// A driver transforming a normal disk into a header-less decrypted disk.
+///
+/// This makes it more convinient to work with.
+struct Driver<D: Disk> {
+    /// The cached disk header.
+    ///
+    /// The disk header contains various very basic information about the disk and how to interact
+    /// with it.
+    ///
+    /// In reality, we could fetch this from the `disk` field as-we-go, but that hurts performance,
+    /// so we cache it in memory.
+    pub header: header::DiskHeader,
+    /// The inner disk.
+    disk: D,
+    /// The cipher and key.
+    cipher: crypto::Cipher,
+}
+
+/// A driver loading error.
+enum OpenError {
+    /// The state flag was set to "inconsistent".
+    InconsistentState {
+        description("The state flag is marked inconsistent.")
+    }
+    /// A disk header parsing error.
+    Parse(err: ParseError) {
+        from()
+        description("Disk header parsing error")
+        display("Disk header parsing error: {}", err)
+    }
+    /// A disk error.
+    Disk(err: disk::Error) {
+        from()
+        description("Disk I/O error")
+        display("Disk I/O error: {}", err)
+    }
+}
+
+impl<D: Disk> Driver<D> {
+    /// Set up the driver from some disk.
+    ///
+    /// This will load the disk header and construct the driver. It will also set the disk to be in
+    /// open state.
+    fn open(disk: D, password: &[u8]) -> Result<Driver<D>, OpenError> {
+        // Load the disk header into some buffer.
+        let mut header_buf = [0; disk::SECTOR_SIZE];
+        disk.read(0, &mut header_buf)?;
+
+        // Decode the disk header.
+        let mut header = DiskHeader::decode(header_buf)?;
+
+        // TODO: Throw a warning if the flag is still in loading state.
+        match header.consistency_flag {
+            // Set the state flag to open.
+            StateFlag::Closed => header.consistency_flag = StateFlag::Open,
+            // The state inconsistent; throw an error.
+            StateFlag::Inconsistent => return Err(OpenError::InconsistentState),
+        }
+
+        // Update the version.
+        header.version_number = VERSION_NUMBER;
+
+        // Construct the driver.
+        let mut driver = Driver {
+            // Generate the cipher (key, configuration etc.) from the disk header.
+            cipher: crypto::Cipher(header.cipher, password),
+            header: header,
+            disk: disk,
+        };
+
+        // Flush the updated header.
+        driver.flush_header();
+
+        Ok(driver)
+    }
+
+    /// Initialize the disk.
+    ///
+    /// This stores disk header and makes the disk ready for use, returning the driver.
+    fn init(disk: D) -> Result<Driver<D>, disk::Error> {
+        // Construct the driver.
+        let mut driver = Driver {
+            header: DiskHeader::default(),
+            disk: disk,
+        };
+
+        // Flush the default header.
+        driver.flush_header()?;
+
+        Ok(driver)
+    }
+
+    /// Flush the stored disk header.
+    fn flush_header(&mut self) -> Result<(), disk::Error> {
+        // Encode and write it to the disk.
+        self.disk.write(0, &self.header.encode())
+    }
+}
+
+impl<D: Disk> Disk for Driver<D> {
+    fn number_of_sectors(&self) -> Sector {
+        self.disk.number_of_sectors()
+    }
+
+    fn write(sector: Sector, offset: SectorOffset, buffer: &[u8]) -> Result<(), Error> {
+        match self.header.cipher {
+            // Encryption disabled; forward the call to the inner disk.
+            &Cipher::Identity => self.disk.write(sector, offset, buffer),
+            _ => unimplemented!(),
+        }
+    }
+    fn read(sector: Sector, offset: SectorOffset, buffer: &mut [u8]) -> Result<(), Error> {
+        match self.header.cipher {
+            // Encryption disabled; forward the call to the inner disk.
+            &Cipher::Identity => self.disk.read(sector, offset, buffer),
+            _ => unimplemented!(),
+        }
     }
 }
 
@@ -299,7 +417,7 @@ mod tests {
         header.cipher = Cipher::Speck;
         assert_eq!(DiskHeader::decode(header.encode()).unwrap(), header);
 
-        header.consistency_flag = ConsistencyFlag::Inconsistent;
+        header.consistency_flag = StateFlag::Inconsistent;
         assert_eq!(DiskHeader::decode(header.encode()).unwrap(), header);
 
         header.state_block_address = 500;
@@ -338,7 +456,7 @@ mod tests {
 
         assert_eq!(sector, header.encode());
 
-        header.consistency_flag = ConsistencyFlag::StillActive;
+        header.consistency_flag = StateFlag::Open;
         sector[144] = 1;
         sector[145] = !1;
 
@@ -365,7 +483,7 @@ mod tests {
 
         let mut sector = DiskHeader::default().encode();
         sector[145] ^= 1;
-        assert_eq!(DiskHeader::decode(sector), Err(Error::CorruptConsistencyFlag));
+        assert_eq!(DiskHeader::decode(sector), Err(Error::CorruptStateFlag));
     }
 
     #[test]
@@ -395,6 +513,6 @@ mod tests {
     fn unknown_consistency_flag() {
         let mut sector = DiskHeader::default().encode();
         sector[144] = 6;
-        assert_eq!(DiskHeader::decode(sector), Err(Error::UnknownConsistencyFlag));
+        assert_eq!(DiskHeader::decode(sector), Err(Error::UnknownStateFlag));
     }
 }

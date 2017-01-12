@@ -8,7 +8,7 @@ const POINTER_SIZE: usize = 8;
 /// A pointer to some cluster.
 pub struct Pointer(NonZero<u64>);
 
-impl ClusterPointer {
+impl Pointer {
     /// Create a new `ClusterPointer` to the `x`'th cluster.
     ///
     /// This returns `None` if `x` is `0`.

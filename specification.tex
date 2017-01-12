@@ -126,7 +126,7 @@
         \subsection{Bitwise negation of state block address (byte 136-144)}
         Repetition of~\ref{header:stateblock}, bitwise negated.
 
-        \subsection{Consistency flag (byte 144)}
+        \subsection{State flag (byte 144)}
         \label{header:consistency}
         This little-endian integer takes one of the following
         values\footnote{The reason it takes two bytes instead of one is to be
@@ -141,12 +141,11 @@
             \item [$\texttt{02}_{16}$] The disk is in an inconsistent
                 state\footnote{This typically only happen if the user poweroffs
                 his or her computer while reformatting the disk.}
-            \item [$\texttt{03}_{16}$] The file system is uninitialized.
         \end{description}
 
         Any other value is considered invalid.
 
-        \subsection{Bitwise negation of consistency flag (byte 145)}
+        \subsection{Bitwise negation of state flag (byte 145)}
         Repetition of~\ref{header:consistency}, bitwise negated.
 
     \chapter{State block}
