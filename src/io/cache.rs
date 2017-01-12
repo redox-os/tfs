@@ -81,7 +81,7 @@ struct Cache<D> {
 }
 
 impl<D: Disk> Cached<D> {
-    /// Flush a cache block to the disk.
+    /// Flush a sector to the disk.
     ///
     /// This can potentially trigger outer flushes if the cache block has flush dependencies.
     ///
@@ -106,6 +106,14 @@ impl<D: Disk> Cached<D> {
             self.disk.write(block.sector, &block.data)?;
             // Unset the dirty flag.
             block.dirty = false;
+        }
+    }
+
+    /// Flush all sectors to the disk.
+    pub fn flush_all(&mut self) -> Result<(), disk::Error> {
+        // Run over the block map and flush them.
+        for i in self.blocks.keys() {
+            self.flush(i);
         }
     }
 
@@ -258,5 +266,11 @@ impl<D: Disk> Cached<D> {
             // It didn't, so we read it from the disk:
             self.fetch_fresh(sector)
         }
+    }
+}
+
+impl<D: Disk> Drop for Cached<D> {
+    fn drop(&mut self) {
+        self.flush_all();
     }
 }

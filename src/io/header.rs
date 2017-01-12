@@ -381,6 +381,15 @@ impl<D: Disk> Driver<D> {
     }
 }
 
+impl<D: Disk> Drop for Driver<D> {
+    fn drop(&mut self) {
+        // Set the state flag to close so we know that it was a proper shutdown.
+        self.header.state_flag = StateFlag::Closed;
+        // Flush the header.
+        self.flush_header();
+    }
+}
+
 impl<D: Disk> Disk for Driver<D> {
     fn number_of_sectors(&self) -> Sector {
         self.disk.number_of_sectors()
