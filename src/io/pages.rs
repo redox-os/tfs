@@ -122,11 +122,11 @@ impl<D: Disk> Manager<D> {
         self.disk.revert();
     }
 
-    /// Allocate a page.
+    /// Queue a page allocation.
     ///
     /// This adds a transaction to the cache pipeline to allocate a page. It can be committed
     /// through `.commit()`.
-    fn alloc(&mut self, buf: &[u8]) -> Result<Pointer, Error> {
+    fn queue_alloc(&mut self, buf: &[u8]) -> Result<Pointer, Error> {
         // Allocate a buffer for constructing the cluster.
         let mut cluster = vec![0; DATA_CLUSTER_HEADER];
         // Extend the last allocated cluster with the new page.
@@ -268,6 +268,11 @@ impl<D: Disk> Manager<D> {
     /// This adds a new transaction to the cache pipeline, which will push some free cluster to the
     /// top of the freelist.
     fn queue_freelist_push(&mut self, cluster: cluster::Pointer) -> Result<(), Error> {
+        // If enabled, purge the data of the cluster.
+        if cfg!(feature = "security") {
+            self.disk.queue(cluster, vec![0; disk::SECTOR_SIZE].into_boxed_slice());
+        }
+
         if self.state.freelist.len() == METACLUSTER_SIZE / cluster::POINTER_SIZE {
             // The freelist head is full, and therefore we use following algorithm:
             //
