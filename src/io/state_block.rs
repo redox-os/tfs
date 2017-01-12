@@ -138,24 +138,24 @@ impl StateBlock {
     }
 
     /// Encode the state block into a sector-sized buffer.
-    fn encode(&self) -> Box<[u8]> {
-        // Allocate a buffer to hold the data.
-        let mut vec = vec![0; disk::SECTOR_SIZE];
+    fn encode(&self) -> [u8; disk::SECTOR_SIZE] {
+        // Create a buffer to hold the data.
+        let mut buf = [0; disk::SECTOR_SIZE];
 
         // Write the checksum algorithm.
-        LittleEndian::write(&mut vec[0..], self.checksum_algorithm as u16);
+        LittleEndian::write(&mut buf[0..], self.checksum_algorithm as u16);
         // Write the compression algorithm.
-        LittleEndian::write(&mut vec[2..], self.compression_algorithm as u16);
+        LittleEndian::write(&mut buf[2..], self.compression_algorithm as u16);
         // Write the freelist head pointer.
-        LittleEndian::write(&mut vec[32..], self.freelist_head);
+        LittleEndian::write(&mut buf[32..], self.freelist_head);
         // Write the superpage pointer.
-        LittleEndian::write(&mut vec[40..], self.superpage);
+        LittleEndian::write(&mut buf[40..], self.superpage);
 
         // Calculate and store the checksum.
-        let cksum = self.checksum_algorithm.hash(&vec[..64]);
-        LittleEndian::write(&mut vec[64..], cksum);
+        let cksum = self.checksum_algorithm.hash(&buf[..64]);
+        LittleEndian::write(&mut buf[64..], cksum);
 
-        vec.into_boxed_slice()
+        buf
     }
 }
 

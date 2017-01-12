@@ -249,36 +249,36 @@ impl DiskHeader {
     }
 
     /// Encode the header into a sector-sized buffer.
-    fn encode(&self) -> Box<[u8]> {
-        // Allocate a buffer to hold the data.
-        let mut vec = vec![0; disk::SECTOR_SIZE];
+    fn encode(&self) -> [u8; disk::SECTOR_SIZE] {
+        // Create a buffer to hold the data.
+        let mut buf = [0; disk::SECTOR_SIZE];
 
         // Write the magic number.
-        vec[..8].copy_from_slice(self.magic_number.into());
+        buf[..8].copy_from_slice(self.magic_number.into());
 
         // Write the current version number.
-        LittleEndian::write(&mut vec[8..], VERSION_NUMBER);
-        LittleEndian::write(&mut vec[12..], !VERSION_NUMBER);
+        LittleEndian::write(&mut buf[8..], VERSION_NUMBER);
+        LittleEndian::write(&mut buf[12..], !VERSION_NUMBER);
 
         // Write the cipher algorithm.
-        LittleEndian::write(&mut vec[64..], self.cipher as u16);
-        LittleEndian::write(&mut vec[66..], !self.cipher as u16);
+        LittleEndian::write(&mut buf[64..], self.cipher as u16);
+        LittleEndian::write(&mut buf[66..], !self.cipher as u16);
 
         // Write the encryption parameters.
-        vec[68..84].copy_from_slice(self.encryption_parameters);
-        for (a, b) in vec[84..100].iter_mut().zip(self.encryption_parameters) {
+        buf[68..84].copy_from_slice(self.encryption_parameters);
+        for (a, b) in buf[84..100].iter_mut().zip(self.encryption_parameters) {
             *a = !b;
         };
 
         // Write the state block address.
-        LittleEndian::write(&mut vec[128..], self.state_block_address);
-        LittleEndian::write(&mut vec[136..], !self.state_block_address);
+        LittleEndian::write(&mut buf[128..], self.state_block_address);
+        LittleEndian::write(&mut buf[136..], !self.state_block_address);
 
         // Write the state flag.
-        vec[144] = self.consistency_flag as u8;
-        vec[145] = !self.consistency_flag as u8;
+        buf[144] = self.consistency_flag as u8;
+        buf[145] = !self.consistency_flag as u8;
 
-        vec.into_boxed_slice()
+        buf
     }
 }
 
