@@ -61,7 +61,7 @@
     The first \clustersize bytes are reserved for the ``disk header'' which
     contains unencrypted configuration and information about the state.
 
-    \section{Introducer (byte 0-64)}
+    \section{Introducer (byte 0-16)}
         \subsection{Magic number (byte 0-8)}
         The first 8 bytes are reserved for a magic number, which is used for
         determining if it does indeed store TFS\@. It is specified to store the
@@ -79,54 +79,31 @@
 
         Breaking changes will increment the higher half of this number.
 
-        \subsection{Bitwise negation version number (byte 12-16)}
-        Repetition of~\ref{header:versionnumber}, bitwise
-        negated\footnote{The reason for this negation is if one overwrites it
-        with e.g.\ all zeros, it should be able to detect this.}.
-
-    \section{Encryption (byte 64-128)}
-        \subsection{Encryption algorithm (byte 64-66)}
-        \label{header:encryption}
-        This field stores a number in little-endian defining encryption
-        algorithm in use. It takes following values
+    \section{Configuration (byte 16-32)}
+        \subsection{Checksum algorithm (byte 16-18)}
+        \label{config:checksum}
+        This field stores a number in little-endian defining checksum algorithm
+        in use.
 
         \begin{description}
-            \item [$0$] No encryption (identity function).
-            \item [$1$] SPECK-128 (XEX mode) with scrypt key stretching
-                See~\ref{crypto:speck}.
+            \item [$1$] The SeaHash algorithm as described
+                in~\ref{checksum:seahash}
             \item [$\geq 2^{15}$] Implementation defined.
         \end{description}
 
-        Any data not stored in the introducer is encrypted through the chosen method.
-
-        \subsection{Bitwise negation of encryption algorithm (byte 66-68)}
-        Repetition of~\ref{header:encryption}, bitwise negated.
-
-        \subsection{Encryption parameters (byte 68-84)}
-        \label{header:encryptionparams}
-        These are parameters used differently based on the choice
-        in~\ref{header:encryption}.
-
-        \subsection{Bitwise negation of encryption parameters (byte 84-100)}
-        Repetition of~\ref{header:encryptionparams}, bitwise negated.
-
-        \section{State (byte 128-192)}
-        \subsection{State block address (byte 128-136)}
+    \section{State (byte 32-48)}
+        \subsection{State block address (byte 32-40)}
         \label{header:stateblock}
         This little-endian integer takes following values:
 
         \begin{description}
             \item [$n = 0$]    state block uninitialized.
-            \item [$n \neq 0$] the $n$'th cluster
-                (starting at byte $\clustersize n$) is used
-                as the state block and abides the format set out
-                in~\ref{stateblock}.
+            \item [$n \neq 0$] the $n$'th cluster (starting at byte
+                $\clustersize n$) is used as the state block and abides the
+                format set out in~\ref{stateblock}.
         \end{description}
 
-        \subsection{Bitwise negation of state block address (byte 136-144)}
-        Repetition of~\ref{header:stateblock}, bitwise negated.
-
-        \subsection{State flag (byte 144)}
+        \subsection{State flag (byte 40)}
         \label{header:consistency}
         This little-endian integer takes one of the following
         values\footnote{The reason it takes two bytes instead of one is to be
@@ -145,29 +122,47 @@
 
         Any other value is considered invalid.
 
-        \subsection{Bitwise negation of state flag (byte 145)}
-        Repetition of~\ref{header:consistency}, bitwise negated.
+    \section{Encryption (byte 64-82)}
+        \subsection{Encryption algorithm (byte 64-66)}
+        \label{header:encryption}
+        This field stores a number in little-endian defining encryption
+        algorithm in use. It takes following values
+
+        \begin{description}
+            \item [$0$] No encryption (identity function).
+            \item [$1$] SPECK-128 (XEX mode) with scrypt key stretching
+                See~\ref{crypto:speck}.
+            \item [$\geq 2^{15}$] Implementation defined.
+        \end{description}
+
+        Any data not stored in the introducer is encrypted through the chosen method.
+
+        \subsection{Encryption parameters (byte 66-82)}
+        \label{header:encryptionparams}
+        These are parameters used differently based on the choice
+        in~\ref{header:encryption}.
+
+    \section{Integrity checking (byte 128-136)}
+        \subsection{Checksum (byte 128-136)}
+        This field stores a little-endian integer equal to the checksum of the
+        state block preceding the checksum itself, calculated by the algorithm
+        specified in~\ref{config:checksum}.
 
     \chapter{State block}
     \label{stateblock}
     At the address (cluster number) chosen in~\ref{header:stateblock}, a block
     defining the state of the file system is stored.
 
-    \section{Configuration}
-        \subsection{Checksum algorithm (byte 0-2)}
-        \label{config:checksum}
-        This field stores a number in little-endian defining checksum algorithm
-        in use.
+    \section{Integrity checking (0-8)}
+        \subsection{Checksum (byte 0-8)}
+        This field stores a little-endian integer equal to the checksum of the
+        state block following the checksum itself\footnote{This does not have
+        the self-validation problem since it is the top block, and silent
+        phantom writes won't affect the correctness of the state.}, calculated by
+        the algorithm specified in~\ref{config:checksum}.
 
-        \begin{description}
-            \item [$0$] Constant checksum as described
-                in~\ref{checksum:constant}.
-            \item [$1$] The SeaHash algorithm as described
-                in~\ref{checksum:seahash}
-            \item [$\geq 2^{15}$] Implementation defined.
-        \end{description}
-
-        \subsection{Compression algorithm (byte 2-4)}
+    \section{Configuration (byte 8-16)}
+        \subsection{Compression algorithm (byte 8-10)}
         \label{config:compression}
         This field stores a number in little-endian defining compression
         algorithm in use.
@@ -179,8 +174,8 @@
             \item [$\geq 2^{15}$] Implementation defined.
         \end{description}
 
-    \section{State}
-        \subsection{Freelist head pointer (byte 32-40)}
+    \section{State (byte 16-32)}
+        \subsection{Freelist head pointer (byte 16-24)}
         This field stores some number (in little-endian), which takes values
 
         \begin{description}
@@ -189,7 +184,7 @@
                 to~\ref{cluster:metacluster}.
         \end{description}
 
-        \subsection{Super-page pointer (byte 40-48)}
+        \subsection{Super-page pointer (byte 24-32)}
         This field stores some number (in little-endian), which takes values
 
         \begin{description}
@@ -197,12 +192,6 @@
             \item [$n \neq 0$] the $n$'th page is the super-page as defined
                 in~\ref{fs:superpage}.
         \end{description}
-
-    \section{Integrity checking}
-        \subsection{Checksum (byte 64-70)}
-        This field stores a little-endian integer equal to the checksum of the
-        state block preceding the checksum itself, calculated by the algorithm
-        specified in~\ref{config:checksum}.
 
     \chapter{Cluster management}
 
@@ -261,15 +250,6 @@
             Bijective maps are recommended for optimal performance.}.
 
     \section{Checksums}
-        \subsection{Constant checksum}
-        \label{checksum:constant}
-        Constant checksum is independent of the input\footnote{This is used as
-        an alternative to storing no checksum, which would make implementation
-        harder. Instead, this allows some -- but weak -- protection against failure
-        with virtually no effort.}, yielding a constant value,
-
-        $$c = 2^{64} - 1$$
-
         \subsection{SeaHash}
         \label{checksum:seahash}
         SeaHash's initial state is

@@ -28,32 +28,20 @@ quick_error! {
         UnknownFormat {
             description("Unknown format (not TFS).")
         }
-        /// The state flag is corrupt.
-        CorruptStateFlag {
-            description("Corrupt state flag.")
-        }
-        /// The cipher field is corrupt.
-        CorruptCipher {
-            description("Corrupt cipher option.")
-        }
-        /// The encryption parameters is corrupt.
-        CorruptEncryptionParameters {
-            description("Corrupt encryption paramters.")
-        }
-        /// The state block address is corrupt.
-        CorruptStateBlockAddress {
-            description("Corrupt state block address.")
-        }
-        /// The version number is corrupt.
-        CorruptVersionNumber {
-            description("Corrupt version number.")
-        }
         /// The version is incompatible with this implementation.
         ///
         /// The version number is given by some integer. If the higher half of the integer does not
         /// match, the versions are incompatible and this error is returned.
         IncompatibleVersion {
             description("Incompatible version.")
+        }
+        /// Unknown or implementation-specific checksum algorithm.
+        UnknownChecksumAlgorithm {
+            description("Unknown checksum algorithm option.")
+        }
+        /// Invalid checksum algorithm.
+        InvalidChecksumAlgorithm {
+            description("Invalid checksum algorithm option.")
         }
         /// Unknown/unsupported (implementation-specific) cipher option.
         UnknownCipher {
@@ -69,6 +57,16 @@ quick_error! {
         /// Unknown state flag value.
         UnknownStateFlag {
             description("Unknown state flag.")
+        }
+        /// The checksums doesn't match.
+        ChecksumMismatch {
+            /// The checksum of the data.
+            expected: u16,
+            /// The expected/stored value of the checksum.
+            found: u16,
+        } {
+            display("Mismatching checksums in the disk header - expected {:x}, found {:x}.", expected, found)
+            description("Mismatching checksum.")
         }
     }
 }
@@ -102,6 +100,38 @@ impl Into<&'static [u8]> for MagicNumber {
         match self {
             MagicNumber::TotalCompatibility => TOTAL_COMPATIBILITY_MAGIC_NUMBER,
             MagicNumber::PartialCompatibility => PARTIAL_COMPATIBILITY_MAGIC_NUMBER,
+        }
+    }
+}
+
+/// A checksum algorithm configuration option.
+enum ChecksumAlgorithm {
+    /// SeaHash checksum.
+    ///
+    /// SeaHash was designed for TFS, and is described [in this
+    /// post](http://ticki.github.io/blog/seahash-explained/).
+    SeaHash = 1,
+}
+
+impl ChecksumAlgorithm {
+    /// Produce the checksum of the buffer through the algorithm.
+    pub fn hash(self, buf: &[u8]) -> u64 {
+        // The behavior depends on the chosen checksum algorithm.
+        match self.state.state_block.checksum {
+            // Hash the thing via SeaHash, then take the 16 lowest bits (truncating cast).
+            ChecksumAlgorithm::SeaHash => seahash::hash(buf),
+        }
+    }
+}
+
+impl TryFrom<u16> for ChecksumAlgorithm {
+    type Err = Error;
+
+    fn try_from(from: u16) -> Result<ChecksumAlgorithm, Error> {
+        match from {
+            1 => Ok(ChecksumAlgorithm::SeaHash),
+            1 << 15... => Err(Error::UnknownChecksumAlgorithm),
+            _ => Err(Error::InvalidChecksumAlgorithm),
         }
     }
 }
@@ -157,6 +187,12 @@ struct DiskHeader {
     magic_number: MagicNumber,
     /// The version number.
     version_number: u32,
+    /// The chosen checksum algorithm.
+    checksum_algorithm: ChecksumAlgorithm,
+    /// The address of the state block.
+    state_block_address: clusters::Pointer,
+    /// The state flag.
+    state_flag: StateFlag,
     /// The cipher.
     cipher: Cipher,
     /// The encryption paramters.
@@ -164,10 +200,6 @@ struct DiskHeader {
     /// These are used as defined by the choice of cipher. Some ciphers might use it for salt or
     /// settings, and others not use it at all.
     encryption_parameters: [u8; 16],
-    /// The address of the state block.
-    state_block_address: clusters::Pointer,
-    /// The state flag.
-    consistency_flag: StateFlag,
 }
 
 impl DiskHeader {
@@ -189,42 +221,20 @@ impl DiskHeader {
 
         // Load the version number.
         ret.version_number = LittleEndian::read(buf[8..]);
-        // Right after the version number, the same number follows, but bitwise negated. Make sure
-        // that these numbers match (if it is bitwise negated). The reason for using this form of
-        // code rather than just repeating it as-is is that if one overwrites all bytes with a
-        // constant value, like zero, it won't be detected.
-        if ret.version_number == !LittleEndian::read(buf[12..]) {
-            // Check if the version is compatible. If the higher half doesn't match, there were a
-            // breaking change. Otherwise, if the version number is lower or equal to the current
-            // version, it's compatible.
-            if ret.version_number >> 16 != VERSION_NUMBER >> 16 || ret.version_number > VERSION_NUMBER {
-                // The version is not compatible; abort.
-                return Err(ParseError::IncompatibleVersion);
-            }
-        } else {
-            // The version number is corrupt; abort.
-            return Err(ParseError::CorruptVersionNumber);
+        // Check if the version is compatible. If the higher half doesn't match, there were a
+        // breaking change. Otherwise, if the version number is lower or equal to the current
+        // version, it's compatible.
+        if ret.version_number >> 16 != VERSION_NUMBER >> 16 || ret.version_number > VERSION_NUMBER {
+            // The version is not compatible; abort.
+            return Err(ParseError::IncompatibleVersion);
         }
 
-        // # Encryption section
+        // # Configuration
         //
-        // This section contains information about how the disk was encrypted, if at all.
+        // This section stores certain configuration options needs to properly load the disk header.
 
-        // Load the encryption algorithm choice.
-        ret.cipher = Cipher::try_from(LittleEndian::read(buf[64..]))?;
-        // Repeat the bitwise negation.
-        if ret.cipher as u16 != !LittleEndian::read(buf[66..]) {
-            // The cipher option is corrupt; abort.
-            return Err(ParseError::CorruptCipher);
-        }
-
-        // Load the encryption parameters (e.g. salt).
-        self.encryption_parameters.copy_from_slice(&buf[68..84]);
-        // Repeat the bitwise negation.
-        if self.encryption_parameters.iter().eq(buf[84..100].iter().map(|x| !x)) {
-            // The encryption parameters are corrupt; abort.
-            return Err(ParseError::CorruptEncryptionParameters);
-        }
+        // Load the checksum algorithm config field.
+        ret.checksum_algorithm = ChecksumAlgorithm::try_from(LittleEndian::read(buf[16..]))?;
 
         // # State section
         //
@@ -232,19 +242,29 @@ impl DiskHeader {
         // file system.
 
         // Load the state block pointer.
-        ret.state_block_address = clusters::Pointer::new(LittleEndian::read(buf[128..]));
-        // Repeat the bitwise negation.
-        if ret.state_block_address as u64 != !LittleEndian::read(buf[136..]) {
-            // The state block address is corrupt; abort.
-            return Err(ParseError::CorruptStateBlockAddress);
-        }
+        ret.state_block_address = clusters::Pointer::new(LittleEndian::read(buf[32..]));
 
         // Load the state flag.
-        self.consistency_flag = StateFlag::from(buf[144])?;
-        // Repeat the bitwise negation.
-        if self.consistency_flag as u8 != !buf[145] {
-            // The state flag is corrupt; abort.
-            return Err(ParseError::CorruptStateFlag);
+        ret.state_flag = StateFlag::from(buf[40])?;
+
+        // # Encryption section
+        //
+        // This section contains information about how the disk was encrypted, if at all.
+
+        // Load the encryption algorithm choice.
+        ret.cipher = Cipher::try_from(LittleEndian::read(buf[64..]))?;
+
+        // Load the encryption parameters (e.g. salt).
+        ret.encryption_parameters.copy_from_slice(&buf[66..][..16]);
+
+        // Make sure that the checksum of the disk header matches the 8 byte field in the end.
+        let expected = LittleEndian::read(&buf[128..]);
+        let found = ret.checksum_algorithm.hash(&buf[..128]);
+        if expected != found {
+            return Err(Error::ChecksumMismatch {
+                expected: expected,
+                found: found,
+            });
         }
     }
 
@@ -258,25 +278,24 @@ impl DiskHeader {
 
         // Write the current version number.
         LittleEndian::write(&mut buf[8..], VERSION_NUMBER);
-        LittleEndian::write(&mut buf[12..], !VERSION_NUMBER);
+
+        // Write the checksum algorithm.
+        LittleEndian::write(&mut buf[16..], self.checksum_algorithm as u16);
+
+        // Write the state block address.
+        LittleEndian::write(&mut buf[32..], self.state_block_address);
+
+        // Write the state flag.
+        buf[40] = self.state_flag as u8;
 
         // Write the cipher algorithm.
         LittleEndian::write(&mut buf[64..], self.cipher as u16);
-        LittleEndian::write(&mut buf[66..], !self.cipher as u16);
 
         // Write the encryption parameters.
-        buf[68..84].copy_from_slice(self.encryption_parameters);
-        for (a, b) in buf[84..100].iter_mut().zip(self.encryption_parameters) {
-            *a = !b;
-        };
+        buf[66..][..16].copy_from_slice(self.encryption_parameters);
 
-        // Write the state block address.
-        LittleEndian::write(&mut buf[128..], self.state_block_address);
-        LittleEndian::write(&mut buf[136..], !self.state_block_address);
-
-        // Write the state flag.
-        buf[144] = self.consistency_flag as u8;
-        buf[145] = !self.consistency_flag as u8;
+        // Calculate and write the checksum.
+        LittleEndian::write(&mut buf[128..], self.checksum_algorithm.hash(&buf[..128]));
 
         buf
     }
@@ -334,9 +353,9 @@ impl<D: Disk> Driver<D> {
         let mut header = DiskHeader::decode(header_buf)?;
 
         // TODO: Throw a warning if the flag is still in loading state.
-        match header.consistency_flag {
+        match header.state_flag {
             // Set the state flag to open.
-            StateFlag::Closed => header.consistency_flag = StateFlag::Open,
+            StateFlag::Closed => header.state_flag = StateFlag::Open,
             // The state inconsistent; throw an error.
             StateFlag::Inconsistent => return Err(OpenError::InconsistentState),
         }
@@ -426,7 +445,7 @@ mod tests {
         header.cipher = Cipher::Speck;
         assert_eq!(DiskHeader::decode(header.encode()).unwrap(), header);
 
-        header.consistency_flag = StateFlag::Inconsistent;
+        header.state_flag = StateFlag::Inconsistent;
         assert_eq!(DiskHeader::decode(header.encode()).unwrap(), header);
 
         header.state_block_address = 500;
@@ -441,64 +460,54 @@ mod tests {
         header.magic_number = MagicNumber::PartialCompatibility;
         sector[7] = b'~';
 
+        LittleEndian::write(&mut sector[128..], seahash::hash(sector[..128]));
         assert_eq!(sector, header.encode());
 
         header.version_number |= 0xFF;
         sector[8] = 0xFF;
 
+        LittleEndian::write(&mut sector[128..], seahash::hash(sector[..128]));
+        assert_eq!(sector, header.encode());
+
+        // TODO: This is currently somewhat irrelevant as there is only one cksum algorithm. When a
+        //       second is added, change this to the non-default.
+        header.checksum = ChecksumAlgorithm::SeaHash;
+        sector[16] = 1;
+
+        LittleEndian::write(&mut sector[128..], seahash::hash(sector[..128]));
+        assert_eq!(sector, header.encode());
+
+        header.state_block_address |= 0xFF;
+        sector[32] = 0xFF;
+
+        LittleEndian::write(&mut sector[128..], seahash::hash(sector[..128]));
+        assert_eq!(sector, header.encode());
+
+        header.state_flag = StateFlag::Open;
+        sector[40] = 1;
+
+        LittleEndian::write(&mut sector[128..], seahash::hash(sector[..128]));
         assert_eq!(sector, header.encode());
 
         header.cipher = Cipher::Speck;
         sector[64] = 1;
-        sector[65] = !1;
 
+        LittleEndian::write(&mut sector[128..], seahash::hash(sector[..128]));
         assert_eq!(sector, header.encode());
 
         header.encryption_parameters[0] = 52;
-        sector[68] = 52;
-        sector[84] = !52;
+        sector[66] = 52;
 
+        LittleEndian::write(&mut sector[128..], seahash::hash(sector[..128]));
         assert_eq!(sector, header.encode());
-
-        header.state_block_address |= 0xFF;
-        sector[128] = 0xFF;
-
-        assert_eq!(sector, header.encode());
-
-        header.consistency_flag = StateFlag::Open;
-        sector[144] = 1;
-        sector[145] = !1;
-
-        assert_eq!(sector, header.encode());
-    }
-
-    #[test]
-    fn corrupt_extra() {
-        let mut sector = DiskHeader::default().encode();
-        sector[12] ^= 2;
-        assert_eq!(DiskHeader::decode(sector), Err(Error::CorruptVersionNumber));
-
-        let mut sector = DiskHeader::default().encode();
-        sector[65] ^= 1;
-        assert_eq!(DiskHeader::decode(sector), Err(Error::CorruptCipher));
-
-        let mut sector = DiskHeader::default().encode();
-        sector[84] ^= 1;
-        assert_eq!(DiskHeader::decode(sector), Err(Error::CorruptEncryptionParameters));
-
-        let mut sector = DiskHeader::default().encode();
-        sector[128] ^= 1;
-        assert_eq!(DiskHeader::decode(sector), Err(Error::CorruptStateBlockAddress));
-
-        let mut sector = DiskHeader::default().encode();
-        sector[145] ^= 1;
-        assert_eq!(DiskHeader::decode(sector), Err(Error::CorruptStateFlag));
     }
 
     #[test]
     fn unknown_format() {
         let mut sector = DiskHeader::default().encode();
         sector[0] = b'A';
+
+        LittleEndian::write(&mut sector[128..], seahash::hash(sector[..128]));
         assert_eq!(DiskHeader::decode(sector), Err(Error::UnknownFormat));
     }
 
@@ -506,6 +515,8 @@ mod tests {
     fn incompatible_version() {
         let mut sector = DiskHeader::default().encode();
         sector[11] = 0xFF;
+
+        LittleEndian::write(&mut sector[128..], seahash::hash(sector[..128]));
         assert_eq!(DiskHeader::decode(sector), Err(Error::IncompatibleVersion));
     }
 
@@ -513,15 +524,43 @@ mod tests {
     fn wrong_cipher() {
         let mut sector = DiskHeader::default().encode();
         sector[64] = 0xFF;
+        LittleEndian::write(&mut sector[128..], seahash::hash(sector[..128]));
         assert_eq!(DiskHeader::decode(sector), Err(Error::InvalidCipher));
         sector[65] = 0xFF;
+        LittleEndian::write(&mut sector[128..], seahash::hash(sector[..128]));
         assert_eq!(DiskHeader::decode(sector), Err(Error::UnknownCipher));
     }
 
     #[test]
-    fn unknown_consistency_flag() {
+    fn unknown_state_flag() {
         let mut sector = DiskHeader::default().encode();
-        sector[144] = 6;
+        sector[40] = 6;
+        LittleEndian::write(&mut sector[128..], seahash::hash(sector[..128]));
         assert_eq!(DiskHeader::decode(sector), Err(Error::UnknownStateFlag));
+    }
+
+    #[test]
+    fn wrong_checksum_algorithm() {
+        let mut sector = DiskHeader::default().encode();
+
+        sector[0] = 0;
+        LittleEndian::write(&mut sector[128..], seahash::hash(sector[..128]));
+        assert_eq!(DiskHeader::decode(sector), Err(Error::InvalidChecksumAlgorithm));
+        sector[1] = 0x80;
+        LittleEndian::write(&mut sector[128..], seahash::hash(sector[..128]));
+        assert_eq!(DiskHeader::decode(sector), Err(Error::UnknownChecksumAlgorithm));
+    }
+
+    #[test]
+    fn checksum_mismatch() {
+        let mut sector = DiskHeader::default().encode();
+
+        sector[5] = 28;
+        assert_eq!(DiskHeader::decode(sector), Err(Error::ChecksumMismatch));
+
+        sector = DiskHeader::default().encode();
+
+        sector[500] = 28;
+        assert_eq!(DiskHeader::decode(sector), Err(Error::ChecksumMismatch));
     }
 }
