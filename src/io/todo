@@ -1,6 +1,0 @@
-- Store checksums in pointers
-    - Make checksums a disk driver?
-✔ Implement changes in specification
-- Driver stack (Box<Disk> in vdev.rs)
-- Come up with a way to get rid of the compression flag.
-✔ Get rid of constant checksums

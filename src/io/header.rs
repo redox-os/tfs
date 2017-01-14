@@ -319,23 +319,25 @@ struct Driver<D: Disk> {
     cipher: crypto::Cipher,
 }
 
-/// A driver loading error.
-enum OpenError {
-    /// The state flag was set to "inconsistent".
-    InconsistentState {
-        description("The state flag is marked inconsistent.")
-    }
-    /// A disk header parsing error.
-    Parse(err: ParseError) {
-        from()
-        description("Disk header parsing error")
-        display("Disk header parsing error: {}", err)
-    }
-    /// A disk error.
-    Disk(err: disk::Error) {
-        from()
-        description("Disk I/O error")
-        display("Disk I/O error: {}", err)
+quick_error! {
+    /// A driver loading error.
+    enum OpenError {
+        /// The state flag was set to "inconsistent".
+        InconsistentState {
+            description("The state flag is marked inconsistent.")
+        }
+        /// A disk header parsing error.
+        Parse(err: ParseError) {
+            from()
+            description("Disk header parsing error")
+            display("Disk header parsing error: {}", err)
+        }
+        /// A disk error.
+        Disk(err: disk::Error) {
+            from()
+            description("Disk I/O error")
+            display("Disk I/O error: {}", err)
+        }
     }
 }
 

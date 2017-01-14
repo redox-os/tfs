@@ -189,8 +189,8 @@
 
         \begin{description}
             \item [$n = 0$]    super-page uninitialized.
-            \item [$n \neq 0$] the $n$'th page is the super-page as defined
-                in~\ref{fs:superpage}.
+            \item [$n \neq 0$] $n$ is a pointer (~\ref{cluster:page_ptr}) to
+                the superpage, defined in~\ref{fs:superpage}.
         \end{description}
 
     \chapter{Cluster management}
@@ -208,6 +208,15 @@
                 the header is compressed. Otherwise, it is read uncompressed.
         \end{description}
 
+        Allocation is done in implementation defined manner\footnote{Our
+        implementation first tries to fit it into the next cluster by
+        appending it (all this can be done atomically by updating the
+        occupied space field after writing the cluster, see requirements
+        in~\ref{config:compression}). If this fails, it proceeds to pop
+        from the top of the freelist.}.
+
+        \subsection{Pages}
+        \label{cluster:page_ptr}
         A data cluster contain up to \maxpagesincluster of \pagesize bytes
         blocks called ``pages''. The decompressed data (algorithm defined
         in~\ref{config:compression}) is the contained pages concatenated.
@@ -220,13 +229,6 @@
         $$r = \maxpagesincluster c + p$$
 
         If the cluster is uncompressed, $p = 0$.
-
-        Allocation is done in implementation defined manner\footnote{Our
-        implementation first tries to fit it into the next cluster by
-        appending it (all this can be done atomically by updating the
-        occupied space field after writing the cluster, see requirements
-        in~\ref{config:compression}). If this fails, it proceeds to pop
-        from the top of the freelist.}.
 
         \subsection{Meta-cluster format}
         \label{cluster:metacluster}
