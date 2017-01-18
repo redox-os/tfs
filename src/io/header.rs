@@ -207,7 +207,7 @@ impl DiskHeader {
     ///
     /// This will construct it into memory while performing error checks on the header to ensure
     /// correctness.
-    fn decode(buf: &[u8]) -> Result<DiskHeader, ParseError> {
+    fn decode(buf: &disk::SectorBuf) -> Result<DiskHeader, ParseError> {
         // Start with some default value, which will be filled out later.
         let mut ret = DiskHeader::default();
 
@@ -269,7 +269,7 @@ impl DiskHeader {
     }
 
     /// Encode the header into a sector-sized buffer.
-    fn encode(&self) -> [u8; disk::SECTOR_SIZE] {
+    fn encode(&self) -> disk::SectorBuf {
         // Create a buffer to hold the data.
         let mut buf = [0; disk::SECTOR_SIZE];
 
@@ -303,7 +303,10 @@ impl DiskHeader {
 
 /// A driver transforming a normal disk into a header-less decrypted disk.
 ///
-/// This makes it more convinient to work with.
+/// This makes it more convenient to work with.
+///
+/// Note that it doesn't subtract the disk header sector, since the null sector can still be used
+/// as a trap value, but reading or writing from it results in panic.
 struct Driver<D: Disk> {
     /// The cached disk header.
     ///
@@ -416,14 +419,20 @@ impl<D: Disk> Disk for Driver<D> {
         self.disk.number_of_sectors()
     }
 
-    fn write(sector: Sector, offset: SectorOffset, buffer: &[u8]) -> Result<(), Error> {
+    fn write(sector: Sector, buffer: &[u8]) -> Result<(), Error> {
+        // Make sure it doesn't write to the null sector reserved for the disk header.
+        assert_ne!(sector, 0, "Trying to write to the null sector.");
+
         match self.header.cipher {
             // Encryption disabled; forward the call to the inner disk.
             &Cipher::Identity => self.disk.write(sector, offset, buffer),
             _ => unimplemented!(),
         }
     }
-    fn read(sector: Sector, offset: SectorOffset, buffer: &mut [u8]) -> Result<(), Error> {
+    fn read(sector: Sector, buffer: &mut [u8]) -> Result<(), Error> {
+        // Make sure it doesn't write to the null sector reserved for the disk header.
+        assert_ne!(sector, 0, "Trying to read from the null sector.");
+
         match self.header.cipher {
             // Encryption disabled; forward the call to the inner disk.
             &Cipher::Identity => self.disk.read(sector, offset, buffer),

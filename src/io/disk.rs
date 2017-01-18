@@ -7,8 +7,13 @@
 /// A disk sector number.
 type Sector = usize;
 
+#[derive(Default)]
+type SectorBuf = [u8; disk::SECTOR_SIZE];
+
 /// The logical sector size.
 const SECTOR_SIZE: usize = 512;
+/// The size of a sector pointer.
+const SECTOR_POINTER_SIZE: usize = 8;
 
 quick_error! {
     /// A disk I/O error.
@@ -39,11 +44,9 @@ trait Disk {
     /// Write data to the disk.
     ///
     /// This writes `buffer` into sector `sector`.
-    fn write(sector: Sector, buffer: &[u8]) -> Result<(), Error>;
+    fn write(sector: Sector, buffer: SectorBuf) -> Result<(), Error>;
     /// Read data from the disk.
-    ///
-    /// This reads `buffer.len()` bytes into `buffer` from sector `sector`.
-    fn read(sector: Sector, buffer: &mut [u8]) -> Result<(), Error>;
+    fn read(sector: Sector) -> Result<SectorBuf, Error>;
 }
 
 /// For testing, we allow byte slices to act as disks.
@@ -53,22 +56,22 @@ impl Disk for &mut [u8] {
         self.len() as Sector / SECTOR_SIZE
     }
 
-    fn write(sector: Sector, buffer: &[u8]) -> Result<(), Error> {
+    fn write(sector: Sector, buffer: SectorBuf) -> Result<(), Error> {
         // Check if the sector is within bounds.
         if sector as usize >= self.number_of_sectors() {
             Err(Error::OutOfBounds)
         } else {
-            Ok(self[sector as usize / SECTOR_SIZE as usize..][..buffer.len()]
+            Ok(self[sector as usize / SECTOR_SIZE as usize..][..disk::SECTO ]
                .copy_from_slice(buffer))
         }
     }
 
-    fn read(sector: Sector, buffer: &mut [u8]) -> Result<(), Error> {
+    fn read(sector: Sector) -> Result<SectorBuf, Error> {
         // Check if the sector is within bounds.
         if sector as usize >= self.number_of_sectors() {
             Err(Error::OutOfBounds)
         } else {
-            Ok(buffer.copy_from_slice(self[sector as usize / SECTOR_SIZE as usize..][..buffer.len()]))
+            Ok(buffer.copy_from_slice(self[sector as usize / SECTOR_SIZE as usize..][..disk::SECTOR_SIZE]))
         }
     }
 }

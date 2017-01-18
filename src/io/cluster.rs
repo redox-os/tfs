@@ -1,4 +1,4 @@
-//! Cluster management.
+//! Clusters.
 
 use std::NonZero;
 

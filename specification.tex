@@ -10,21 +10,18 @@
 \date{\today}
 
 % Constants
-\newcommand{\clusterheader}{2 }
 \newcommand{\clustersize}{512 }
-\newcommand{\maxpagesincluster}{256 }
-\newcommand{\metaclustercksum}{8 }
 \newcommand{\minimumsectorsize}{512 }
-\newcommand{\pagesize}{510 } % \clustersize - \clusterheader
 \newcommand{\versionnumber}{0 }
 
 \begin{document}
+    \maketitle
+
     \begin{abstract}
         We give a complete specification of the on-disk representation of the
         TFS file system. Certain implementation details are covered.
     \end{abstract}
 
-    \maketitle
     \tableofcontents
 
     \chapter{Introduction}
@@ -57,6 +54,11 @@
                 is written or retaining the old data.
         \end{itemize}
 
+        Data corruption can break these guarantees or premises, and TFS
+        encompasses certain measures against such corruption, but they are
+        strictly speaking heuristic, like any error detection and correction
+        method, as the damage could be across all the disks.
+
     \chapter{Disk header}
     The first \clustersize bytes are reserved for the ``disk header'' which
     contains unencrypted configuration and information about the state.
@@ -70,7 +72,8 @@
         If the format does only partially conform to this specification, the
         string ``\texttt{\textasciitilde TFS fmt}'' is used instead. Partially
         compatible implementations may use checksum algorithm, ciphers,
-        compression algorithms, and so on not specified in this document.
+        compression algorithms, and so on not specified in this document, but
+        they should abide the same format.
 
         \subsection{Version number (byte 8-12)}
         \label{header:versionnumber}
@@ -87,7 +90,7 @@
 
         \begin{description}
             \item [$1$] The SeaHash algorithm as described
-                in~\ref{checksum:seahash}
+                in~\ref{algorithm:seahash}
             \item [$\geq 2^{15}$] Implementation defined.
         \end{description}
 
@@ -131,7 +134,7 @@
         \begin{description}
             \item [$0$] No encryption (identity function).
             \item [$1$] SPECK-128 (XEX mode) with scrypt key stretching
-                See~\ref{crypto:speck}.
+                See~\ref{algorithm:speck}.
             \item [$\geq 2^{15}$] Implementation defined.
         \end{description}
 
@@ -170,12 +173,22 @@
         \begin{description}
             \item [$0$] No compression (identity function).
             \item [$1$] The LZ4 compressor as described
-                in~\ref{compression:lz4}.
+                in~\ref{algorithm:lz4}.
             \item [$\geq 2^{15}$] Implementation defined.
         \end{description}
 
-    \section{State (byte 16-32)}
-        \subsection{Freelist head pointer (byte 16-24)}
+    \section{State (byte 16-48)}
+        \subsection{Super-page pointer (byte 16-32)}
+        This field stores some number (in little-endian), which takes values
+
+        \begin{description}
+            \item [$n = 0$]    super-page uninitialized.
+            \item [$n \neq 0$] $n$ is a pointer (~\ref{cluster:page}) to the
+                superpage, defined in~\ref{fs:superpage}.
+        \end{description}
+
+        \subsection{Freelist head pointer (byte 32-40)}
+        \label{state:freelist_head}
         This field stores some number (in little-endian), which takes values
 
         \begin{description}
@@ -184,76 +197,86 @@
                 to~\ref{cluster:metacluster}.
         \end{description}
 
-        \subsection{Super-page pointer (byte 24-32)}
-        This field stores some number (in little-endian), which takes values
+        \subsection{Checksum of the freelist head (byte 40-48)}
+        This field stores the checksum (in little-endian) of the active part
+        (~\ref{cluster:metacluster}) of the freelist head, by the algorithm
+        specified in~\ref{config:checksum}.
 
-        \begin{description}
-            \item [$n = 0$]    super-page uninitialized.
-            \item [$n \neq 0$] $n$ is a pointer (~\ref{cluster:page_ptr}) to
-                the superpage, defined in~\ref{fs:superpage}.
-        \end{description}
+        If the freelist is empty, this field is 0.
+
+        \subsection{Freelist head counter (byte 48)}
+        \label{state:freelist_head_counter}
+        This field counts the number of free clusters in the freelist head. If
+        the freelist is empty, this field is 0.
 
     \chapter{Cluster management}
 
     \section{Clusters and pages}
         The disk is divided into clusters of \clustersize bytes each.
 
-        \subsection{Data clusters}
-        Data cluster has a two bytes header in the start:
+        \subsection{Data clusters and pages}
+        \label{cluster:page}
+        A data cluster contain some number of \clustersize bytes blocks called
+        ``pages''.
+
+        A pointer to a page is exactly 128 bits wide (from more less
+        significant bits to more significant):
 
         \begin{description}
-            \item [15-bit checksum] This is the 15 least-significant bits of
-                the checksum of the non-header data, stored in little-endian.
-            \item [1-bit compression flag] If this bit is 1, the data following
-                the header is compressed. Otherwise, it is read uncompressed.
+            \item [Little-endian 64-bit cluster number] This is the cluster in
+                which the page is stored.
+            \item [Little-endian 32-bit page number] If this number is $2^{32}
+                - 1$, the page can be read directly from the cluster without
+                any specialized logic.  Otherwise, this is the offset (in
+                pages) into the decompressed cluster which is compressed by the
+                algorithm specified in~\ref{cluster:compression}.
+            \item [Little-endian 32-bit checksum] This is the 32 least
+                significant bits of the checksum of the page, by the algorithm
+                specified in~\ref{config:checksum}.
         \end{description}
 
-        Allocation is done in implementation defined manner\footnote{Our
-        implementation first tries to fit it into the next cluster by
-        appending it (all this can be done atomically by updating the
-        occupied space field after writing the cluster, see requirements
-        in~\ref{config:compression}). If this fails, it proceeds to pop
-        from the top of the freelist.}.
-
-        \subsection{Pages}
-        \label{cluster:page_ptr}
-        A data cluster contain up to \maxpagesincluster of \pagesize bytes
-        blocks called ``pages''. The decompressed data (algorithm defined
-        in~\ref{config:compression}) is the contained pages concatenated.
-
-        Pointers to pages uses the first 60 bits to define the cluster number,
-        and the last four bits to define which page, it points to. In
-        particular, if $c$ is the cluster number and $p$ is the number of the
-        page in the cluster, then the pointer is given by
-
-        $$r = \maxpagesincluster c + p$$
-
-        If the cluster is uncompressed, $p = 0$.
+        Allocation is done in implementation defined manner.
 
         \subsection{Meta-cluster format}
         \label{cluster:metacluster}
         The head of the freelist is a metacluster, which itself is a collection
-        of other free clusters. It starts with a \metaclustercksum byte
-        checksum of the non-header part of the metacluster.
+        of other free clusters.
+
+        It starts with an 64-bit little-endian checksum of the next
+        metacluster. If no next metacluster exists, this integer is 0. This is
+        followed by a 64-bit little-endian pointer to the next metacluster.
+        Similarly, this is 0 if no next metacluster exists.
 
         Following this, there is some number of 64-bit little-endian pointers
-        to other free clusters.
+        to other free clusters. If the metacluster is the top metacluster
+        (\ref{state:freelist_head}), the pointers up to the cluster counter
+        (\ref{state:freelist_head_counter}). Otherwise, all the pointers from
+        the first in this section up to the first null pointer must be free.
 
-        If any, the first pointer must point to another meta-cluster.
-
-        The rest of the cluster is padded with zeros.
+        The checksum of a metacluster is calculated up to the last free cluster
+        pointer in the metacluster.
 
         \subsection{Allocation and deallocation}
         The algorithm for allocation and deallocation is implementation
         defined\footnote{It is generally done by inspecting the head of the
-            freelist before popping it, to see if it has a sister cluster,
-            where the page can be fit in. If it cannot, the freelist is popped.
-            The way such clusters are paired is up to the implementation.
-            Bijective maps are recommended for optimal performance.}.
+        freelist before popping it, to see if it has a sister cluster,
+        where the page can be fit in. If it cannot, the freelist is popped.
+        The way such clusters are paired is up to the implementation.
+        Bijective maps are recommended for optimal performance.}.
+
+    \section{Compression}
+    \label{cluster:compression}
+        Data is compressed into fixed size blocks via the algorithm chosen
+        in~\ref{config:compression}, but special padding logic is used.
+
+        The compressed data might be padded with $\texttt{ff}_{16}$ and then
+        zeros until the desired length is obtained.
+
+    \chapter{Algorithms}
 
     \section{Checksums}
         \subsection{SeaHash}
-        \label{checksum:seahash}
+        \label{algorithm:seahash}
         SeaHash's initial state is
 
         \begin{align*}
@@ -292,7 +315,7 @@
 
     \section{Compression algorithms}
         \subsection{LZ4}
-        \label{compression:lz4}
+        \label{algorithm:lz4}
         LZ4 compressed data is a series of blocks, subject to following format:
 
         \begin{description}
@@ -317,7 +340,7 @@
 
     \section{Cryptography}
         \subsection{Speck}
-        \label{crypto:speck}
+        \label{algorithm:speck}
         This algorithm uses the 128 block size version of the SPECK
         cipher\cite{speck} with the key generated by \cite{scrypt} with $N =
         2^{20}$, $r = 8$, and $p = 1$. The salt is given

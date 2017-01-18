@@ -10,7 +10,10 @@ struct Block {
     /// The data of the sector.
     ///
     /// This shall reflect what is on the disk unless the block is marked dirty.
-    data: Box<[u8]>,
+    ///
+    /// We do not need to store this on the heap, but we do in order to improve performance and
+    /// avoid excessive copying between stack frames.
+    data: Box<disk::SectorBuf>,
     /// Does the data in memory reflect the data on the disk?
     ///
     /// This is called _the dirty flag_ and defines if a flush is needed or if the in-memory data
@@ -77,7 +80,7 @@ struct Cache<D> {
     ///
     /// These are not committed to the block map yet and will not be until `.commit()` is called.
     /// They are ensured to be written to the disk in the order of the pipeline.
-    pipeline: Vec<(disk::Sector, Box<[u8]>)>,
+    pipeline: Vec<(disk::Sector, Box<disk::SectorBuf>)>,
 }
 
 impl<D: Disk> Cached<D> {
@@ -120,23 +123,19 @@ impl<D: Disk> Cached<D> {
     /// Read a sector from the disk.
     ///
     /// Note that this does not respond to writes in the pipeline, only committed transactions.
-    pub fn read(&self, sector: disk::Sector) -> Result<&[u8], disk::Error> {
+    pub fn read(&self, sector: disk::Sector) -> Result<&disk::SectorBuf, disk::Error> {
         Ok(self.get(sector)?.data)
     }
 
     /// Queue a write to the pipeline.
     ///
     /// This pushes a transaction to the pipeline, which can be committed through `.commit()`.
-    pub fn queue(&mut self, sector: disk::Sector, buf: Box<[u8]>) {
-        self.pipeline.push((sector, buf));
-    }
-
-    /// Revert the pipeline and drop the transactions.
-    ///
-    /// This clears the transactions in the pipeline without commiting them. It can be used when an
-    /// operation fails and you need to return to a consistent state.
-    pub fn revert(&mut self) {
-        self.pipeline.clear();
+    #[inline]
+    pub fn queue(&mut self, sector: disk::Sector, buf: disk::SectorBuf) {
+        // For now, we'll just assume the function gets inlined such that copying the buffer from a
+        // higher stack frame isn't needed.
+        // TODO: Consider letting the call side allocate the buffer.
+        self.pipeline.push((sector, box buf));
     }
 
     /// Commit the transactions in the pipeline to the cache.
@@ -163,6 +162,27 @@ impl<D: Disk> Cached<D> {
                 block = self.commit_write(sector, buf, Some(block.sector));
             }
         }
+    }
+
+    /// Commits a sector write with some dependency.
+    ///
+    /// This writes `buf` into sector `sector` in the cache, ensuring that the sector (if any)
+    /// `dependency` is flushed to the disk prior to `sector`.
+    fn commit_write(&mut self, sector: disk::Sector, buf: Box<disk::SectorBuf>, dependency: Option<disk::Sector>) -> &mut Block {
+        // Allocate a new cache block.
+        let block = cache.alloc_block(sector);
+
+        // Put the data into the freshly allocated cache block.
+        block.data = buf;
+
+        // Add the potential dependency to the cache block.
+        if let Some(dependency) = dependency {
+            block.add_dependency(dependency)
+        }
+        // Mark dirty.
+        block.dirty = true;
+
+        block
     }
 
     /// Trim the cache to reduce memory.
@@ -194,27 +214,6 @@ impl<D: Disk> Cached<D> {
         self.blocks.remove(sector);
 
         Ok(())
-    }
-
-    /// Commits a sector write with some dependency.
-    ///
-    /// This writes `buf` into sector `sector` in the cache, ensuring that the sector (if any)
-    /// `dependency` is flushed to the disk prior to `sector`.
-    fn commit_write(&mut self, sector: cluster::Pointer, buf: Box<[u8]>, dependency: Option<disk::Sector>) -> &mut Block {
-        // Allocate a new cache block.
-        let block = cache.alloc_block(sector);
-
-        // Put the data into the freshly allocated cache block.
-        block.data = buf;
-
-        // Add the potential dependency to the cache block.
-        if let Some(dependency) = dependency {
-            block.add_dependency(dependency)
-        }
-        // Mark dirty.
-        block.dirty = true;
-
-        block
     }
 
     /// Allocate (or find replacement) for a new cache block.
