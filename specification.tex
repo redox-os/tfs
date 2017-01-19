@@ -239,8 +239,7 @@
 
         \subsection{Meta-cluster format}
         \label{cluster:metacluster}
-        The head of the freelist is a metacluster, which itself is a collection
-        of other free clusters.
+        Metaclusters are a collection of other free clusters.
 
         It starts with an 64-bit little-endian checksum of the next
         metacluster. If no next metacluster exists, this integer is 0. This is
@@ -253,8 +252,9 @@
         (\ref{state:freelist_head_counter}). Otherwise, all the pointers from
         the first in this section up to the first null pointer must be free.
 
-        The checksum of a metacluster is calculated up to the last free cluster
-        pointer in the metacluster.
+        The checksum of a metacluster is calculated
+        through~\ref{config:checksum} up to the last free cluster pointer in
+        the metacluster.
 
         \subsection{Allocation and deallocation}
         The algorithm for allocation and deallocation is implementation

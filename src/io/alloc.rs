@@ -398,18 +398,31 @@ impl<D: Disk> Manager<D> {
                     // one.
 
                     // Decode the new metacluster.
-                    self.head_metacluster = Metacluster::decode(self.disk.read(next_metacluster.into())?);
-                    // Update the state block with the data from the newly decoded metacluster.
-                    self.state_block.freelist_head = Some(state_block::FreelistHead {
-                        // The pointer should point towards the new metacluster.
-                        cluster: next_metacluster,
-                        // TODO: This can be done much more efficiently, as we already have the decoded
-                        //       buffer. No need for re-decoding it.
-                        checksum: self.head_metacluster.checksum(),
-                        // Since the cluster can at most contain 63 < 256 clusters, casting to u8
-                        // won't cause overflow.
-                        counter: self.head_metacluster.free.len() as u8,
-                    });
+                    let metacluster = Metacluster::decode(self.disk.read(next_metacluster.into())?);
+                    // Calculate the checksum.
+                    // TODO: This can be done much more efficiently, as we already have the decoded
+                    //       buffer. No need for re-decoding it.
+                    let checksum = self.head_metacluster.checksum();
+
+                    // Check the metacluster against the checksum stored in the older block.
+                    if checksum == self.head_metacluster.next_checksum {
+                        // Checksum matched.
+
+                        // Update the head metacluster to the decoded cluster.
+                        self.head_metacluster = metacluster;
+                        // Update the state block with the data from the newly decoded metacluster.
+                        self.state_block.freelist_head = Some(state_block::FreelistHead {
+                            // The pointer should point towards the new metacluster.
+                            cluster: next_metacluster,
+                            checksum: checksum,
+                            // Since the cluster can at most contain 63 < 256 clusters, casting to u8
+                            // won't cause overflow.
+                            counter: self.head_metacluster.free.len() as u8,
+                        });
+                    } else {
+                        // Checksum mismatched; throw an error.
+                        Err(Error::ChecksumMismatch)
+                    }
                 }
 
                 // We queue a state block flush to write down our changes to the state block.
@@ -462,7 +475,7 @@ impl<D: Disk> Manager<D> {
                 self.state_block.freelist_head = Some(state_block::FreelistHead {
                     cluster: cluster,
                     // Calculate the checksum of the new head metacluster.
-                    checksum: self.checksum(self.head_metacluster.checksum()),
+                    checksum: self.head_metacluster.checksum(),
                     // Currently, no free clusters are stored in the new head metacluster, so the
                     // counter is 0.
                     counter: 0,
