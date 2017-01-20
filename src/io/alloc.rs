@@ -151,6 +151,11 @@ struct Manager<D> {
     /// (i.e. the pages cannot compress to the cluster size or less), a new cluster will be
     /// allocated.
     last_cluster: Option<ClusterState>,
+    /// The deduplication table.
+    ///
+    /// This table allows the allocator for searching for candidates to use instead of allocating a
+    /// new cluster. In particular, it searches for duplicates of the allocated page.
+    dedup_table: dedup::Table,
 }
 
 impl<D: Disk> Manager<D> {
@@ -170,10 +175,22 @@ impl<D: Disk> Manager<D> {
     /// The algorithm works greedily by fitting as many pages as possible into the most recently
     /// used cluster.
     fn queue_alloc(&mut self, buf: disk::SectorBuf) -> Result<page::Pointer, Error> {
+        // TODO: The variables are named things like `ptr`, which kinda contradicts the style of
+        //       the rest of the code.
+
         /// The capacity (in bytes) of a compressed cluster.
         ///
         /// This is the maximal number of bytes that a cluster can contain decompressed.
         const CLUSTER_CAPACITY: usize = 512 * 2048;
+
+        // Calculate the checksum of the buffer. We'll use this later.
+        let cksum = self.checksum(buf) as u32;
+
+        // Check if duplicate exists.
+        if let Some(page) = self.dedup_table.dedup(buf, cksum) {
+            // Deduplicate and simply use the already stored page.
+            return Ok(page);
+        }
 
         // Handle the case where compression is disabled.
         if self.state_block.compression_algorithm == CompressionAlgorithm::Identity {
@@ -182,11 +199,17 @@ impl<D: Disk> Manager<D> {
             // Write the cluster with the raw, uncompressed data.
             self.disk.queue(cluster, buf);
 
-            return page::Pointer {
+            let ptr = page::Pointer {
                 cluster: cluster,
                 offset: None,
-                checksum: self.checksum(buf) as u32,
+                checksum: cksum,
             };
+
+            // Insert the page pointer into the deduplication table to allow future use as
+            // duplicate.
+            self.dedup_table.insert(buf, ptr);
+
+            return Ok(ptr);
         }
 
         if let Some(state) = self.last_cluster {
@@ -205,14 +228,20 @@ impl<D: Disk> Manager<D> {
                     // It succeeded! Write the compressed data into the cluster.
                     self.disk.queue(state.cluster, compressed);
 
-                    // Return the pointer and the algorithm is over.
-                    return Ok(page::Pointer {
+                    let ptr = Ok(page::Pointer {
                         cluster: state.cluster,
                         // Calculate the offset into the decompressed buffer, where the page is
                         // stored.
                         offset: Some(state.uncompressed / disk::SECTOR_SIZE - 1),
-                        checksum: self.checksum(buf) as u32,
+                        checksum: cksum,
                     });
+
+                    // Insert the page pointer into the deduplication table to allow future use as
+                    // duplicate.
+                    self.dedup_table.insert(buf, ptr);
+
+                    // Return the pointer and the algorithm is over.
+                    return Ok(ptr);
                 }
             }
         }
@@ -223,7 +252,7 @@ impl<D: Disk> Manager<D> {
 
         // Pop the cluster from the freelist.
         let cluster = self.queue_freelist_pop()?;
-        if let Some(compressed) = self.compress(buf) {
+        let ptr = if let Some(compressed) = self.compress(buf) {
             // We were able to compress the page to fit into the cluster. At first, compressing the
             // first page seems unnecessary as it is guaranteed to fit in without compression, but
             // it has a purpose: namely that it allows us to extend the cluster. Enabling
@@ -244,7 +273,7 @@ impl<D: Disk> Manager<D> {
             page::Pointer {
                 cluster: cluster,
                 offset: Some(0),
-                checksum: self.checksum(buf) as u32,
+                checksum: cksum,
             }
         } else {
             // We were not able to compress the page into a single cluster. We work under the
@@ -259,9 +288,15 @@ impl<D: Disk> Manager<D> {
             page::Pointer {
                 cluster: cluster,
                 offset: None,
-                checksum: self.checksum(buf) as u32,
+                checksum: cksum,
             }
-        }
+        };
+
+        // Insert the page pointer into the deduplication table to allow future use as
+        // duplicate.
+        self.dedup_table.insert(buf, ptr);
+
+        Ok(ptr)
     }
 
     /// Read/dereference a page.
