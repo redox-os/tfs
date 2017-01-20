@@ -13,18 +13,38 @@ quick_error! {
         OutOfClusters {
             description("Out of free clusters.")
         }
-        /// The checksum of the data and the provided checksum does not match.
+        /// A page checksum did not match.
         ///
-        /// This indicates some form of data corruption.
-        ChecksumMismatch {
+        /// The checksum of the data and the checksum stored in the page pointer did not match.
+        ///
+        /// This indicates some form of data corruption in the sector storing the page.
+        PageChecksumMismatch {
             /// The page with the mismatching checksum.
             page: page::Pointer,
-            /// The stored checksum of the data.
+            /// The actual checksum of the page.
             found: u32,
         } {
-            display("Mismatching checksums in cluster {} - expected {:x}, found {:x}.",
-                    page.cluster, page.checksum, found)
-            description("Mismatching checksum.")
+            display("Mismatching checksums in {} - expected {:x}, found {:x}.",
+                    page, page.checksum, found)
+            description("Mismatching checksum in page.")
+        }
+        /// A metacluster checksum did not match.
+        ///
+        /// The checksum of the metacluster and the checksum stored in the previous metacluster
+        /// pointer did not match.
+        ///
+        /// This indicates some form of data corruption in the sector storing the metacluster.
+        MetacluterChecksumMismatch {
+            /// The corrupted metacluster whose stored and actual checksum mismatches.
+            cluster: cluster::Pointer,
+            /// The expected/stored checksum.
+            expected: u64,
+            /// The actual checksum of the data.
+            found: u64,
+        } {
+            display("Mismatching checksums in metacluster {:x} - expected {:x}, found {:x}.",
+                    cluster, expected.checksum, found)
+            description("Mismatching checksum in metacluster.")
         }
         /// The compressed data is invalid and cannot be decompressed.
         ///
@@ -275,7 +295,7 @@ impl<D: Disk> Manager<D> {
             Ok(ret)
         } else {
             // The checksums mismatched, thrown an error.
-            Err(Error::ChecksumMismatch {
+            Err(Error::PageChecksumMismatch {
                 page: page,
                 found: cksum,
             })
@@ -383,7 +403,8 @@ impl<D: Disk> Manager<D> {
                 // Put back the freelist head into the state block.
                 self.state_block.freelist_head = freelist_head;
 
-                // Queue a state block flush to reflect the changes above.
+                // Queue a state block flush to reflect the changes above. Because both the
+                // checksum and counter are updated, this will be atomic and consistent.
                 self.queue_state_block_flush();
 
                 Ok(free)
@@ -393,9 +414,10 @@ impl<D: Disk> Manager<D> {
                 // next metacluster, if any, and then use the current, exhausted metacluster as the
                 // allocated cluster.
 
+                // The head metacluster is now empty, update the head to the next metacluster, if
+                // it exist.
                 if let Some(next_metacluster) = self.head_metacluster.next_metacluster.take() {
-                    // There were a new metacluster. We'll update the head metacluster to be this
-                    // one.
+                    // A new metacluster existed.
 
                     // Decode the new metacluster.
                     let metacluster = Metacluster::decode(self.disk.read(next_metacluster.into())?);
@@ -421,12 +443,18 @@ impl<D: Disk> Manager<D> {
                         });
                     } else {
                         // Checksum mismatched; throw an error.
-                        Err(Error::ChecksumMismatch)
+                        Err(Error::ChecksumMismatch {
+                            cluster: next_metacluster,
+                            // This was the stored checksum.
+                            expected: self.head_metacluster.next_checksum,
+                            // And the actual checksum.
+                            found: checksum,
+                        })
                     }
-                }
 
-                // We queue a state block flush to write down our changes to the state block.
-                self.queue_state_block_flush();
+                    // We queue a state block flush to write down our changes to the state block.
+                    self.queue_state_block_flush();
+                }
 
                 // Use _the old_ head metacluster as the allocated cluster.
                 Ok(freelist_head.cluster)
