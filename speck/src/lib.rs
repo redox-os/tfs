@@ -4,6 +4,8 @@
 //! structure and code size, which can fit in just a couple of lines, while still preserving
 //! security.
 
+#![feature(i128_type)]
+
 /// The number of rounds.
 const ROUNDS: u64 = 32;
 
@@ -39,7 +41,12 @@ macro_rules! inv_round {
 ///
 /// If you want to reuse the key, however, it is recommended that you use the precomputed schedule
 /// provided by the `Key` struct.
-pub fn encrypt_block((mut m1, mut m2): (u64, u64), (mut k1, mut k2): (u64, u64)) -> (u64, u64) {
+pub fn encrypt_block(m: u128, k: u128) -> u128 {
+    let mut m1 = (m >> 64) as u64;
+    let mut m2 = m as u64;
+    let mut k1 = (k >> 64) as u64;
+    let mut k2 = k as u64;
+
     // Run the initial round (similar to the loop below, but doesn't update the key schedule).
     round!(m1, m2, k2);
 
@@ -50,7 +57,7 @@ pub fn encrypt_block((mut m1, mut m2): (u64, u64), (mut k1, mut k2): (u64, u64))
         round!(m1, m2, k2);
     }
 
-    (m1, m2)
+    m2 as u128 | (m1 as u128) << 64
 }
 
 /// A precomputed key.
@@ -66,7 +73,10 @@ pub struct Key {
 
 impl Key {
     /// Generate a new key from some seed.
-    pub fn new((mut k1, mut k2): (u64, u64)) -> Key {
+    pub fn new(k: u128) -> Key {
+        let mut k1 = (k >> 64) as u64;
+        let mut k2 = k as u64;
+
         let mut ret = Key {
             schedule: [0; ROUNDS as usize],
         };
@@ -85,25 +95,31 @@ impl Key {
     }
 
     /// Encrypt a 128-bit block with this key.
-    pub fn encrypt_block(&self, (mut m1, mut m2): (u64, u64)) -> (u64, u64) {
+    pub fn encrypt_block(&self, m: u128) -> u128 {
+        let mut m1 = (m >> 64) as u64;
+        let mut m2 = m as u64;
+
         // We run a round for every subkey in the generated key schedule.
         for &k in &self.schedule {
             // Run a round on the message.
             round!(m1, m2, k);
         }
 
-        (m1, m2)
+        m2 as u128 | (m1 as u128) << 64
     }
 
     /// Decrypt a 128-bit block with this key.
-    pub fn decrypt_block(&self, (mut c1, mut c2): (u64, u64)) -> (u64, u64) {
+    pub fn decrypt_block(&self, c: u128) -> u128 {
+        let mut c1 = (c >> 64) as u64;
+        let mut c2 = c as u64;
+
         // We run a round for every subkey in the generated key schedule.
         for &k in self.schedule.iter().rev() {
             // Run a round on the message.
             inv_round!(c1, c2, k);
         }
 
-        (c1, c2)
+        c2 as u128 | (c1 as u128) << 64
     }
 }
 
@@ -113,27 +129,22 @@ mod tests {
 
     #[test]
     fn encrypt_decrypt() {
-        let mut a = 394u64;
-        let mut b = 320948u64;
-        let mut x;
-        let mut y = 234087328470234u64;
+        for mut x in 0u128..90000 {
+            // <3
+            x = x.wrapping_mul(0x6eed0e9da4d94a4f6eed0e9da4d94a4f);
+            x ^= (x >> 6) >> (x >> (128 - 6));
+            x = x.wrapping_mul(0x6eed0e9da4d94a4f6eed0e9da4d94a4f);
 
-        for _ in 0..9000 {
-            a = a.wrapping_mul(206066389);
-            b ^= a;
-            x = y.wrapping_add(a);
-            y = x.wrapping_mul(b | 1);
+            let key = Key::new(!x);
 
-            let key = Key::new((x, y));
-
-            assert_eq!(key.decrypt_block(key.encrypt_block((a, b))), (a, b));
-            assert_eq!(key.encrypt_block((a, b)), encrypt_block((a, b), (x, y)));
+            assert_eq!(key.decrypt_block(key.encrypt_block(x)), x);
+            assert_eq!(key.encrypt_block(x), encrypt_block(x, !x));
         }
     }
 
     #[test]
     fn test_vectors() {
         // These test vectors are taken from the SPECK paper.
-        assert_eq!(encrypt_block((0x6c61766975716520, 0x7469206564616d20), (0x0f0e0d0c0b0a0908, 0x0706050403020100)), (0xa65d985179783265, 0x7860fedf5c570d18));
+        assert_eq!(encrypt_block(0x6c617669757165207469206564616d20, 0x0f0e0d0c0b0a09080706050403020100), 0xa65d9851797832657860fedf5c570d18);
     }
 }
