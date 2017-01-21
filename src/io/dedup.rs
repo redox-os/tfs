@@ -72,7 +72,7 @@ struct Table {
     table: [Option<Candidate>; MAX_PAGES_IN_TABLE]
 }
 
-impl DeduplicationTable {
+impl Table {
     /// Find a duplicate of some page.
     ///
     /// This searches for a duplicate of `buf` which has checksum `cksum`. If no duplicate is
@@ -108,5 +108,48 @@ impl DeduplicationTable {
             // TODO: This fingerprint might be double-calculated due to the use in `dedup`.
             fingerprint: fingerprint(buf),
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn duplicate() {
+        let mut table = Table::default();
+        let p1 = page::Pointer {
+            cksum: 7,
+            .. Default::default()
+        };
+        let p2 = page::Pointer {
+            cksum: 13,
+            .. Default::default()
+        };
+
+        table.insert(&Default::default(), p1);
+        table.insert(&Default::default(), p2);
+
+        assert_eq!(table.dedup(&Default::default(), 7), p1);
+        assert_eq!(table.dedup(&Default::default(), 13), p2);
+    }
+
+    #[test]
+    fn checksum_collision() {
+        let mut table = Table::default();
+        let p1 = page::Pointer {
+            cksum: 7,
+            .. Default::default()
+        };
+        let p2 = page::Pointer {
+            cksum: 7,
+            cluster: cluster::Pointer::new(100).unwrap(),
+            .. Default::default()
+        };
+
+        table.insert([0; disk::SECTOR_SIZE], p1);
+        table.insert([1; disk::SECTOR_SIZE], p2);
+
+        assert_eq!(table.dedup(&Default::default(), 7), p2);
     }
 }

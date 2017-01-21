@@ -273,3 +273,5 @@ impl<D: Disk> Drop for Cached<D> {
         self.flush_all();
     }
 }
+
+// TODO: Add tests.
