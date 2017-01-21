@@ -132,7 +132,7 @@ mod tests {
         for mut x in 0u128..90000 {
             // <3
             x = x.wrapping_mul(0x6eed0e9da4d94a4f6eed0e9da4d94a4f);
-            x ^= (x >> 6) >> (x >> (128 - 6));
+            x ^= (x >> 6) >> (x >> 122);
             x = x.wrapping_mul(0x6eed0e9da4d94a4f6eed0e9da4d94a4f);
 
             let key = Key::new(!x);

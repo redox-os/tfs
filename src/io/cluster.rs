@@ -23,3 +23,16 @@ impl Pointer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn null_pointer() {
+        assert!(Pointer::new(0).is_none());
+    }
+
+    fn non_null_pointer() {
+        assert_eq!(Pointer::new(2).unwrap().into(), 2);
+    }
+}
