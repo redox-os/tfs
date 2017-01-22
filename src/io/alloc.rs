@@ -132,8 +132,8 @@ impl Metacluster {
 /// This is the center point of the I/O stack, providing allocation, deallocation, compression,
 /// etc. It manages the clusters (with the page abstraction) and caches the disks.
 struct Manager<D> {
-    /// The inner disk.
-    disk: Cache<header::Driver<D>>,
+    /// The inner disk cache.
+    cache: Cache,
     /// The state block.
     ///
     /// The state block stores the state of the file system including allocation state,
@@ -158,13 +158,13 @@ struct Manager<D> {
     dedup_table: dedup::Table,
 }
 
-impl<D: Disk> Manager<D> {
+impl Manager {
     /// Commit the transactions in the pipeline to the cache.
     ///
     /// This runs over the transactions in the pipeline and applies them to the cache.
-    fn commit(&mut self) {
+    pub fn commit(&mut self) {
         // Commit the cache pipeline.
-        self.disk.commit();
+        self.cache.commit();
     }
 
     /// Queue a page allocation.
@@ -174,7 +174,7 @@ impl<D: Disk> Manager<D> {
     ///
     /// The algorithm works greedily by fitting as many pages as possible into the most recently
     /// used cluster.
-    fn queue_alloc(&mut self, buf: disk::SectorBuf) -> Result<page::Pointer, Error> {
+    pub fn queue_alloc(&mut self, buf: disk::SectorBuf) -> Result<page::Pointer, Error> {
         // TODO: The variables are named things like `ptr`, which kinda contradicts the style of
         //       the rest of the code.
 
@@ -197,7 +197,7 @@ impl<D: Disk> Manager<D> {
             // Pop a cluster from the freelist.
             let cluster = self.queue_freelist_pop()?;
             // Write the cluster with the raw, uncompressed data.
-            self.disk.queue(cluster, buf);
+            self.cache.queue(cluster, buf);
 
             let ptr = page::Pointer {
                 cluster: cluster,
@@ -226,7 +226,7 @@ impl<D: Disk> Manager<D> {
                 // Check if we can compress the extended buffer into a single cluster.
                 if let Some(compressed) = self.compress(state.uncompressed) {
                     // It succeeded! Write the compressed data into the cluster.
-                    self.disk.queue(state.cluster, compressed);
+                    self.cache.queue(state.cluster, compressed);
 
                     let ptr = Ok(page::Pointer {
                         cluster: state.cluster,
@@ -261,7 +261,7 @@ impl<D: Disk> Manager<D> {
             // there is no change in how the other pages are read.
 
             // Write the compressed data into the cluster.
-            self.disk.queue(cluster, compressed);
+            self.cache.queue(cluster, compressed);
 
             // Make the "last cluster" the newly allocated cluster.
             self.last_cluster = Some(ClusterState {
@@ -283,7 +283,7 @@ impl<D: Disk> Manager<D> {
             // algorithms with a reordering step), rarely shrinks by adding more data.
 
             // Write the data into the cluster, uncompressed.
-            self.disk.queue(cluster, buf);
+            self.cache.queue(cluster, buf);
 
             page::Pointer {
                 cluster: cluster,
@@ -302,9 +302,9 @@ impl<D: Disk> Manager<D> {
     /// Read/dereference a page.
     ///
     /// This reads page `page` and returns the content.
-    fn read(&self, page: page::Pointer) -> Result<disk::SectorBuf, Error> {
+    pub fn read(&self, page: page::Pointer) -> Result<disk::SectorBuf, Error> {
         // Read the cluster in which the page is stored.
-        let buf = self.disk.read(page.cluster)?;
+        let buf = self.cache.read(page.cluster)?;
 
         let ret = if let Some(offset) = page.offset {
             // The page is compressed, decompress it and read at some offset `offset` (in pages).
@@ -402,7 +402,7 @@ impl<D: Disk> Manager<D> {
     ///
     /// This queues a new transaction flushing the state block.
     fn queue_state_block_flush(&mut self) {
-        self.disk.queue(self.header.state_block_address, self.state_block.encode());
+        self.cache.queue(self.header.state_block_address, self.state_block.encode());
     }
 
     /// Queue a head metacluster write to some cluster.
@@ -411,7 +411,7 @@ impl<D: Disk> Manager<D> {
     /// `self.head_metacluster` into the cluster `cluster`.
     fn queue_head_metacluster_write(&mut self, cluster: cluster::Pointer) {
         // Queue the write of the encoded buffer.
-        self.disk.queue(cluster, self.head_metacluster.encode());
+        self.cache.queue(cluster, self.head_metacluster.encode());
     }
 
     /// Queue a pop from the freelist.
@@ -455,7 +455,7 @@ impl<D: Disk> Manager<D> {
                     // A new metacluster existed.
 
                     // Decode the new metacluster.
-                    let metacluster = Metacluster::decode(self.disk.read(next_metacluster.into())?);
+                    let metacluster = Metacluster::decode(self.cache.read(next_metacluster.into())?);
                     // Calculate the checksum.
                     // TODO: This can be done much more efficiently, as we already have the decoded
                     //       buffer. No need for re-decoding it.
@@ -512,7 +512,7 @@ impl<D: Disk> Manager<D> {
     fn queue_freelist_push(&mut self, cluster: cluster::Pointer) -> Result<(), Error> {
         // If enabled, purge the data of the cluster.
         if cfg!(feature = "security") {
-            self.disk.queue(cluster, disk::SectorBuf::default());
+            self.cache.queue(cluster, disk::SectorBuf::default());
         }
 
         if let Some(freelist_head) = self.state_block.freelist_head {

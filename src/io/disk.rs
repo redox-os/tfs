@@ -22,13 +22,21 @@ quick_error! {
         ///
         /// This is triggered when the sector read or written to does not exist.
         OutOfBounds {
+            /// The sector out-of-bounds.
+            sector: Sector,
+        } {
+            display("Disk sector {} past end of disk.", sector)
             description("Disk sector past end of disk.")
         }
         /// The sector is determined to be corrupted per the hardware checks.
         ///
         /// Most modern hard disks implement some form of consistency checks. If said check fails, this
         /// error shall be returned.
-        SectorCorrupted {
+        CorruptSector {
+            /// The corrupt sector.
+            sector: Sector,
+        } {
+            display("Disk sector {} is corrupt.", sector)
             description("Corrupt disk sector.")
         }
     }
@@ -43,10 +51,12 @@ trait Disk {
 
     /// Write data to the disk.
     ///
-    /// This writes `buffer` into sector `sector`.
-    fn write(sector: Sector, buffer: SectorBuf) -> Result<(), Error>;
+    /// This writes buffer `buf` into sector `sector`.
+    fn write(&mut self, sector: Sector, buf: &SectorBuf) -> Result<(), Error>;
     /// Read data from the disk.
-    fn read(sector: Sector) -> Result<SectorBuf, Error>;
+    ///
+    /// This reads sector `sector` into buffer `buf`.
+    fn read(&self, sector: Sector, buf: &mut SectorBuf) -> Result<(), Error>;
 }
 
 /// For testing, we allow byte slices to act as disks.
@@ -62,16 +72,16 @@ impl Disk for &mut [u8] {
             Err(Error::OutOfBounds)
         } else {
             Ok(self[sector as usize / SECTOR_SIZE as usize..][..disk::SECTO ]
-               .copy_from_slice(buffer))
+               .copy_from_slice(buf))
         }
     }
 
-    fn read(sector: Sector) -> Result<SectorBuf, Error> {
+    fn read(sector: Sector, buf: &mut SectorBuf) -> Result<(), Error> {
         // Check if the sector is within bounds.
         if sector as usize >= self.number_of_sectors() {
             Err(Error::OutOfBounds)
         } else {
-            Ok(buffer.copy_from_slice(self[sector as usize / SECTOR_SIZE as usize..][..disk::SECTOR_SIZE]))
+            Ok(buf.copy_from_slice(self[sector as usize / SECTOR_SIZE as usize..][..disk::SECTOR_SIZE]))
         }
     }
 }

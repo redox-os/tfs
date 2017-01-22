@@ -60,6 +60,7 @@
         method, as the damage could be across all the disks.
 
     \chapter{Disk header}
+    \label{header}
     The first \clustersize bytes are reserved for the ``disk header'' which
     contains unencrypted configuration and information about the state.
 
@@ -71,7 +72,7 @@
 
         If the format does only partially conform to this specification, the
         string ``\texttt{\textasciitilde TFS fmt}'' is used instead. Partially
-        compatible implementations may use checksum algorithm, ciphers,
+        compatible implementations may use checksum algorithm, vdevs,
         compression algorithms, and so on not specified in this document, but
         they should abide the same format.
 
@@ -125,31 +126,49 @@
 
         Any other value is considered invalid.
 
-    \section{Encryption (byte 64-82)}
-        \subsection{Encryption algorithm (byte 64-66)}
-        \label{header:encryption}
-        This field stores a number in little-endian defining encryption
-        algorithm in use. It takes following values
+    \section{Virtual device stack (byte 64-504)}
+        This stores the virtual device (``vdev'') configuration stack, in the
+        order in which the vdev transformations are applied.
 
-        \begin{description}
-            \item [$0$] No encryption (identity function).
-            \item [$1$] SPECK-128 (XEX mode) with scrypt key stretching
-                See~\ref{algorithm:speck}.
-            \item [$\geq 2^{15}$] Implementation defined.
-        \end{description}
+        It is a prefix-free code with each codeword starting with an 16-bit
+        little-endian label defining the type of the particular vdev.
 
-        Any data not stored in the introducer is encrypted through the chosen method.
+        The vdevs are specified in~\ref{vdev}.
 
-        \subsection{Encryption parameters (byte 66-82)}
-        \label{header:encryptionparams}
-        These are parameters used differently based on the choice
-        in~\ref{header:encryption}.
-
-    \section{Integrity checking (byte 128-136)}
+    \section{Integrity checking (byte 504-512)}
         \subsection{Checksum (byte 128-136)}
         This field stores a little-endian integer equal to the checksum of the
         state block preceding the checksum itself, calculated by the algorithm
         specified in~\ref{config:checksum}.
+
+    \chapter{Virtual devices}
+    \label{vdev}
+        \section{Terminator}
+        This vdev has label 0 and acts as the last applied vdev. No vdevs
+        follows.
+
+        \section{Mirror}
+        This vdev has label 1. It halfs the parent vdev and lets the higher
+        half mirror the lower. Any write to the disk transforms to two
+        identical writes into the lower and higher part respectively.
+
+        \section{SPECK encryption}
+        This vdev has label 2 and encrypts everything after the disk header
+        (~\ref{header}) in the parent vdev with SPECK-128 (XEX mode) with
+        scrypt key stretching. The salt is stored as a 128-bit little-endian
+        integer after the label.
+
+        For details, refer to~\ref{algorithm:speck}.
+
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+        \section{Implementation defined}
+        This vdev has label $\texttt{ffff}_{16}$ and 8 bytes following, uniquely
+        identifying the type\footnote{It is strongly recommended that this
+        integer is chosen at random to avoid colliding with other
+        implementations.}. The behavior of this vdev and the number of bytes
+        following the label and sublevel is entirely left to the implementation
+        defined.
 
     \chapter{State block}
     \label{stateblock}
@@ -161,8 +180,8 @@
         This field stores a little-endian integer equal to the checksum of the
         state block following the checksum itself\footnote{This does not have
         the self-validation problem since it is the top block, and silent
-        phantom writes won't affect the correctness of the state.}, calculated by
-        the algorithm specified in~\ref{config:checksum}.
+        phantom writes won't affect the correctness of the state.}, calculated
+        by the algorithm specified in~\ref{config:checksum}.
 
     \section{Configuration (byte 8-16)}
         \subsection{Compression algorithm (byte 8-10)}
@@ -319,7 +338,8 @@
         LZ4 compressed data is a series of blocks, subject to following format:
 
         \begin{description}
-            \item [1 byte token] Call the higher 4 bits $t_1$ and the lower $t_2$.
+            \item [1 byte token] Call the higher 4 bits $t_1$ and the lower
+                $t_2$.
             \item [$n_1$ 255s (skip if $t_1 \neq 15$)]
             \item [1 byte (skip if $t_1 \neq 15$)] Call this value $e_1$.
             \item [$t_1 + 256n_1 + e_1$ bytes] This (called the literals
@@ -343,8 +363,7 @@
         \label{algorithm:speck}
         This algorithm uses the 128 block size version of the SPECK
         cipher\cite{speck} with the key generated by \cite{scrypt} with $N =
-        2^{20}$, $r = 8$, and $p = 1$. The salt is given
-        by~\ref{header:encryptionparams}.
+        2^{20}$, $r = 8$, and $p = 1$. The salt is given by the vdev.
 
         The cipher is used in the XEX mode of operation\cite{xex}.
 

@@ -65,9 +65,11 @@ impl Block {
 /// It organizes the cache into _cache blocks_ each representing some _disk sector_. The cache
 /// blocks are put in a _dependency graph_ which enforces the ordering of flushes (writes to
 /// disks).
-struct Cache<D> {
+///
+/// It holds a vdev driver, which the flushes are written to.
+struct Cache {
     /// The raw disk.
-    disk: D,
+    disk: vdev::Driver,
     /// The cache replacement tracker.
     ///
     /// This tracks the state of the replacement algorithm, which chooses which cache block shall
@@ -83,7 +85,7 @@ struct Cache<D> {
     pipeline: Vec<(disk::Sector, Box<disk::SectorBuf>)>,
 }
 
-impl<D: Disk> Cached<D> {
+impl Cached {
     /// Flush a sector to the disk.
     ///
     /// This can potentially trigger outer flushes if the cache block has flush dependencies.
@@ -268,7 +270,7 @@ impl<D: Disk> Cached<D> {
     }
 }
 
-impl<D: Disk> Drop for Cached<D> {
+impl Drop for Cached {
     fn drop(&mut self) {
         self.flush_all();
     }
