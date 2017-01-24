@@ -59,11 +59,11 @@ quick_error! {
             display("Unable to decompress data from cluster {}.", cluster)
             description("Unable to decompress data.")
         }
-        /// A cache reading error.
-        CacheRead(err: cache::ReadError) {
+        /// A disk error.
+        Disk(err: disk::Error) {
             from()
-            description("Cache reading error.")
-            display("Cache reading error: {}", err)
+            description("Disk I/O error.")
+            display("Disk I/O error: {}", err)
         }
     }
 }
@@ -304,7 +304,7 @@ impl Manager {
     /// This reads page `page` and returns the content.
     pub fn read(&self, page: page::Pointer) -> Result<disk::SectorBuf, Error> {
         // Read the cluster in which the page is stored.
-        self.cache.read(page.cluster, |cluster| {
+        self.cache.read_then(page.cluster, |cluster| {
             // Decompress if necessary.
             let buf = if let Some(offset) = page.offset {
                 // The page is compressed, decompress it and read at some offset `offset` (in pages).

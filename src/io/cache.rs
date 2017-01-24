@@ -58,28 +58,6 @@ impl Block {
     }
 }
 
-
-quick_error! {
-    /// A cache reading error.
-    enum ReadError<T: Error> {
-        /// A disk error.
-        Disk(err: disk::Error) {
-            from()
-            description("Disk I/O error.")
-            display("Disk I/O error: {}", err)
-        }
-        /// Another error.
-        ///
-        /// This is simply wrapping the generic parameter, so the programmer can choose another
-        /// error they want.
-        Other(err: T) {
-            from()
-            description(err.description())
-            display("{}", err)
-        }
-    }
-}
-
 /// A cached disk.
 ///
 /// This wrapper manages caching and the consistency issues originating from it.
@@ -150,8 +128,8 @@ impl Cached {
     /// to recover, and retry `map`.
     ///
     /// Note that this does not respond to writes in the pipeline, only committed transactions.
-    pub fn read_then<F, E>(&self, sector: disk::Sector, map: F) -> Result<T, ReadError<E>>
-        where F: Fn(buf: &disk::SectorBuf) -> Result<T, E> {
+    pub fn read_then<F, E>(&self, sector: disk::Sector, map: F) -> Result<T, E>
+        where F: Fn(buf: Result<&disk::SectorBuf, disk::Error>) -> Result<T, E> {
         // Check if the sector already exists in the cache.
         if let Some(block) = self.blocks.get_mut(sector) {
             // It did!
@@ -160,19 +138,18 @@ impl Cached {
             self.cache_tracker.touch(sector);
 
             // Read the block and pass it through `map`.
-            map(&self.blocks[block].data)
+            map(Ok(&self.blocks[block].data))
         } else {
             // It didn't, so we read it from the disk and see if it passes verification.
-            if let Ok(ret) = map(self.fetch_fresh(sector)?) {
+            if let Ok(ret) = map(self.fetch_fresh(sector)) {
                 // It's all good.
                 Ok(ret)
             } else {
                 // The verifier failed, so the data is likely corrupt. We'll try to recover the
-                // data through the vdev's redundancy.
-                self.disk.heal(sector)?;
-                // We read it again and see if it passes verification this time. If not, healing
-                // failed, and we cannot do anything about it.
-                map(&self.fetch_fresh(sector)?.data)
+                // data through the vdev's redundancy, then we read it again and see if it passes
+                // verification this time. If not, healing failed, and we cannot do anything about
+                // it.
+                map(self.disk.heal(sector).or_else(|| &self.fetch_fresh(sector)?.data))
             }
         }
     }

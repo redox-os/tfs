@@ -39,16 +39,6 @@ quick_error! {
             display("Disk sector {} is corrupt.", sector)
             description("Corrupt disk sector.")
         }
-        /// Sector healing failed.
-        ///
-        /// The corrupt sector could not be healed, unfortunately.
-        HealFailed {
-            /// The sector which was being healed.
-            sector: Sector,
-        } {
-            display("Disk sector {} could not be healed.", sector)
-            description("Failed to heal corrupt disk sector")
-        }
     }
 }
 
