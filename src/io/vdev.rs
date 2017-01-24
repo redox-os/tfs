@@ -1,25 +1,17 @@
-/// A virtual device.
-///
-/// A virtual device or "vdev" is a disk with some extra capabilities. It transforms operations to
-/// disks to provide new features.
-///
-/// Vdevs themself can be seen as an image (transformation) of another vdev. They might modify the
-/// sector enumeration or provide some redundancy, encryption, or similar features.
-///
-/// The term vdev has a equivalent meaning in the context of ZFS.
-///
-/// It is important that vdevs keep the invariants of the inner vdev. In particular, it may not
-/// leave to an inconsistent state, unless the inner vdev does. Futhermore, the disk header must be
-/// in sector 0, unmodified.
-trait Vdev: Disk {
-    /// Heal a sector.
-    ///
-    /// This heals sector `sector`, through the provided redundancy, if possible.
-    ///
-    /// Note that after it is called, it is still necessary to check if the healed sector is valid,
-    /// as there is a certain probability that the recovery will fail.
-    fn heal(&mut self, sector: disk::Sector) -> Result<(), disk::Error>;
-}
+//! Virtual devices.
+//!
+//! A virtual device or "vdev" is a disk with some extra capabilities. It transforms operations to
+//! other operationss in order to provide new features.
+//!
+//! Vdevs themself can be seen as an image (transformation) of another disk. They might modify the
+//! sector enumeration or provide some redundancy, encryption, or similar features working on disk
+//! level.
+//!
+//! The term vdev has a equivalent meaning in the context of ZFS.
+//!
+//! It is important that vdevs keep the invariants of the inner vdev. In particular, it may not
+//! leave to an inconsistent state, unless the inner vdev does. Futhermore, the disk header must be
+//! in sector 0, unmodified.
 
 /// A mirror vdev.
 ///
@@ -28,13 +20,31 @@ trait Vdev: Disk {
 ///
 /// It allows you to potentially heal a sector, by fetching its copy in the higher part.
 struct Mirror {
-    /// The inner vdev.
-    inner: Box<Vdev>,
+    /// The inner disk.
+    inner: Box<Disk>,
 }
 
-impl Vdev for Mirror {
+impl Disk for Mirror {
+    fn number_of_sectors(&self) -> disk::Sector {
+        // Simply half the number of sectors of the inner disk.
+        self.inner.number_of_sectors() >> 1
+    }
+
+    fn write(sector: Sector, buf: &SectorBuf) -> Result<(), disk::Error> {
+        // Write to the main sector.
+        self.inner.write(sector, buf)?;
+        // Write the mirror sector. If the disk was somehow suspended before the mirror sector was
+        // written, both halfs of the inner disk are still consistent, so it won't leave to an
+        // inconsistent state, despite being out of sync.
+        self.inner.write(sector + self.number_of_sectors(), buf)
+    }
+    fn read(sector: Sector, buf: &mut SectorBuf) -> Result<(), disk::Error> {
+        // Forward the call to the inner.
+        self.inner.read(sector, buf)
+    }
+
     fn heal(&mut self, sector: disk::Sector) -> Result<(), disk::Error> {
-        // Get the size of half of the inner vdev.
+        // Get the size of half of the inner disk.
         let half = self.number_of_sectors();
         // Check if in bound.
         if sector < half {
@@ -54,48 +64,21 @@ impl Vdev for Mirror {
     }
 }
 
-impl Disk for Mirror {
-    fn number_of_sectors(&self) -> disk::Sector {
-        // Simply half the number of sectors of the inner vdev.
-        self.inner.number_of_sectors() >> 1
-    }
-
-    fn write(sector: Sector, buf: &SectorBuf) -> Result<(), disk::Error> {
-        // Write to the main sector.
-        self.inner.write(sector, buf)?;
-        // Write the mirror sector. If the disk was somehow suspended before the mirror sector was
-        // written, both halfs of the inner vdev are still consistent, so it won't leave to an
-        // inconsistent state, despite being out of sync.
-        self.inner.write(sector + self.number_of_sectors(), buf)
-    }
-    fn read(sector: Sector, buf: &mut SectorBuf) -> Result<(), disk::Error> {
-        // Forward the call to the inner.
-        self.inner.read(sector, buf)
-    }
-}
-
 /// A SPECK encryption vdev.
 ///
-/// This encrypts the inner vdev with the SPECK cipher in XEX mode and Scrypt key stretching.
+/// This encrypts the inner disk with the SPECK cipher in XEX mode and Scrypt key stretching.
 struct Speck {
-    /// The inner vdev.
-    inner: Box<Vdev>,
+    /// The inner disk.
+    inner: Box<Disk>,
     /// The key to encrypt with.
     ///
     /// This is derived through Scrypt.
     key: u128,
 }
 
-impl Vdev for Speck {
-    fn heal(&mut self, sector: disk::Sector) -> Result<(), disk::Error> {
-        // Simply forward the call to the inner vdev.
-        self.inner.heal(sector)
-    }
-}
-
 impl Disk for Speck {
     fn number_of_sectors(&self) -> disk::Sector {
-        // Simply forward the call to the inner vdev.
+        // Simply forward the call to the inner disk.
         self.inner.number_of_sectors()
     }
 
@@ -105,6 +88,11 @@ impl Disk for Speck {
     }
     fn read(sector: Sector, buf: &mut SectorBuf) -> Result<(), disk::Error> {
         unimplemented!()
+    }
+
+    fn heal(&mut self, sector: disk::Sector) -> Result<(), disk::Error> {
+        // Simply forward the call to the inner disk.
+        self.inner.heal(sector)
     }
 }
 
@@ -148,7 +136,7 @@ struct Driver {
     pub header: header::DiskHeader,
     /// The inner disk.
     // TODO: Remove this vtable?
-    vdev: Box<Vdev>,
+    disk: Box<Disk>,
 }
 
 
@@ -168,24 +156,32 @@ impl Driver {
 
         // TODO: Throw a warning if the flag is still in loading state.
         match header.state_flag {
-            // Set the state flag to open.
-            StateFlag::Closed => header.state_flag = StateFlag::Open,
+            // Throw a warning if it wasn't properly shut down.
+            StateFlag::Open => {
+                /* TODO: logging
+                warn!(log, "The disk's state flag is still open. Disk likely wasn't properly shut \
+                      down last time. Beware of data loss.");
+                */
+            },
             // The state inconsistent; throw an error.
             StateFlag::Inconsistent => return Err(OpenError::InconsistentState),
         }
+
+        // Set the state flag to open.
+        header.state_flag = StateFlag::Open;
 
         // Update the version.
         header.version_number = VERSION_NUMBER;
 
         // Construct the vdev stack.
-        let mut vdev = Box::new(vdev);
+        let mut disk = Box::new(disk);
         for i in header.vdev_stack {
-            vdev = match i {
+            disk = match i {
                 Vdev::Mirror => Box::new(Mirror {
-                    inner: vdev,
+                    inner: disk,
                 }),
                 Vdev::Speck { salt } => Box::new(Speck {
-                    inner: vdev,
+                    inner: disk,
                     // Derive the key.
                     key: crypto::derive(salt, password),
                 }),
@@ -194,7 +190,7 @@ impl Driver {
 
         let driver = Driver {
             header: header,
-            vdev: vdev,
+            disk: disk,
         };
 
         // Flush the updated header.
@@ -206,11 +202,11 @@ impl Driver {
     /// Flush the stored disk header.
     fn flush_header(&mut self) -> Result<(), disk::Error> {
         // Encode and write it to the disk.
-        self.vdev.write(0, &self.header.encode())
+        self.disk.write(0, &self.header.encode())
     }
 }
 
-impl<D: Disk> Drop for Driver<D> {
+impl Drop for Driver {
     fn drop(&mut self) {
         // Set the state flag to close so we know that it was a proper shutdown.
         self.header.state_flag = StateFlag::Closed;
@@ -219,30 +215,28 @@ impl<D: Disk> Drop for Driver<D> {
     }
 }
 
-impl<D: Disk> Disk for Driver<D> {
+impl Disk for Driver {
     fn number_of_sectors(&self) -> Sector {
-        self.vdev.number_of_sectors()
+        self.disk.number_of_sectors()
     }
 
     fn write(sector: Sector, buf: &[u8]) -> Result<(), Error> {
         // Make sure it doesn't write to the null sector reserved for the disk header.
         assert_ne!(sector, 0, "Trying to write to the null sector.");
 
-        // Forward the call to the inner vdev.
-        self.vdev.write(sector, buf)
+        // Forward the call to the inner disk.
+        self.disk.write(sector, buf)
     }
     fn read(sector: Sector, buf: &mut [u8]) -> Result<(), Error> {
         // Make sure it doesn't write to the null sector reserved for the disk header.
         assert_ne!(sector, 0, "Trying to read from the null sector.");
 
-        // Forward the call to the inner vdev.
-        self.vdev.read(sector, buf)
+        // Forward the call to the inner disk.
+        self.disk.read(sector, buf)
     }
-}
 
-impl Vdev for Driver {
     fn heal(&mut self, sector: disk::Sector) -> Result<(), disk::Error> {
-        // Forward the call to the inner vdev.
-        self.vdev.read(sector)
+        // Forward the call to the inner disk.
+        self.disk.heal(sector)
     }
 }

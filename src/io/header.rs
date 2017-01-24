@@ -54,16 +54,16 @@ quick_error! {
             /// The expected/stored value of the checksum.
             found: u16,
         } {
-            display("Mismatching checksums in the disk header - expected {:x}, found {:x}.", expected, found)
             description("Mismatching checksum.")
+            display("Mismatching checksums in the disk header - expected {:x}, found {:x}.", expected, found)
         }
         /// Non-existent vdev.
         InvalidVdev {
             /// The unknown label.
             label: u16,
         } {
-            display("Invalid/nonexistent vdev with label {}.", label)
             description("Invalid/nonexistent vdev in the vdev stack.")
+            display("Invalid/nonexistent vdev with label {}.", label)
         }
         /// Unknown implementation defined vdev.
         UnknownVdev {

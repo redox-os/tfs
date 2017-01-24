@@ -58,6 +58,28 @@ impl Block {
     }
 }
 
+
+quick_error! {
+    /// A cache reading error.
+    enum ReadError<T: Error> {
+        /// A disk error.
+        Disk(err: disk::Error) {
+            from()
+            description("Disk I/O error.")
+            display("Disk I/O error: {}", err)
+        }
+        /// Another error.
+        ///
+        /// This is simply wrapping the generic parameter, so the programmer can choose another
+        /// error they want.
+        Other(err: T) {
+            from()
+            description(err.description())
+            display("{}", err)
+        }
+    }
+}
+
 /// A cached disk.
 ///
 /// This wrapper manages caching and the consistency issues originating from it.
@@ -122,11 +144,37 @@ impl Cached {
         }
     }
 
-    /// Read a sector from the disk.
+    /// Read a sector from the disk, then apply a closure to it.
+    ///
+    /// This reads sector `sector` and runs it through closure `map`. If it fails, it will attempt
+    /// to recover, and retry `map`.
     ///
     /// Note that this does not respond to writes in the pipeline, only committed transactions.
-    pub fn read(&self, sector: disk::Sector) -> Result<&disk::SectorBuf, disk::Error> {
-        Ok(self.get(sector)?.data)
+    pub fn read_then<F, E>(&self, sector: disk::Sector, map: F) -> Result<T, ReadError<E>>
+        where F: Fn(buf: &disk::SectorBuf) -> Result<T, E> {
+        // Check if the sector already exists in the cache.
+        if let Some(block) = self.blocks.get_mut(sector) {
+            // It did!
+
+            // Touch the cache block.
+            self.cache_tracker.touch(sector);
+
+            // Read the block and pass it through `map`.
+            map(&self.blocks[block].data)
+        } else {
+            // It didn't, so we read it from the disk and see if it passes verification.
+            if let Ok(ret) = map(self.fetch_fresh(sector)?) {
+                // It's all good.
+                Ok(ret)
+            } else {
+                // The verifier failed, so the data is likely corrupt. We'll try to recover the
+                // data through the vdev's redundancy.
+                self.disk.heal(sector)?;
+                // We read it again and see if it passes verification this time. If not, healing
+                // failed, and we cannot do anything about it.
+                map(&self.fetch_fresh(sector)?.data)
+            }
+        }
     }
 
     /// Queue a write to the pipeline.
@@ -248,25 +296,6 @@ impl Cached {
 
         // Add the cache block to the cache tracker.
         self.cache_tracker.insert(sector);
-    }
-
-    /// Get the cache block for a sector.
-    ///
-    /// This grabs the sector from the cache or from the disk, if necessary.
-    fn get(&mut self, sector: disk::Sector) -> Result<&mut Block, disk::Error> {
-        // Check if the sector already exists in the cache.
-        if let Some(block) = self.blocks.get_mut(sector) {
-            // It did!
-
-            // Touch the cache block.
-            self.cache_tracker.touch(sector);
-
-            // Read the block.
-            Ok(&mut self.blocks[block])
-        } else {
-            // It didn't, so we read it from the disk:
-            self.fetch_fresh(sector)
-        }
     }
 }
 

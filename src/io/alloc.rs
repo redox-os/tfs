@@ -59,11 +59,11 @@ quick_error! {
             display("Unable to decompress data from cluster {}.", cluster)
             description("Unable to decompress data.")
         }
-        /// A disk error.
-        Disk(err: disk::Error) {
+        /// A cache reading error.
+        CacheRead(err: cache::ReadError) {
             from()
-            description("Disk I/O error")
-            display("Disk I/O error: {}", err)
+            description("Cache reading error.")
+            display("Cache reading error: {}", err)
         }
     }
 }
@@ -304,37 +304,37 @@ impl Manager {
     /// This reads page `page` and returns the content.
     pub fn read(&self, page: page::Pointer) -> Result<disk::SectorBuf, Error> {
         // Read the cluster in which the page is stored.
-        let buf = self.cache.read(page.cluster)?;
+        self.cache.read(page.cluster, |cluster| {
+            // Decompress if necessary.
+            let buf = if let Some(offset) = page.offset {
+                // The page is compressed, decompress it and read at some offset `offset` (in pages).
 
-        let ret = if let Some(offset) = page.offset {
-            // The page is compressed, decompress it and read at some offset `offset` (in pages).
+                // Decompress the cluster.
+                let decompressed = self.decompress(cluster)?;
 
-            // Decompress the cluster.
-            let decompressed = self.decompress(buf)?;
+                // Read the decompressed stream from some offset, into a sector buffer.
+                let mut tmp = disk::SectorBuf::default();
+                // TODO: Find a way to eliminate this memcpy.
+                tmp.copy_from_slice(decompressed[offset * disk::SECTOR_SIZE..][..disk::SECTOR_SIZE]);
 
-            // Read the decompressed stream from some offset, into a sector buffer.
-            let mut tmp = disk::SectorBuf::default();
-            // TODO: Find a way to eliminate this memcpy.
-            tmp.copy_from_slice(decompressed[offset * disk::SECTOR_SIZE..][..disk::SECTOR_SIZE]);
+                tmp
+            } else {
+                // The page was not compressed so we can just use the cluster directly.
+                cluster
+            };
 
-            tmp
-        } else {
-            // The page was not compressed so we can just use the cluster directly.
-            buf
-        };
+            // Check the data against the stored checksum.
+            let cksum = self.checksum(buf) as u32;
+            if cksum as u32 != page.checksum {
+                // The checksums mismatched, thrown an error.
+                return Err(Error::PageChecksumMismatch {
+                    page: page,
+                    found: cksum,
+                });
+            }
 
-        // Check the data against the stored checksum.
-        let cksum = self.checksum(ret) as u32;
-        if cksum as u32 == page.checksum {
-            // All good.
             Ok(ret)
-        } else {
-            // The checksums mismatched, thrown an error.
-            Err(Error::PageChecksumMismatch {
-                page: page,
-                found: cksum,
-            })
-        }
+        })
     }
 
     /// Calculate the checksum of some buffer, based on the user configuration.
@@ -454,41 +454,46 @@ impl Manager {
                 if let Some(next_metacluster) = self.head_metacluster.next_metacluster.take() {
                     // A new metacluster existed.
 
-                    // Decode the new metacluster.
-                    let metacluster = Metacluster::decode(self.cache.read(next_metacluster.into())?);
-                    // Calculate the checksum.
-                    // TODO: This can be done much more efficiently, as we already have the decoded
-                    //       buffer. No need for re-decoding it.
-                    let checksum = self.head_metacluster.checksum();
+                    // Read and decode the metacluster.
+                    self.cache.read_then(next_metacluster.into())?, |buf| {
+                        // Decode the new metacluster.
+                        let metacluter = Metacluster::decode(buf);
+                        // Calculate the checksum.
+                        // TODO: This can be done much more efficiently, as we already have the decoded
+                        //       buffer. No need for re-decoding it.
+                        let checksum = metacluster.checksum();
 
-                    // Check the metacluster against the checksum stored in the older block.
-                    if checksum == self.head_metacluster.next_checksum {
-                        // Checksum matched.
+                        // Check the metacluster against the checksum stored in the older block.
+                        if checksum != self.head_metacluster.next_checksum {
+                            // Everything suceeded.
 
-                        // Update the head metacluster to the decoded cluster.
-                        self.head_metacluster = metacluster;
-                        // Update the state block with the data from the newly decoded metacluster.
-                        self.state_block.freelist_head = Some(state_block::FreelistHead {
-                            // The pointer should point towards the new metacluster.
-                            cluster: next_metacluster,
-                            checksum: checksum,
-                            // Since the cluster can at most contain 63 < 256 clusters, casting to u8
-                            // won't cause overflow.
-                            counter: self.head_metacluster.free.len() as u8,
-                        });
-                    } else {
-                        // Checksum mismatched; throw an error.
-                        Err(Error::ChecksumMismatch {
-                            cluster: next_metacluster,
-                            // This was the stored checksum.
-                            expected: self.head_metacluster.next_checksum,
-                            // And the actual checksum.
-                            found: checksum,
-                        })
-                    }
+                            // Update the head metacluster to the decoded cluster.
+                            self.head_metacluster = metacluster;
+                            // Update the state block with the data from the newly decoded metacluster.
+                            self.state_block.freelist_head = Some(state_block::FreelistHead {
+                                // The pointer should point towards the new metacluster.
+                                cluster: next_metacluster,
+                                checksum: checksum,
+                                // Since the cluster can at most contain 63 < 256 clusters, casting to u8
+                                // won't cause overflow.
+                                counter: self.head_metacluster.free.len() as u8,
+                            });
 
-                    // We queue a state block flush to write down our changes to the state block.
-                    self.queue_state_block_flush();
+                            // We queue a state block flush to write down our changes to the state block.
+                            self.queue_state_block_flush();
+
+                            Ok(())
+                        } else {
+                            // Checksum mismatched; throw an error.
+                            Err(Error::ChecksumMismatch {
+                                cluster: next_metacluster,
+                                // This was the stored checksum.
+                                expected: self.head_metacluster.next_checksum,
+                                // And the actual checksum.
+                                found: checksum,
+                            })
+                        }
+                    })?;
                 }
 
                 // Use _the old_ head metacluster as the allocated cluster.

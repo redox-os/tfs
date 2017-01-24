@@ -39,6 +39,16 @@ quick_error! {
             display("Disk sector {} is corrupt.", sector)
             description("Corrupt disk sector.")
         }
+        /// Sector healing failed.
+        ///
+        /// The corrupt sector could not be healed, unfortunately.
+        HealFailed {
+            /// The sector which was being healed.
+            sector: Sector,
+        } {
+            display("Disk sector {} could not be healed.", sector)
+            description("Failed to heal corrupt disk sector")
+        }
     }
 }
 
@@ -57,6 +67,13 @@ trait Disk {
     ///
     /// This reads sector `sector` into buffer `buf`.
     fn read(&self, sector: Sector, buf: &mut SectorBuf) -> Result<(), Error>;
+    /// Heal a sector.
+    ///
+    /// This heals sector `sector`, through the provided redundancy, if possible.
+    ///
+    /// Note that after it is called, it is still necessary to check if the healed sector is valid,
+    /// as there is a certain probability that the recovery will fail.
+    fn heal(&mut self, sector: disk::Sector) -> Result<(), disk::Error>;
 }
 
 /// For testing, we allow byte slices to act as disks.
@@ -83,5 +100,11 @@ impl Disk for &mut [u8] {
         } else {
             Ok(buf.copy_from_slice(self[sector as usize / SECTOR_SIZE as usize..][..disk::SECTOR_SIZE]))
         }
+    }
+
+    fn heal(&mut self, sector: disk::Sector) -> Result<(), disk::Error> {
+        Err(Error::HealFailed {
+            sector: sector,
+        })
     }
 }
