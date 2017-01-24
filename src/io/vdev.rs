@@ -125,7 +125,9 @@ quick_error! {
 ///
 /// Note that it doesn't subtract the disk header sector, since the null sector can still be used
 /// as a trap value, but reading or writing from it results in panic.
-struct Driver {
+struct Driver<L> {
+    /// The log exitpoint.
+    pub log: L,
     /// The cached disk header.
     ///
     /// The disk header contains various very basic information about the disk and how to interact
@@ -140,51 +142,64 @@ struct Driver {
 }
 
 
-impl Driver {
+impl<L: slog::Drain> Driver<L> {
     /// Set up the driver from some disk.
     ///
     /// This will load the disk header from `disk` and construct the driver. It will also set the
     /// disk to be in open state. If any encryption is enabled, `password` will be used as the
     /// password.
-    fn open<T: Disk>(disk: T, password: &[u8]) -> Result<Driver, Error> {
+    fn open<T: Disk>(log: L, disk: T, password: &[u8]) -> Result<Driver, Error> {
+        info!(log, "initializing the driver");
+
         // Load the disk header into some buffer.
+        debug!(log, "reading the disk header");
         let mut header_buf = [0; disk::SECTOR_SIZE];
         disk.read(0, &mut header_buf)?;
 
         // Decode the disk header.
+        debug!(log, "decoding the disk header");
         let mut header = DiskHeader::decode(header_buf)?;
 
-        // TODO: Throw a warning if the flag is still in loading state.
         match header.state_flag {
             // Throw a warning if it wasn't properly shut down.
             StateFlag::Open => {
-                /* TODO: logging
-                warn!(log, "The disk's state flag is still open. Disk likely wasn't properly shut \
-                      down last time. Beware of data loss.");
-                */
+                warn!(log, "the disk's state flag is still open, likely wasn't properly shut down \
+                            last time; beware of data loss");
             },
             // The state inconsistent; throw an error.
             StateFlag::Inconsistent => return Err(OpenError::InconsistentState),
         }
 
         // Set the state flag to open.
+        debug!(log, "setting the state flag to 'open'");
         header.state_flag = StateFlag::Open;
 
         // Update the version.
+        debug!(log, "updating the version number";
+               "old version" => header.version_number,
+               "new version" => VERSION_NUMBER);
         header.version_number = VERSION_NUMBER;
 
         // Construct the vdev stack.
         let mut disk = Box::new(disk);
         for i in header.vdev_stack {
             disk = match i {
-                Vdev::Mirror => Box::new(Mirror {
-                    inner: disk,
-                }),
-                Vdev::Speck { salt } => Box::new(Speck {
-                    inner: disk,
-                    // Derive the key.
-                    key: crypto::derive(salt, password),
-                }),
+                Vdev::Mirror => {
+                    debug!(log, "appending a mirror vdev");
+
+                    Box::new(Mirror {
+                        inner: disk,
+                    })
+                },
+                Vdev::Speck { salt } => {
+                    debug!(log, "appending a SPECK encryption vdev", "salt" => salt);
+
+                    Box::new(Speck {
+                        inner: disk,
+                        // Derive the key.
+                        key: crypto::derive(salt, password),
+                    })
+                },
             };
         }
 
@@ -201,26 +216,35 @@ impl Driver {
 
     /// Flush the stored disk header.
     fn flush_header(&mut self) -> Result<(), disk::Error> {
+        debug!(self, "flushing the disk header");
+
         // Encode and write it to the disk.
         self.disk.write(0, &self.header.encode())
     }
 }
 
-impl Drop for Driver {
+impl<L: slog::Drain> Drop for Driver<L> {
     fn drop(&mut self) {
+        info!(self, "closing the driver");
+
         // Set the state flag to close so we know that it was a proper shutdown.
+        debug!(self, "setting state flag to 'closed'");
         self.header.state_flag = StateFlag::Closed;
         // Flush the header.
         self.flush_header();
     }
 }
 
-impl Disk for Driver {
+delegate_log!(Driver.log);
+
+impl<L: slog::Drain> Disk for Driver<L> {
     fn number_of_sectors(&self) -> Sector {
         self.disk.number_of_sectors()
     }
 
     fn write(sector: Sector, buf: &[u8]) -> Result<(), Error> {
+        trace!("writing data"; "sector" => sector);
+
         // Make sure it doesn't write to the null sector reserved for the disk header.
         assert_ne!(sector, 0, "Trying to write to the null sector.");
 
@@ -228,6 +252,8 @@ impl Disk for Driver {
         self.disk.write(sector, buf)
     }
     fn read(sector: Sector, buf: &mut [u8]) -> Result<(), Error> {
+        trace!("reading data"; "sector" => sector);
+
         // Make sure it doesn't write to the null sector reserved for the disk header.
         assert_ne!(sector, 0, "Trying to read from the null sector.");
 
@@ -236,6 +262,8 @@ impl Disk for Driver {
     }
 
     fn heal(&mut self, sector: disk::Sector) -> Result<(), disk::Error> {
+        debug!("healing possibly corrupt sector"; "sector" => sector);
+
         // Forward the call to the inner disk.
         self.disk.heal(sector)
     }

@@ -67,9 +67,9 @@ impl Block {
 /// disks).
 ///
 /// It holds a vdev driver, which the flushes are written to.
-struct Cache {
+struct Cache<L> {
     /// The raw disk.
-    disk: vdev::Driver,
+    disk: vdev::Driver<L>,
     /// The cache replacement tracker.
     ///
     /// This tracks the state of the replacement algorithm, which chooses which cache block shall
@@ -85,13 +85,15 @@ struct Cache {
     pipeline: Vec<(disk::Sector, Box<disk::SectorBuf>)>,
 }
 
-impl Cached {
+impl<L: slog::Drain> Cached<L> {
     /// Flush a sector to the disk.
     ///
     /// This can potentially trigger outer flushes if the cache block has flush dependencies.
     ///
     /// Note that this doesn't commit the pipeline.
     pub fn flush(&mut self, sector: disk::Sector) -> Result<(), disk::Error> {
+        trace!(self, "flushing cache block", "sector" => sector);
+
         // Read the block.
         let block = &mut self.blocks[block];
 
@@ -116,6 +118,8 @@ impl Cached {
 
     /// Flush all sectors to the disk.
     pub fn flush_all(&mut self) -> Result<(), disk::Error> {
+        debug!(self, "flushing all cache blocks");
+
         // Run over the block map and flush them.
         for i in self.blocks.keys() {
             self.flush(i);
@@ -130,9 +134,12 @@ impl Cached {
     /// Note that this does not respond to writes in the pipeline, only committed transactions.
     pub fn read_then<F, E>(&self, sector: disk::Sector, map: F) -> Result<T, E>
         where F: Fn(buf: Result<&disk::SectorBuf, disk::Error>) -> Result<T, E> {
+        trace!(self, "reading from cache"; "sector" => sector);
+
         // Check if the sector already exists in the cache.
         if let Some(block) = self.blocks.get_mut(sector) {
             // It did!
+            trace!(self, "cache hit"; "sector" => sector);
 
             // Touch the cache block.
             self.cache_tracker.touch(sector);
@@ -140,16 +147,23 @@ impl Cached {
             // Read the block and pass it through `map`.
             map(Ok(&self.blocks[block].data))
         } else {
+            trace!(self, "cache miss"; "sector" => sector);
+
             // It didn't, so we read it from the disk and see if it passes verification.
-            if let Ok(ret) = map(self.fetch_fresh(sector)) {
+            match map(self.fetch_fresh(sector)) {
+                Err(err) => {
+                    warn!(self, "data verification failed";
+                          "sector" => sector,
+                          "error" => err);
+
+                    // The verifier failed, so the data is likely corrupt. We'll try to recover the
+                    // data through the vdev's redundancy, then we read it again and see if it passes
+                    // verification this time. If not, healing failed, and we cannot do anything about
+                    // it.
+                    map(self.disk.heal(sector).or_else(|| &self.fetch_fresh(sector)?.data))
+                },
                 // It's all good.
-                Ok(ret)
-            } else {
-                // The verifier failed, so the data is likely corrupt. We'll try to recover the
-                // data through the vdev's redundancy, then we read it again and see if it passes
-                // verification this time. If not, healing failed, and we cannot do anything about
-                // it.
-                map(self.disk.heal(sector).or_else(|| &self.fetch_fresh(sector)?.data))
+                x => x,
             }
         }
     }
@@ -159,6 +173,8 @@ impl Cached {
     /// This pushes a transaction to the pipeline, which can be committed through `.commit()`.
     #[inline]
     pub fn queue(&mut self, sector: disk::Sector, buf: disk::SectorBuf) {
+        trace!(self, "queueing write"; "sector" => sector);
+
         // For now, we'll just assume the function gets inlined such that copying the buffer from a
         // higher stack frame isn't needed.
         // TODO: Consider letting the call side allocate the buffer.
@@ -180,6 +196,8 @@ impl Cached {
     /// transactions preserving their order in the pipeline. If two transactions "collide" (are
     /// writing to the same sector), the newest one is picked and the old one is thrown away.
     pub fn commit(&mut self) {
+        trace!(self, "committing pipeline"; "transactions" => self.pipeline.len());
+
         if Some((first_sector, first_buf)) = writes.next() {
             // Write the first block which has no dependencies.
             let mut block = self.commit_write(first_sector, first_buf, None);
@@ -226,6 +244,8 @@ impl Cached {
 
         // Make sure that there are enough blocks before trimming.
         if self.blocks.len() > MAX_BLOCKS {
+            info!(self, "trimming cache"; "cache blocks" => self.blocks.len());
+
             // Find candidates for trimming and remove them.
             for sector in self.cache_tracker.trim(MIN_BLOCKS) {
                 self.remove(sector)?;
@@ -237,6 +257,8 @@ impl Cached {
 
     /// Remove some sector from the trash.
     fn remove(&mut self, sector: disk::Sector) -> Result<(), disk::Error> {
+        trace!(self, "removing block from cache"; "sector" => sector);
+
         self.flush(block)?;
         self.blocks.remove(sector);
 
@@ -249,6 +271,8 @@ impl Cached {
     ///
     /// It will reset and flush the block and update the block map.
     fn alloc_block(&mut self, sector: disk::Sector) -> &mut Block {
+        trace!(self, "allocating cache block"; "sector" => sector);
+
         // Note that we simply insert letting the cache grow. We will incidentally "trim" the cache
         // to reduce memory usage.
         self.blocks.insert(sector, Block {
@@ -265,6 +289,8 @@ impl Cached {
     ///
     /// This will fetch `sector` from the disk to store it in the in-memory cache structure.
     fn fetch_fresh(&mut self, sector: disk::Sector) -> Result<&mut Block, disk::Error> {
+        trace!(self, "fetching from disk"; "sector" => sector);
+
         // Allocate a new cache block.
         let block = self.alloc_block(sector);
 
@@ -276,10 +302,14 @@ impl Cached {
     }
 }
 
-impl Drop for Cached {
+impl<L: slog::Drain> Drop for Cache<L> {
     fn drop(&mut self) {
+        info!(self, "closing cache");
+
         self.flush_all();
     }
 }
+
+delegate_log!(Cache.driver);
 
 // TODO: Add tests.

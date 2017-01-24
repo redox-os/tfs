@@ -131,9 +131,9 @@ impl Metacluster {
 ///
 /// This is the center point of the I/O stack, providing allocation, deallocation, compression,
 /// etc. It manages the clusters (with the page abstraction) and caches the disks.
-struct Manager<D> {
+struct Manager<L> {
     /// The inner disk cache.
-    cache: Cache,
+    cache: Cache<L>,
     /// The state block.
     ///
     /// The state block stores the state of the file system including allocation state,
@@ -158,7 +158,7 @@ struct Manager<D> {
     dedup_table: dedup::Table,
 }
 
-impl Manager {
+impl<L: slog::Drain> Manager<L> {
     /// Commit the transactions in the pipeline to the cache.
     ///
     /// This runs over the transactions in the pipeline and applies them to the cache.
@@ -185,9 +185,11 @@ impl Manager {
 
         // Calculate the checksum of the buffer. We'll use this later.
         let cksum = self.checksum(buf) as u32;
+        debug!(self, "queueing a page allocation"; "checksum" => cksum);
 
         // Check if duplicate exists.
         if let Some(page) = self.dedup_table.dedup(buf, cksum) {
+            debug!(self, "found duplicate page"; "page" => page);
             // Deduplicate and simply use the already stored page.
             return Ok(page);
         }
@@ -212,7 +214,7 @@ impl Manager {
             return Ok(ptr);
         }
 
-        if let Some(state) = self.last_cluster {
+        if let Some(state) = self.last_cluster.take() {
             // We have earlier allocated a cluster, meaning that we can potentially append more
             // pages into the cluster.
 
@@ -220,6 +222,9 @@ impl Manager {
             // allocate a new cluster. This limit exists to avoid unbounded memory use which can be
             // exploited by a malicious party to force an OOM crash.
             if state.uncompressed.len() < CLUSTER_CAPACITY {
+                trace!(self, "extending existing cluster";
+                       "old length" => state.uncompressed.len());
+
                 // Extend the buffer of uncompressed data in the last allocated cluster.
                 state.uncompressed.extend_from_slice(buf);
 
@@ -227,6 +232,10 @@ impl Manager {
                 if let Some(compressed) = self.compress(state.uncompressed) {
                     // It succeeded! Write the compressed data into the cluster.
                     self.cache.queue(state.cluster, compressed);
+
+                    // Put back the "last cluster", as it might be possible to fit in even more
+                    // pages later on.
+                    self.last_cluster = state;
 
                     let ptr = Ok(page::Pointer {
                         cluster: state.cluster,
@@ -250,9 +259,14 @@ impl Manager {
         // allocated cluster, or because the cluster could not contain the page. We'll allocate a
         // new cluster to contain our page.
 
+        debug_assert!(self.last_cluster.is_none(), "The last cluster is still open, despite being \
+                      full.");
+
         // Pop the cluster from the freelist.
         let cluster = self.queue_freelist_pop()?;
         let ptr = if let Some(compressed) = self.compress(buf) {
+            trace!(self, "storing compressible page in cluster"; "cluster" => cluster);
+
             // We were able to compress the page to fit into the cluster. At first, compressing the
             // first page seems unnecessary as it is guaranteed to fit in without compression, but
             // it has a purpose: namely that it allows us to extend the cluster. Enabling
@@ -276,6 +290,8 @@ impl Manager {
                 checksum: cksum,
             }
         } else {
+            trace!(self, "storing incompressible page in cluster"; "cluster" => cluster);
+
             // We were not able to compress the page into a single cluster. We work under the
             // assumption, that we cannot do so either when new data is added. This makes the
             // algorithm greedy, but it is a fairly reasonable assumption to make, as most
@@ -284,6 +300,9 @@ impl Manager {
 
             // Write the data into the cluster, uncompressed.
             self.cache.queue(cluster, buf);
+
+            // `self.last_cluster` will continue being `None`, until an actually extendible
+            // (compressed) cluster comes in.
 
             page::Pointer {
                 cluster: cluster,
@@ -303,6 +322,8 @@ impl Manager {
     ///
     /// This reads page `page` and returns the content.
     pub fn read(&self, page: page::Pointer) -> Result<disk::SectorBuf, Error> {
+        trace!(self, "reading page"; "page" => page);
+
         // Read the cluster in which the page is stored.
         self.cache.read_then(page.cluster, |cluster| {
             // Decompress if necessary.
@@ -339,6 +360,8 @@ impl Manager {
 
     /// Calculate the checksum of some buffer, based on the user configuration.
     fn checksum(&self, buf: &[u8]) -> u64 {
+        trace!(self, "calculating checksum");
+
         self.state_block.checksum_algorithm.hash(buf)
     }
 
@@ -348,6 +371,8 @@ impl Manager {
     ///
     /// This will panic if compression is disabled.
     fn compress(&self, input: &[u8]) -> Option<disk::SectorBuf> {
+        trace!(self, "compressing data");
+
         // Compress the input.
         let compressed = match self.state_block.compression_algorithm {
             // We'll panic if compression is disabled, as it is assumed that the caller handles
@@ -381,6 +406,8 @@ impl Manager {
     ///
     /// This will panic if compression is disabled.
     fn decompress(&self, cluster: disk::SectorBuf) -> Result<Box<[u8]>, Error> {
+        trace!(self, "decompressing data");
+
         // Find the padding delimited (i.e. the last non-zero byte).
         if let Some((len, _)) = cluster.enumerate().rev().find(|(_, x)| x != 0) {
             // We found the delimiter and can now distinguish padding from data.
@@ -402,6 +429,8 @@ impl Manager {
     ///
     /// This queues a new transaction flushing the state block.
     fn queue_state_block_flush(&mut self) {
+        trace!(self, "queueing state block flush");
+
         self.cache.queue(self.header.state_block_address, self.state_block.encode());
     }
 
@@ -410,6 +439,8 @@ impl Manager {
     /// This adds a new transaction to the cache pipeline, which will write the representation of
     /// `self.head_metacluster` into the cluster `cluster`.
     fn queue_head_metacluster_write(&mut self, cluster: cluster::Pointer) {
+        trace!(self, "queueing state block flush"; "target cluster" => cluster);
+
         // Queue the write of the encoded buffer.
         self.cache.queue(cluster, self.head_metacluster.encode());
     }
@@ -423,6 +454,8 @@ impl Manager {
     /// pop and return the pointer. If not, make the next metacluster the head metacluster and
     /// return the old metacluster.
     fn queue_freelist_pop(&mut self) -> Result<cluster::Pointer, Error> {
+        trace!(self, "popping from freelist");
+
         if let Some(freelist_head) = self.state_block.freelist_head.take() {
             if let Some(free) = self.head_metacluster.free.pop() {
                 // There were one or more free clusters in the head metacluster, we pop the last
@@ -453,6 +486,7 @@ impl Manager {
                 // it exist.
                 if let Some(next_metacluster) = self.head_metacluster.next_metacluster.take() {
                     // A new metacluster existed.
+                    debug!(self, "switching metacluster"; "new metacluster" => next_metacluster);
 
                     // Read and decode the metacluster.
                     self.cache.read_then(next_metacluster.into())?, |buf| {
@@ -515,6 +549,8 @@ impl Manager {
     /// the new, empty head metacluster, which is linked to the old head metacluster. If not, the
     /// free cluster is simply pushed.
     fn queue_freelist_push(&mut self, cluster: cluster::Pointer) -> Result<(), Error> {
+        trace!(self, "queueing freelist push"; "cluster" => cluster);
+
         // If enabled, purge the data of the cluster.
         if cfg!(feature = "security") {
             self.cache.queue(cluster, disk::SectorBuf::default());
@@ -524,6 +560,7 @@ impl Manager {
             if self.head_metacluster.free.len() + 2 == disk::SECTOR_SIZE / cluster::POINTER_SIZE {
                 // The head metacluster is full, so we will use the cluster to create a new
                 // head metacluster.
+                debug!(self, "creating new metacluster"; "cluster" => cluster);
 
                 // Clear the free clusters to make ensure that there isn't duplicates.
                 self.head_metacluster.free.clear();
@@ -572,3 +609,5 @@ impl Manager {
         }
     }
 }
+
+delegate_log!(Manager.cache);
