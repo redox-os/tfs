@@ -65,14 +65,14 @@ impl Into<u128> for Pointer {
     fn into(self) -> u128 {
         // Shift and OR to set up the integer as described in the specification.
         self.cluster as u128
-            | self.offset.map_or(!0, |offset| {
+            | (self.offset.map_or(!0, |offset| {
                 // TODO: Consider removing this.
                 assert_ne!(offset, !0, "The page offset cannot be 0xFFFFFFFF, as it collides with \
                            the serialization of `PageOffset::Uncompressed`.");
 
                 offset
-            }) as u128 << 64
-            | (self.checksum as u128 << 64 << 32)
+            }) as u128) << 64
+            | (self.checksum as u128) << 64 << 32
     }
 }
 
@@ -84,7 +84,7 @@ impl From<u128> for Pointer {
             // Next the page offset is stored.
             offset: match (from >> 64) as u32 {
                 // Again, the trap value !0 represents an uncompressed cluster.
-                !0 => None,
+                0xFFFFFFFF => None,
                 // This cluster was compressed and the offset is `n`.
                 n => Some(n),
             },

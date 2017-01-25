@@ -192,7 +192,7 @@ impl<L: slog::Drain> Driver<L> {
                     })
                 },
                 Vdev::Speck { salt } => {
-                    debug!(log, "appending a SPECK encryption vdev", "salt" => salt);
+                    debug!(log, "appending a SPECK encryption vdev"; "salt" => salt);
 
                     Box::new(Speck {
                         inner: disk,
@@ -242,8 +242,8 @@ impl<L: slog::Drain> Disk for Driver<L> {
         self.disk.number_of_sectors()
     }
 
-    fn write(sector: Sector, buf: &[u8]) -> Result<(), Error> {
-        trace!("writing data"; "sector" => sector);
+    fn write(&mut self, sector: Sector, buf: &[u8]) -> Result<(), Error> {
+        trace!(self, "writing data"; "sector" => sector);
 
         // Make sure it doesn't write to the null sector reserved for the disk header.
         assert_ne!(sector, 0, "Trying to write to the null sector.");
@@ -251,8 +251,8 @@ impl<L: slog::Drain> Disk for Driver<L> {
         // Forward the call to the inner disk.
         self.disk.write(sector, buf)
     }
-    fn read(sector: Sector, buf: &mut [u8]) -> Result<(), Error> {
-        trace!("reading data"; "sector" => sector);
+    fn read(&mut self, sector: Sector, buf: &mut [u8]) -> Result<(), Error> {
+        trace!(self, "reading data"; "sector" => sector);
 
         // Make sure it doesn't write to the null sector reserved for the disk header.
         assert_ne!(sector, 0, "Trying to read from the null sector.");
@@ -262,7 +262,7 @@ impl<L: slog::Drain> Disk for Driver<L> {
     }
 
     fn heal(&mut self, sector: disk::Sector) -> Result<(), disk::Error> {
-        debug!("healing possibly corrupt sector"; "sector" => sector);
+        debug!(self, "healing possibly corrupt sector"; "sector" => sector);
 
         // Forward the call to the inner disk.
         self.disk.heal(sector)

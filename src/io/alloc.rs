@@ -489,7 +489,7 @@ impl<L: slog::Drain> Manager<L> {
                     debug!(self, "switching metacluster"; "new metacluster" => next_metacluster);
 
                     // Read and decode the metacluster.
-                    self.cache.read_then(next_metacluster.into())?, |buf| {
+                    self.cache.read_then(next_metacluster.into()?, |buf| {
                         // Decode the new metacluster.
                         let metacluter = Metacluster::decode(buf);
                         // Calculate the checksum.

@@ -92,7 +92,7 @@ impl<L: slog::Drain> Cached<L> {
     ///
     /// Note that this doesn't commit the pipeline.
     pub fn flush(&mut self, sector: disk::Sector) -> Result<(), disk::Error> {
-        trace!(self, "flushing cache block", "sector" => sector);
+        trace!(self, "flushing cache block"; "sector" => sector);
 
         // Read the block.
         let block = &mut self.blocks[block];
@@ -133,7 +133,7 @@ impl<L: slog::Drain> Cached<L> {
     ///
     /// Note that this does not respond to writes in the pipeline, only committed transactions.
     pub fn read_then<F, E>(&self, sector: disk::Sector, map: F) -> Result<T, E>
-        where F: Fn(buf: Result<&disk::SectorBuf, disk::Error>) -> Result<T, E> {
+        where F: Fn(Result<&disk::SectorBuf, disk::Error>) -> Result<T, E> {
         trace!(self, "reading from cache"; "sector" => sector);
 
         // Check if the sector already exists in the cache.

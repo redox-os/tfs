@@ -135,7 +135,7 @@ impl TryFrom<u16> for ChecksumAlgorithm {
     fn try_from(from: u16) -> Result<ChecksumAlgorithm, Error> {
         match from {
             1 => Ok(ChecksumAlgorithm::SeaHash),
-            1 << 15... => Err(Error::UnknownChecksumAlgorithm),
+            0x8000...0xFFFF => Err(Error::UnknownChecksumAlgorithm),
             _ => Err(Error::InvalidChecksumAlgorithm),
         }
     }

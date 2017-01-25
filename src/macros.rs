@@ -9,8 +9,8 @@
 /// delegate_log!(MyType.my_field);
 /// ```
 macro_rules! delegate_log {
-    ($type:ty.$field:ident) => {
-        impl<L: slog::Drain> Drop for $type<L> {
+    ($ty:ident.$field:ident) => {
+        impl<L: slog::Drain> Drop for $ty<L> {
             type Error = L::Error;
 
             fn log(&self, info: &slog::Record, o: &slog::OwnedKeyValueList) -> Result<(), L::Error> {

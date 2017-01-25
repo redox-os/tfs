@@ -41,7 +41,7 @@ impl TryFrom<u16> for CompressionAlgorithm {
         match from {
             0 => Ok(CompressionAlgorithm::Identity),
             1 => Ok(CompressionAlgorithm::Lz4),
-            1 << 15... => Err(Error::UnknownCompressionAlgorithm),
+            0x8000...0xFFFF => Err(Error::UnknownCompressionAlgorithm),
             _ => Err(Error::InvalidCompressionAlgorithm),
         }
     }

@@ -5,10 +5,12 @@ authors = ["ticki <ticki@users.noreply.github.com>"]
 
 [dependencies]
 byteorder = "0"
-quick-error = "1"
 lz4-compress = "0"
-speck = "0"
+quick-error = "1"
+ring = "0"
 seahash = "3"
+slog = "1"
+speck = "0"
 
 [features]
 security = []
