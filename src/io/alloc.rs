@@ -165,7 +165,7 @@ impl Manager {
     ///
     /// The algorithm works greedily by fitting as many pages as possible into the most recently
     /// used cluster.
-    pub fn alloc(&mut self, buf: disk::SectorBuf) -> Result<Transacting<page::Pointer>, Error> {
+    pub fn alloc(&mut self, buf: disk::SectorBuf) -> Result<cache::Transacting<page::Pointer>, Error> {
         // TODO: The variables are named things like `ptr`, which kinda contradicts the style of
         //       the rest of the code.
 
@@ -182,7 +182,7 @@ impl Manager {
         if let Some(page) = self.dedup_table.dedup(buf, cksum) {
             debug!(self, "found duplicate page"; "page" => page);
             // Deduplicate and simply use the already stored page. No transaction where required.
-            return Ok(Transacting::no_transaction(page));
+            return Ok(cache::Transacting::no_transaction(page));
         }
 
         // Handle the case where compression is disabled.
@@ -513,7 +513,7 @@ impl Manager {
 
                 // Use _the old_ head metacluster as the allocated cluster, and wrap it in the
                 // potential transaction from updating the metacluster head.
-                Ok(Transacting::new(freelist_head.cluster, transaction))
+                Ok(cache::Transacting::new(freelist_head.cluster, transaction))
             }
         } else {
             // There is no freelist head, rendering the freelist empty, hence there is no cluster

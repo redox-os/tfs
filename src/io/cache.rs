@@ -16,6 +16,10 @@ struct Transacting<'a, T> {
 }
 
 impl<'a, T> Transacting<'a, T> {
+    /// Create a new `Transacting`.
+    ///
+    /// This creates a new `Transacting<T>` from inner value `inner` and with transaction
+    /// `Transaction`.
     fn new(inner: T, transaction: Option<Transaction>) -> Transacting<T> {
         Transacting {
             inner: inner,
@@ -23,17 +27,11 @@ impl<'a, T> Transacting<'a, T> {
         }
     }
 
+    /// Create a new `Transacting` without a transaction.
     fn no_transaction(inner: T) -> Transacting<T> {
         Transacting {
             inner: T,
             transaction: None,
-        }
-    }
-
-    fn replace_inner<U>(self, new: U) -> Transacting<U> {
-        Transacting {
-            inner: new,
-            transaction: self.transaction,
         }
     }
 
@@ -69,6 +67,9 @@ struct Transaction<'a> {
 }
 
 impl<'a> Transaction<'a> {
+    /// Wrap a value in the transaction.
+    ///
+    /// This makes a `Transacting` with the transaction and inner value `inner`.
     fn wrap<T>(self, inner: T) -> Transacting<T> {
         Transacting {
             inner: T,
