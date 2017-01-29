@@ -131,9 +131,9 @@ impl Metacluster {
 ///
 /// This is the center point of the I/O stack, providing allocation, deallocation, compression,
 /// etc. It manages the clusters (with the page abstraction) and caches the disks.
-struct Manager<L> {
+struct Manager {
     /// The inner disk cache.
-    cache: Cache<L>,
+    cache: Cache,
     /// The state block.
     ///
     /// The state block stores the state of the file system including allocation state,
@@ -158,23 +158,14 @@ struct Manager<L> {
     dedup_table: dedup::Table,
 }
 
-impl<L: slog::Drain> Manager<L> {
-    /// Commit the transactions in the pipeline to the cache.
+impl Manager {
+    /// Allocate a page.
     ///
-    /// This runs over the transactions in the pipeline and applies them to the cache.
-    pub fn commit(&mut self) {
-        // Commit the cache pipeline.
-        self.cache.commit();
-    }
-
-    /// Queue a page allocation.
-    ///
-    /// This adds a transaction to the cache pipeline to allocate a page. It can be committed
-    /// through `.commit()`.
+    /// This allocates a page with content `buf`.
     ///
     /// The algorithm works greedily by fitting as many pages as possible into the most recently
     /// used cluster.
-    pub fn queue_alloc(&mut self, buf: disk::SectorBuf) -> Result<page::Pointer, Error> {
+    pub fn alloc(&mut self, buf: disk::SectorBuf) -> Result<Transacting<page::Pointer>, Error> {
         // TODO: The variables are named things like `ptr`, which kinda contradicts the style of
         //       the rest of the code.
 
@@ -185,21 +176,19 @@ impl<L: slog::Drain> Manager<L> {
 
         // Calculate the checksum of the buffer. We'll use this later.
         let cksum = self.checksum(buf) as u32;
-        debug!(self, "queueing a page allocation"; "checksum" => cksum);
+        debug!(self, "allocating page"; "checksum" => cksum);
 
         // Check if duplicate exists.
         if let Some(page) = self.dedup_table.dedup(buf, cksum) {
             debug!(self, "found duplicate page"; "page" => page);
-            // Deduplicate and simply use the already stored page.
-            return Ok(page);
+            // Deduplicate and simply use the already stored page. No transaction where required.
+            return Ok(Transacting::no_transaction(page));
         }
 
         // Handle the case where compression is disabled.
         if self.state_block.compression_algorithm == CompressionAlgorithm::Identity {
             // Pop a cluster from the freelist.
-            let cluster = self.queue_freelist_pop()?;
-            // Write the cluster with the raw, uncompressed data.
-            self.cache.queue(cluster, buf);
+            let cluster = self.freelist_pop()?;
 
             let ptr = page::Pointer {
                 cluster: cluster,
@@ -211,7 +200,8 @@ impl<L: slog::Drain> Manager<L> {
             // duplicate.
             self.dedup_table.insert(buf, ptr);
 
-            return Ok(ptr);
+            // Write the cluster with the raw, uncompressed data, and return the transaction monad.
+            return Ok(cluster.then(self.cache.write(cluster, buf)).wrap(ptr));
         }
 
         if let Some(state) = self.last_cluster.take() {
@@ -230,9 +220,6 @@ impl<L: slog::Drain> Manager<L> {
 
                 // Check if we can compress the extended buffer into a single cluster.
                 if let Some(compressed) = self.compress(state.uncompressed) {
-                    // It succeeded! Write the compressed data into the cluster.
-                    self.cache.queue(state.cluster, compressed);
-
                     // Put back the "last cluster", as it might be possible to fit in even more
                     // pages later on.
                     self.last_cluster = state;
@@ -249,8 +236,9 @@ impl<L: slog::Drain> Manager<L> {
                     // duplicate.
                     self.dedup_table.insert(buf, ptr);
 
-                    // Return the pointer and the algorithm is over.
-                    return Ok(ptr);
+                    // It succeeded! Write the compressed data into the cluster. Wrap the pointer
+                    // in the transaction and return it.
+                    return self.cache.write(state.cluster, compressed).wrap(ptr);
                 }
             }
         }
@@ -263,7 +251,7 @@ impl<L: slog::Drain> Manager<L> {
                       full.");
 
         // Pop the cluster from the freelist.
-        let cluster = self.queue_freelist_pop()?;
+        let cluster = self.freelist_pop()?;
         let ptr = if let Some(compressed) = self.compress(buf) {
             trace!(self, "storing compressible page in cluster"; "cluster" => cluster);
 
@@ -274,9 +262,6 @@ impl<L: slog::Drain> Manager<L> {
             // updating pointers pointing to the clujster. However, when we are already compressed,
             // there is no change in how the other pages are read.
 
-            // Write the compressed data into the cluster.
-            self.cache.queue(cluster, compressed);
-
             // Make the "last cluster" the newly allocated cluster.
             self.last_cluster = Some(ClusterState {
                 cluster: cluster,
@@ -284,11 +269,12 @@ impl<L: slog::Drain> Manager<L> {
                 uncompressed: buf.as_vec(),
             });
 
-            page::Pointer {
+            // Write the compressed data into the cluster.
+            cluster.then(self.cache.write(cluster, compressed)).wrap(page::Pointer {
                 cluster: cluster,
                 offset: Some(0),
                 checksum: cksum,
-            }
+            })
         } else {
             trace!(self, "storing incompressible page in cluster"; "cluster" => cluster);
 
@@ -298,17 +284,15 @@ impl<L: slog::Drain> Manager<L> {
             // compression algorithm works at a stream level, and even those that don't (e.g.
             // algorithms with a reordering step), rarely shrinks by adding more data.
 
-            // Write the data into the cluster, uncompressed.
-            self.cache.queue(cluster, buf);
-
             // `self.last_cluster` will continue being `None`, until an actually extendible
             // (compressed) cluster comes in.
 
-            page::Pointer {
+            // Write the data into the cluster, uncompressed.
+            cluster.then(self.cache.write(cluster, buf)).replace_inner(page::Pointer {
                 cluster: cluster,
                 offset: None,
                 checksum: cksum,
-            }
+            })
         };
 
         // Insert the page pointer into the deduplication table to allow future use as
@@ -425,35 +409,34 @@ impl<L: slog::Drain> Manager<L> {
         }
     }
 
-    /// Queue a state block flush.
+    /// Flush the state block.
     ///
-    /// This queues a new transaction flushing the state block.
-    fn queue_state_block_flush(&mut self) {
-        trace!(self, "queueing state block flush");
+    /// This flushes the state block (not to the disk, but to the cache), and returns the
+    /// transaction.
+    fn flush_state_block(&mut self) -> cache::Transaction {
+        trace!(self, "flushing the state block to the cache");
 
-        self.cache.queue(self.header.state_block_address, self.state_block.encode());
+        self.cache.write(self.header.state_block_address, self.state_block.encode());
     }
 
-    /// Queue a head metacluster write to some cluster.
+    /// Write the head metacluster to some cluster.
     ///
-    /// This adds a new transaction to the cache pipeline, which will write the representation of
-    /// `self.head_metacluster` into the cluster `cluster`.
-    fn queue_head_metacluster_write(&mut self, cluster: cluster::Pointer) {
-        trace!(self, "queueing state block flush"; "target cluster" => cluster);
+    /// The cache transaction is returned.
+    fn write_head_metacluster(&mut self, cluster: cluster::Pointer) -> cache::Transaction {
+        trace!(self, "writing the head metacluster"; "target cluster" => cluster);
 
-        // Queue the write of the encoded buffer.
-        self.cache.queue(cluster, self.head_metacluster.encode());
+        self.cache.write(cluster, self.head_metacluster.encode());
     }
 
-    /// Queue a pop from the freelist.
+    /// Pop from the freelist.
     ///
-    /// This adds a new transaction to the cache pipeline, which will pop from the top of the
-    /// freelist and return the result.
+    /// The returned pointer is wrapped in a cache transaction, representing the operations done in
+    /// order to pop it.
     ///
     /// The algorithm works as follows: If the head metacluster contains more free clusters, simply
     /// pop and return the pointer. If not, make the next metacluster the head metacluster and
     /// return the old metacluster.
-    fn queue_freelist_pop(&mut self) -> Result<cluster::Pointer, Error> {
+    fn freelist_pop(&mut self) -> Result<cache::Transacting<cluster::Pointer>, Error> {
         trace!(self, "popping from freelist");
 
         if let Some(freelist_head) = self.state_block.freelist_head.take() {
@@ -471,11 +454,10 @@ impl<L: slog::Drain> Manager<L> {
                 // Put back the freelist head into the state block.
                 self.state_block.freelist_head = freelist_head;
 
-                // Queue a state block flush to reflect the changes above. Because both the
-                // checksum and counter are updated, this will be atomic and consistent.
-                self.queue_state_block_flush();
-
-                Ok(free)
+                // Flush the state block to reflect the changes above. Because both the checksum
+                // and counter are updated, this will be atomic and consistent. Wrap the output in
+                // the transaction.
+                Ok(self.flush_state_block().wrap(free))
             } else {
                 // There were no free clusters, but there might be additional metaclusters. The
                 // outline of the algorithm is to update the freelist head pointer to point to the
@@ -484,39 +466,23 @@ impl<L: slog::Drain> Manager<L> {
 
                 // The head metacluster is now empty, update the head to the next metacluster, if
                 // it exist.
-                if let Some(next_metacluster) = self.head_metacluster.next_metacluster.take() {
+                let transaction = if let Some(next_metacluster) = self.head_metacluster.next_metacluster.take() {
                     // A new metacluster existed.
                     debug!(self, "switching metacluster"; "new metacluster" => next_metacluster);
 
                     // Read and decode the metacluster.
-                    self.cache.read_then(next_metacluster.into()?, |buf| {
+                    if let Ok(metacluster) = self.cache.read_then(next_metacluster.into()?, |buf| {
                         // Decode the new metacluster.
                         let metacluter = Metacluster::decode(buf);
                         // Calculate the checksum.
-                        // TODO: This can be done much more efficiently, as we already have the decoded
-                        //       buffer. No need for re-decoding it.
+                        // TODO: This can be done much more efficiently, as we already have the
+                        //       decoded buffer. No need for re-decoding it.
                         let checksum = metacluster.checksum();
 
                         // Check the metacluster against the checksum stored in the older block.
                         if checksum != self.head_metacluster.next_checksum {
                             // Everything suceeded.
-
-                            // Update the head metacluster to the decoded cluster.
-                            self.head_metacluster = metacluster;
-                            // Update the state block with the data from the newly decoded metacluster.
-                            self.state_block.freelist_head = Some(state_block::FreelistHead {
-                                // The pointer should point towards the new metacluster.
-                                cluster: next_metacluster,
-                                checksum: checksum,
-                                // Since the cluster can at most contain 63 < 256 clusters, casting to u8
-                                // won't cause overflow.
-                                counter: self.head_metacluster.free.len() as u8,
-                            });
-
-                            // We queue a state block flush to write down our changes to the state block.
-                            self.queue_state_block_flush();
-
-                            Ok(())
+                            Ok(metacluster)
                         } else {
                             // Checksum mismatched; throw an error.
                             Err(Error::ChecksumMismatch {
@@ -527,11 +493,27 @@ impl<L: slog::Drain> Manager<L> {
                                 found: checksum,
                             })
                         }
-                    })?;
-                }
+                    }) {
+                        // Update the head metacluster to the decoded cluster.
+                        self.head_metacluster = metacluster;
+                        // Update the state block with the data from the newly decoded metacluster.
+                        self.state_block.freelist_head = Some(state_block::FreelistHead {
+                            // The pointer should point towards the new metacluster.
+                            cluster: next_metacluster,
+                            checksum: checksum,
+                            // Since the cluster can at most contain 63 < 256 clusters, casting to u8
+                            // won't cause overflow.
+                            counter: self.head_metacluster.free.len() as u8,
+                        });
 
-                // Use _the old_ head metacluster as the allocated cluster.
-                Ok(freelist_head.cluster)
+                        // We flush the state block flush to write down our changes to the state block.
+                        Some(self.flush_state_block())
+                    } else { None }
+                } else { None };
+
+                // Use _the old_ head metacluster as the allocated cluster, and wrap it in the
+                // potential transaction from updating the metacluster head.
+                Ok(Transacting::new(freelist_head.cluster, transaction))
             }
         } else {
             // There is no freelist head, rendering the freelist empty, hence there is no cluster
@@ -540,21 +522,17 @@ impl<L: slog::Drain> Manager<L> {
         }
     }
 
-    /// Queue a push to the freelist.
+    /// Push to the freelist.
     ///
-    /// This adds a new transaction to the cache pipeline, which will push some free cluster to the
-    /// top of the freelist.
+    /// This pushes `cluster` to the freelist and returns the cache transaction, or an error.
     ///
     /// The algorithm works as follows: If the metacluster is full, the pushed cluster is used as
     /// the new, empty head metacluster, which is linked to the old head metacluster. If not, the
     /// free cluster is simply pushed.
-    fn queue_freelist_push(&mut self, cluster: cluster::Pointer) -> Result<(), Error> {
-        trace!(self, "queueing freelist push"; "cluster" => cluster);
+    fn freelist_push(&mut self, cluster: cluster::Pointer) -> cache::Transaction {
+        trace!(self, "pushing to freelist"; "cluster" => cluster);
 
-        // If enabled, purge the data of the cluster.
-        if cfg!(feature = "security") {
-            self.cache.queue(cluster, disk::SectorBuf::default());
-        }
+        let mut transaction = Transaction
 
         if let Some(freelist_head) = self.state_block.freelist_head {
             if self.head_metacluster.free.len() + 2 == disk::SECTOR_SIZE / cluster::POINTER_SIZE {
@@ -571,10 +549,6 @@ impl<L: slog::Drain> Manager<L> {
                 // become the new metacluster's next. This simple trick is allows us to bypass
                 // recalculation of the checksum. Small optimization, but hey, it works.
                 self.head_metacluster.next_checksum = freelist_head.next_checksum;
-                // Queue a write of the metacluster to `cluster`. This won't leave the system in an
-                // inconsistent state, as only `cluster`, which is free, will be changed.
-                self.queue_head_metacluster_write(cluster);
-
                 // Update the state block freelist head metadata to point to the new head
                 // metacluster.
                 self.state_block.freelist_head = Some(state_block::FreelistHead {
@@ -585,16 +559,20 @@ impl<L: slog::Drain> Manager<L> {
                     // counter is 0.
                     counter: 0,
                 });
-                // Queue a state block flush. This won't leave the system in an inconsistent state
-                // either, as a new, valid metacluster is stored at `cluster`.
-                self.queue_state_block_flush();
+                // Write the metacluster to `cluster`. This won't leave the system in an
+                // inconsistent state, as only `cluster`, which is free, will be changed.
+                self.write_head_metacluster(cluster).then(
+                    // Flush the state block. This won't leave the system in an inconsistent state
+                    // either, as a new, valid metacluster is stored at `cluster`.
+                    self.flush_state_block();
+                )
             } else {
                 // There is more space in the head metacluster.
 
                 // Push the new free cluster.
                 self.head_metacluster.free.push(cluster);
-                // Queue a flush. Woosh!
-                self.queue_state_block_flush();
+                // Flush. Woosh!
+                self.flush_state_block()
             }
         } else {
             // The freelist is empty, so we set the cluster up as an empty metacluster as the
@@ -604,8 +582,8 @@ impl<L: slog::Drain> Manager<L> {
                 checksum: 0,
                 counter: 0,
             });
-            // Queue a state block flush to add the new cluster.
-            self.queue_state_block_flush();
+            // Flush the state block to add the new cluster.
+            self.flush_state_block()
         }
     }
 }

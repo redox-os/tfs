@@ -1,3 +1,100 @@
+use crossbeam::sync::SegQueue;
+
+/// A monad-like wrapper telling that some data depends on a transaction.
+///
+/// This wraps some inner data, adding a transaction, which it depends on.
+///
+/// It is usually used if some data requires a transaction to be valid. An example is if a file was
+/// allocated on an address, then the address would only be valid if the associated transaction was
+/// executed.
+#[must_use]
+struct Transacting<'a, T> {
+    /// The inner data.
+    inner: T,
+    /// The accompanying transaction.
+    transaction: Option<Transaction<'a>>,
+}
+
+impl<'a, T> Transacting<'a, T> {
+    fn new(inner: T, transaction: Option<Transaction>) -> Transacting<T> {
+        Transacting {
+            inner: inner,
+            transaction: transaction,
+        }
+    }
+
+    fn no_transaction(inner: T) -> Transacting<T> {
+        Transacting {
+            inner: T,
+            transaction: None,
+        }
+    }
+
+    fn replace_inner<U>(self, new: U) -> Transacting<U> {
+        Transacting {
+            inner: new,
+            transaction: self.transaction,
+        }
+    }
+
+    /// Chain the transaction together with another transaction, so they're executed sequentially.
+    ///
+    /// This makes a new transaction which will execute `self`'s transaction then `other`.
+    fn then(self, other: Transaction) -> Transaction {
+        if let Some(transaction) = self.transaction {
+            // Append it to the current transaction.
+            transaction.then(other)
+        } else {
+            // `self` contained no transaction, so we'll simply execute `other`.
+            other
+        }
+    }
+}
+
+/// A transaction handler
+///
+/// This is used for representing a write transaction node. It has a reference to the cache and a
+/// mutable reference to the block, allowing it to create child transactions of the write.
+///
+/// The transaction will be flushable when this handler is dropped.
+#[derive(Copy, Clone)]
+#[must_use]
+struct Transaction<'a> {
+    /// The sector of the transaction.
+    sector: disk::Sector,
+    /// The block in question.
+    ///
+    /// This is a lock guard, and thus as long it is held, the block cannot be flushed.
+    block: chashmap::WriteGuard<'a, Block>,
+}
+
+impl<'a> Transaction<'a> {
+    fn wrap<T>(self, inner: T) -> Transacting<T> {
+        Transacting {
+            inner: T,
+            transaction: self,
+        }
+    }
+
+    /// Execute a transaction depending on the current.
+    ///
+    /// This makes a new transaction which will execute `self` transaction then `other`.
+    ///
+    /// Beware that it will make `self` flushable, by executing the lock.
+    fn then(self, other: Transaction) -> Transaction {
+        // Make `other` depend on `self`.
+        other.block.flush_dependencies.push(self.sector);
+
+        // Since `other` depends on `self`, we can safely use `other`.
+        Transaction {
+            sector: other.sector,
+            block: other.block,
+        }
+
+        // Now `self` will drop, releasing the lock, and making it flushable.
+    }
+}
+
 /// A cache block.
 ///
 /// This stores a single sector in memory, for more performant reads and writes.
@@ -5,20 +102,14 @@
 /// The terminology "cache block" is similar to "cache lines" in CPUs. They represent a single
 /// fixed-size block which is cached in memory.
 struct Block {
-    /// The sector the block stores.
-    sector: disk::Sector,
     /// The data of the sector.
     ///
-    /// This shall reflect what is on the disk unless the block is marked dirty.
+    /// This shall reflect what is on the disk, unless the block is marked "dirty".
+    data: disk::SectorBuf,
+    /// Is this block in sync with the disk?
     ///
-    /// We do not need to store this on the heap, but we do in order to improve performance and
-    /// avoid excessive copying between stack frames.
-    data: Box<disk::SectorBuf>,
-    /// Does the data in memory reflect the data on the disk?
-    ///
-    /// This is called _the dirty flag_ and defines if a flush is needed or if the in-memory data
-    /// already matches the on-disk data. Whenever it is written in memory, the flag should be set
-    /// so that we're sure that it gets flushed properly to the disk.
+    /// This is set if `self.data` matches what is written to the disk. Namely, if it has been
+    /// flushed or not.
     dirty: bool,
     /// Disk sectors that shall be flushed _before_ this block.
     ///
@@ -36,26 +127,22 @@ struct Block {
 }
 
 impl Block {
-    /// Reset the cache block.
-    ///
-    /// This resets the dirty flag and clears the flush dependencies.
-    ///
-    /// Note that it does not change the data or the sector.
-    fn reset(&mut self) {
-        // The cache block starts out as clean...
-        self.dirty = false;
-        // ...and hence has no dependencies.
-        self.flush_dependencies.clear();
-    }
-
-    /// Add a sector to flush before the block.
-    fn add_dependency(&mut self, sector: disk::Sector) {
-        // To avoid meta-cycles, we make sure that the dependent sector isn't the sector of the
-        // block itself.
-        if self.sector != sector {
-            self.flush_dependencies.push(sector);
+    /// Create a new block with some data.
+    fn new(data: disk::SectorBuf) -> Block {
+        Block {
+            data: data,
+            dirty: false,
+            flush_dependencies: Vec::new(),
         }
     }
+}
+
+/// A cache operation.
+enum CacheOperation {
+    /// Create a new cache block for some sector.
+    Create(disk::Sector),
+    /// Touch a cache block of some sector.
+    Touch(disk::Sector),
 }
 
 /// A cached disk.
@@ -67,246 +154,202 @@ impl Block {
 /// disks).
 ///
 /// It holds a vdev driver, which the flushes are written to.
-struct Cache<L> {
-    /// The raw disk.
-    disk: vdev::Driver<L>,
+struct Cache {
+    /// The inner driver.
+    driver: vdev::Driver,
+
+    /// The cache tracker operation queue.
+    ///
+    /// In order to avoid excessively locking and unlocking the cache tracker, we buffer the
+    /// operations, which will then be executed in one go, when needed.
+    queue: SegQueue<CacheOperation>,
     /// The cache replacement tracker.
     ///
     /// This tracks the state of the replacement algorithm, which chooses which cache block shall
     /// be replaced in favor of a new cache. It serves to estimate/guess which block is likely not
     /// used in the near future.
-    cache_tracker: mlcr::Cache,
-    /// The cache blocks.
-    blocks: HashMap<disk::Sector, Block>,
-    /// The pipeline of writes to-be-committed.
-    ///
-    /// These are not committed to the block map yet and will not be until `.commit()` is called.
-    /// They are ensured to be written to the disk in the order of the pipeline.
-    pipeline: Vec<(disk::Sector, Box<disk::SectorBuf>)>,
+    tracker: Mutex<mlcr::Cache>,
+
+    /// The sector-to-cache block map.
+    sector_map: CHashMap<disk::Sector, Block,
 }
 
-impl<L: slog::Drain> Cached<L> {
-    /// Flush a sector to the disk.
+impl Cache {
+    /// Execute a write transaction.
     ///
-    /// This can potentially trigger outer flushes if the cache block has flush dependencies.
-    ///
-    /// Note that this doesn't commit the pipeline.
-    pub fn flush(&mut self, sector: disk::Sector) -> Result<(), disk::Error> {
-        trace!(self, "flushing cache block"; "sector" => sector);
+    /// This creates a transaction writing `buf` into sector `sector`, when dropped.
+    fn write<F>(&self, sector: disk::Sector, buf: disk::SectorBuf) -> Transaction {
+        // Acquire the lock to the block, and initialize if it doesn't already exist.
+        let lock = self.sector_map.get_mut_or(sector, Block::default());
+        // Set the dirty flag.
+        lock.dirty = true;
+        // Update the data.
+        lock.data = buf;
 
-        // Read the block.
-        let block = &mut self.blocks[block];
-
-        // Flush all the dependencies. This is important for correct ordering!
-        for dep in block.flush_dependencies {
-            self.flush(dep)?;
-
-            // It could happen naturally that the dependent sector was not found in the block
-            // map. Namely, if the sector was replaced by another cache block. In such case, the
-            // sector is naturally already flushed (during replacement) and thus there is no
-            // consistency issues.
-        }
-
-        // Check if the block is (still) dirty.
-        if block.dirty {
-            // Write the block to the disk.
-            self.disk.write(block.sector, &block.data)?;
-            // Unset the dirty flag.
-            block.dirty = false;
+        Transaction {
+            block: lock,
+            cache: self,
         }
     }
 
-    /// Flush all sectors to the disk.
-    pub fn flush_all(&mut self) -> Result<(), disk::Error> {
-        debug!(self, "flushing all cache blocks");
-
-        // Run over the block map and flush them.
-        for i in self.blocks.keys() {
-            self.flush(i);
-        }
-    }
-
-    /// Read a sector from the disk, then apply a closure to it.
+    /// Read a sector.
     ///
-    /// This reads sector `sector` and runs it through closure `map`. If it fails, it will attempt
-    /// to recover, and retry `map`.
+    /// This reads sector `sector`, and applies the closure `map`. If `sector` needs to be fetched
+    /// from the disk, and `map` fails, data recovery is attempted.
     ///
-    /// Note that this does not respond to writes in the pipeline, only committed transactions.
-    pub fn read_then<F, E>(&self, sector: disk::Sector, map: F) -> Result<T, E>
-        where F: Fn(Result<&disk::SectorBuf, disk::Error>) -> Result<T, E> {
-        trace!(self, "reading from cache"; "sector" => sector);
+    /// If an I/O operation fails, the error is returned. Otherwise, the return value of `map` is
+    /// returned.
+    fn read_then<F, T, E>(&self, sector: disk::Sector, map: F) -> Result<T, E>
+        where F: Fn(&disk::SectorBuf) -> Result<T, E>,
+              E: From<disk::Error> {
+        debug!(self, "reading sector"; "sector" => sector);
 
-        // Check if the sector already exists in the cache.
-        if let Some(block) = self.blocks.get_mut(sector) {
-            // It did!
-            trace!(self, "cache hit"; "sector" => sector);
+        // Check if the sector is already available in the cache.
+        if let Some(accessor) = self.sector_map.find(sector) {
+            // Yup, we found the sector in the cache.
+            trace!(self, "cache hit; reading from cache"; "sector" => sector);
 
-            // Touch the cache block.
-            self.cache_tracker.touch(sector);
+            // Touch the sector.
+            self.queue.push(CacheOperation::Touch(sector));
 
-            // Read the block and pass it through `map`.
-            map(Ok(&self.blocks[block].data))
+            handler(accessor)
         } else {
-            trace!(self, "cache miss"; "sector" => sector);
+            trace!(self, "cache miss; reading from disk"; "sector" => sector);
 
-            // It didn't, so we read it from the disk and see if it passes verification.
-            match map(self.fetch_fresh(sector)) {
+            // Occupy the block in the map, so that we can later on insert it.
+            let block = self.sector_map.get_mut_or(sector, Block::default());
+            // Insert the sector into the cache tracker.
+            self.queue.push(CacheOperation::Create(sector));
+
+            // Fetch the data from the disk.
+            self.disk.read(sector, &mut block.data)?;
+
+            // Handle the block through the closure, and resolve respective verification issues.
+            match map(&block.data) {
                 Err(err) => {
-                    warn!(self, "data verification failed";
-                          "sector" => sector,
-                          "error" => err);
-
                     // The verifier failed, so the data is likely corrupt. We'll try to recover the
                     // data through the vdev's redundancy, then we read it again and see if it passes
                     // verification this time. If not, healing failed, and we cannot do anything about
                     // it.
-                    map(self.disk.heal(sector).or_else(|| &self.fetch_fresh(sector)?.data))
+                    warn!(self, "data verification failed"; "sector" => sector, "error" => err);
+
+                    // Attempt to heal the sector.
+                    self.disk.heal(sector)?;
+                    // Read it again.
+                    self.disk.read(sector, &mut block.data)?;
+
+                    // Try to verify it once again.
+                    map(&block.data)
                 },
-                // It's all good.
                 x => x,
             }
         }
     }
 
-    /// Queue a write to the pipeline.
+    /// Trim the cache.
     ///
-    /// This pushes a transaction to the pipeline, which can be committed through `.commit()`.
-    #[inline]
-    pub fn queue(&mut self, sector: disk::Sector, buf: disk::SectorBuf) {
-        trace!(self, "queueing write"; "sector" => sector);
+    /// This reduces the cache to exactly `to` blocks. Note that this is quite expensive, and
+    /// should thus only be called once in a whle.
+    fn trim(&self, to: usize) -> Result<(), disk::Error> {
+        info!(self, "trimming cache"; "to" => to);
 
-        // For now, we'll just assume the function gets inlined such that copying the buffer from a
-        // higher stack frame isn't needed.
-        // TODO: Consider letting the call side allocate the buffer.
-        self.pipeline.push((sector, box buf));
-    }
-
-    /// Commit the transactions in the pipeline to the cache.
-    ///
-    /// This commits the sectors and data given in the pipeline in the specified order enforcing
-    /// consistency with respect to the flush order. To understand what this means, one must see
-    /// writes as a function from a valid state to another together with the constraint that
-    /// another function is applied prior to that. In other words, it does not enforce that they're
-    /// written sequentially — or even written at all. Transactions can be forwarded backwards and
-    /// merged with other transactions, but this should not leave the system inconsistent, since
-    /// the _ordering_ is still enforced.
-    ///
-    /// More formally, we can think of the pipeline as a totally ordered set. When it is committed,
-    /// every transaction is put into totally ordered set of transactions, such that the
-    /// transactions preserving their order in the pipeline. If two transactions "collide" (are
-    /// writing to the same sector), the newest one is picked and the old one is thrown away.
-    pub fn commit(&mut self) {
-        trace!(self, "committing pipeline"; "transactions" => self.pipeline.len());
-
-        if Some((first_sector, first_buf)) = writes.next() {
-            // Write the first block which has no dependencies.
-            let mut block = self.commit_write(first_sector, first_buf, None);
-
-            // Write the rest with the previous write as dependency.
-            for (sector, buf) in self.pipeline.drain() {
-                block = self.commit_write(sector, buf, Some(block.sector));
-            }
-        }
-    }
-
-    /// Commits a sector write with some dependency.
-    ///
-    /// This writes `buf` into sector `sector` in the cache, ensuring that the sector (if any)
-    /// `dependency` is flushed to the disk prior to `sector`.
-    fn commit_write(&mut self, sector: disk::Sector, buf: Box<disk::SectorBuf>, dependency: Option<disk::Sector>) -> &mut Block {
-        // Allocate a new cache block.
-        let block = cache.alloc_block(sector);
-
-        // Put the data into the freshly allocated cache block.
-        block.data = buf;
-
-        // Add the potential dependency to the cache block.
-        if let Some(dependency) = dependency {
-            block.add_dependency(dependency)
-        }
-        // Mark dirty.
-        block.dirty = true;
-
-        block
-    }
-
-    /// Trim the cache to reduce memory.
-    ///
-    /// This reduces the cache to some fixed number of cache blocks, if the number of blocks is
-    /// above some fixed limit.
-    pub fn trim(&mut self) -> Result<(), disk::Error> {
-        /// The maximum number of blocks before a trim will occur.
-        const MAX_BLOCKS: usize = 500000;
-        /// The minimum number of blocks after a trim has occured.
-        ///
-        /// If the number of cache blocks
-        const MIN_BLOCKS: usize = 300000;
-
-        // Make sure that there are enough blocks before trimming.
-        if self.blocks.len() > MAX_BLOCKS {
-            info!(self, "trimming cache"; "cache blocks" => self.blocks.len());
-
-            // Find candidates for trimming and remove them.
-            for sector in self.cache_tracker.trim(MIN_BLOCKS) {
-                self.remove(sector)?;
+        // Lock the cache tracker.
+        let tracker = self.tracker.lock();
+        // Commit the buffered operations to the tracker.
+        while let Some(op) = self.queue.try_pop() {
+            match op {
+                // Create new cache block.
+                CacheOperation::Create(sector) => tracker.create(sector),
+                // Touch a cache block.
+                CacheOperation::Touch(sector) => tracker.touch(sector),
             }
         }
 
-        Ok(())
-    }
+        // The set of blocks to trim.
+        let mut flush: HashSet<_> = tracker.trim(to).collect();
+        // Exhaust the set until it is empty.
+        while let Some(tl_sector) = flush.drain().first() {
+            debug!(self, "flushing and removing block"; "sector" => tl_sector);
 
-    /// Remove some sector from the trash.
-    fn remove(&mut self, sector: disk::Sector) -> Result<(), disk::Error> {
-        trace!(self, "removing block from cache"; "sector" => sector);
+            // We grab the reference and lock in order to avoid the block changing while we
+            // traverse.
+            let tl_block = self.sector_map.find_mut(tl_sector);
+            // Skip flushing, if the block is not dirty.
+            if !tl_block.dirty {
+                continue;
+            }
+            // Start with an empty stack to do our search. This stack will hold the state of the
+            // traversal, following a variant of DFS, where we dive as deep as possible first, and
+            // then backtrack when we can go deeper. Every element must be a dirty block.
+            let mut stack = Vec::new();
+            // Push the sector we will flush to the stack.
+            stack.push((tl_sector, tl_block));
 
-        self.flush(block)?;
-        self.blocks.remove(sector);
+            // Traverse!
+            loop {
+                // Pop the top of the stack to deepen it.
+                if let Some((sector, block)) = stack.pop() {
+                    // See if the block has flush dependencies, which must be flushed before.
+                    if let Some(dep) = block.flush_dependencies.pop() {
+                        // It got at least one flush dependencies.
+                        trace!(self, "traversing dependency";
+                               "sector" => sector,
+                               "depending sector" => dep);
 
-        Ok(())
-    }
+                        // Since it could potentially have more than one dependencies, we push it
+                        // back so that we can reinvestigate later.
+                        stack.push((sector, block));
 
-    /// Allocate (or find replacement) for a new cache block.
-    ///
-    /// This finds a cache block which can be used for new objects.
-    ///
-    /// It will reset and flush the block and update the block map.
-    fn alloc_block(&mut self, sector: disk::Sector) -> &mut Block {
-        trace!(self, "allocating cache block"; "sector" => sector);
+                        // Check if the block is dirty, or we can skip it. This holds up the
+                        // invariant that every block in `stack` are dirty.
+                        if block.dirty {
+                            // Push the dependency to the stack. Again, we use `find_mut` to make sure
+                            // other threads doesn't access it while we traverse.
+                            stack.push((dep, self.sector_map.find_mut(sector)));
+                        }
+                    } else {
+                        // The block is dirty and needs to be flushed. Note that we need not to
+                        // check if it is dirty, as our invariant states that al blocks in `stack`
+                        // are dirty.
+                        debug!(self, "flushing block"; "sector" => sector);
 
-        // Note that we simply insert letting the cache grow. We will incidentally "trim" the cache
-        // to reduce memory usage.
-        self.blocks.insert(sector, Block {
-            data: vec![0; disk::SECTOR_SIZE],
-            dirty: false,
-            flush_dependencies: Vec::new(),
-        });
+                        // No more flush dependencies on the former top of the stack (`block`), so
+                        // we can safely write the sector, knowing that all dependencies have been
+                        // flushed.
+                        self.driver.write(sector, block.data)?;
+                        // Unset the dirty flag.
+                        block.dirty = false;
 
-        // I wish there was a method to bypass this lookup, but there isn't, so we simply index.
-        &mut self.blocks[sector]
-    }
+                        // Clean up the block if it is a top-level block (a block which will be
+                        // removed).
+                        if flush.remove(sector) || sector == tl_sector {
+                            // We've now removed the block from `flush`, so we won't flush it later
+                            // on.
 
-    /// Fetch an uncached disk sector to the cache.
-    ///
-    /// This will fetch `sector` from the disk to store it in the in-memory cache structure.
-    fn fetch_fresh(&mut self, sector: disk::Sector) -> Result<&mut Block, disk::Error> {
-        trace!(self, "fetching from disk"; "sector" => sector);
+                            // Remove the sector from the cache tracker.
+                            tracker.remove(sector);
+                            // Finally, remove the block from the sector map.
+                            self.sector_map.remove(sector);
+                        }
 
-        // Allocate a new cache block.
-        let block = self.alloc_block(sector);
-
-        // Read the sector from the disk.
-        self.disk.read(sector, &mut block.data)?;
-
-        // Add the cache block to the cache tracker.
-        self.cache_tracker.insert(sector);
+                        // We don't need to pop from the stack, since we have already popped an
+                        // element, which we won't push back. The lock originating from `find_mut`
+                        // is dropped here, and the block can then freely be modified.
+                    }
+                } else {
+                    // The stack is empty, and we've traversed everything.
+                    break;
+                }
+            }
+        }
     }
 }
 
-impl<L: slog::Drain> Drop for Cache<L> {
+impl Drop for Cache {
     fn drop(&mut self) {
         info!(self, "closing cache");
 
-        self.flush_all();
+        self.trim(0);
     }
 }
 

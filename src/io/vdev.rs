@@ -125,9 +125,11 @@ quick_error! {
 ///
 /// Note that it doesn't subtract the disk header sector, since the null sector can still be used
 /// as a trap value, but reading or writing from it results in panic.
-struct Driver<L> {
+struct Driver {
     /// The log exitpoint.
-    pub log: L,
+    ///
+    /// This is boxed to allow dynamic reconfiguration.
+    pub log: Box<slog::Drain>,
     /// The cached disk header.
     ///
     /// The disk header contains various very basic information about the disk and how to interact
@@ -142,7 +144,7 @@ struct Driver<L> {
 }
 
 
-impl<L: slog::Drain> Driver<L> {
+impl Driver {
     /// Set up the driver from some disk.
     ///
     /// This will load the disk header from `disk` and construct the driver. It will also set the
@@ -223,7 +225,7 @@ impl<L: slog::Drain> Driver<L> {
     }
 }
 
-impl<L: slog::Drain> Drop for Driver<L> {
+impl Drop for Driver {
     fn drop(&mut self) {
         info!(self, "closing the driver");
 
@@ -237,7 +239,7 @@ impl<L: slog::Drain> Drop for Driver<L> {
 
 delegate_log!(Driver.log);
 
-impl<L: slog::Drain> Disk for Driver<L> {
+impl Disk for Driver {
     fn number_of_sectors(&self) -> Sector {
         self.disk.number_of_sectors()
     }
