@@ -4,6 +4,9 @@
 //! non-obviously, since clusters can hold more than one page at once (compression). Every cluster
 //! will maximize the number of pages held and when it's filled up, a new cluster will be fetched.
 
+/// The atomic ordering used in the allocator.
+const ORDERING: atomic::Ordering = atomic::Ordering::Relaxed;
+
 quick_error! {
     /// A page management error.
     enum Error {
@@ -134,23 +137,29 @@ impl Metacluster {
 struct Manager {
     /// The inner disk cache.
     cache: Cache,
-    /// The state block.
+    /// The on-disk state.
     ///
-    /// The state block stores the state of the file system including allocation state,
-    /// configuration, and more.
-    state_block: state_block::StateBlock,
+    /// This is the state as stored in the state block. The reason we do not store the whole state
+    /// block in one is that, we want to avoid the lock when reading the static parts of the state
+    /// block (e.g. configuration).
+    state: Mutex<state_block::State>,
+    /// The configuration options.
+    ///
+    /// This is the configuration part of the state block. We don't need a lock, since we won't
+    /// mutate it while the system is initialized.
+    config: state_block::Config,
     /// The first metacluster of the freelist.
     ///
     /// This list is used as the allocation primitive of TFS. It is a simple freelist-based cluster
     /// allocation system, but there is one twist: To optimize the data locality, the list is
     /// unrolled.
-    head_metacluster: Metacluster,
+    head_metacluster: Mutex<Metacluster>,
     /// The last allocated cluster.
     ///
     /// If possible, newly allocated pages will be appended to this cluster. When it is filled
     /// (i.e. the pages cannot compress to the cluster size or less), a new cluster will be
     /// allocated.
-    last_cluster: Option<ClusterState>,
+    last_cluster: AtomicOption<ClusterState>,
     /// The deduplication table.
     ///
     /// This table allows the allocator for searching for candidates to use instead of allocating a
@@ -186,7 +195,7 @@ impl Manager {
         }
 
         // Handle the case where compression is disabled.
-        if self.state_block.compression_algorithm == CompressionAlgorithm::Identity {
+        if self.config.compression_algorithm == CompressionAlgorithm::Identity {
             // Pop a cluster from the freelist.
             let cluster = self.freelist_pop()?;
 
@@ -204,7 +213,7 @@ impl Manager {
             return Ok(cluster.then(self.cache.write(cluster, buf)).wrap(ptr));
         }
 
-        if let Some(state) = self.last_cluster.take() {
+        if let Some(state) = self.last_cluster.take(ORDERING) {
             // We have earlier allocated a cluster, meaning that we can potentially append more
             // pages into the cluster.
 
@@ -222,7 +231,7 @@ impl Manager {
                 if let Some(compressed) = self.compress(state.uncompressed) {
                     // Put back the "last cluster", as it might be possible to fit in even more
                     // pages later on.
-                    self.last_cluster = state;
+                    self.last_cluster.swap(Some(state), ORDERING);
 
                     let ptr = Ok(page::Pointer {
                         cluster: state.cluster,
@@ -247,9 +256,6 @@ impl Manager {
         // allocated cluster, or because the cluster could not contain the page. We'll allocate a
         // new cluster to contain our page.
 
-        debug_assert!(self.last_cluster.is_none(), "The last cluster is still open, despite being \
-                      full.");
-
         // Pop the cluster from the freelist.
         let cluster = self.freelist_pop()?;
         let ptr = if let Some(compressed) = self.compress(buf) {
@@ -263,11 +269,11 @@ impl Manager {
             // there is no change in how the other pages are read.
 
             // Make the "last cluster" the newly allocated cluster.
-            self.last_cluster = Some(ClusterState {
+            self.last_cluster.swap(Some(ClusterState {
                 cluster: cluster,
                 // So far, it only contains one page.
                 uncompressed: buf.as_vec(),
-            });
+            }), ORDERING);
 
             // Write the compressed data into the cluster.
             cluster.then(self.cache.write(cluster, compressed)).wrap(page::Pointer {
@@ -346,7 +352,7 @@ impl Manager {
     fn checksum(&self, buf: &[u8]) -> u64 {
         trace!(self, "calculating checksum");
 
-        self.state_block.checksum_algorithm.hash(buf)
+        self.driver.header.hash(buf)
     }
 
     /// Compress some data based on the compression configuration option.
@@ -358,7 +364,7 @@ impl Manager {
         trace!(self, "compressing data");
 
         // Compress the input.
-        let compressed = match self.state_block.compression_algorithm {
+        let compressed = match self.config.compression_algorithm {
             // We'll panic if compression is disabled, as it is assumed that the caller handles
             // this case.
             CompressionAlgorithm::Identity => panic!("Compression was disabled."),
@@ -395,7 +401,7 @@ impl Manager {
         // Find the padding delimited (i.e. the last non-zero byte).
         if let Some((len, _)) = cluster.enumerate().rev().find(|(_, x)| x != 0) {
             // We found the delimiter and can now distinguish padding from data.
-            Ok(match self.state_block.compression_algorithm {
+            Ok(match self.config.compression_algorithm {
                 // We'll panic if compression is disabled, as it is assumed that the caller handles
                 // this case.
                 CompressionAlgorithm::Identity => panic!("Compression was disabled."),
@@ -413,10 +419,16 @@ impl Manager {
     ///
     /// This flushes the state block (not to the disk, but to the cache), and returns the
     /// transaction.
-    fn flush_state_block(&mut self) -> cache::Transaction {
+    ///
+    /// It takes a state in order to avoid re-acquiring the lock.
+    fn flush_state_block(&mut self, state: &state_block::State) -> cache::Transaction {
         trace!(self, "flushing the state block to the cache");
 
-        self.cache.write(self.header.state_block_address, self.state_block.encode());
+        // Do it, motherfucker.
+        self.cache.write(self.driver.header.state_block_address, state_block::StateBlock {
+            config: self.config,
+            state: state,
+        }.encode())
     }
 
     /// Write the head metacluster to some cluster.
@@ -439,7 +451,10 @@ impl Manager {
     fn freelist_pop(&mut self) -> Result<cache::Transacting<cluster::Pointer>, Error> {
         trace!(self, "popping from freelist");
 
-        if let Some(freelist_head) = self.state_block.freelist_head.take() {
+        // Lock the state.
+        let state = self.state.lock();
+
+        if let Some(freelist_head) = state.freelist_head.take() {
             if let Some(free) = self.head_metacluster.free.pop() {
                 // There were one or more free clusters in the head metacluster, we pop the last
                 // free cluster in the metacluster.
@@ -452,12 +467,12 @@ impl Manager {
                 freelist_head.checksum = self.head_metacluster.checksum();
 
                 // Put back the freelist head into the state block.
-                self.state_block.freelist_head = freelist_head;
+                state.freelist_head = freelist_head;
 
                 // Flush the state block to reflect the changes above. Because both the checksum
                 // and counter are updated, this will be atomic and consistent. Wrap the output in
                 // the transaction.
-                Ok(self.flush_state_block().wrap(free))
+                Ok(self.flush_state_block(&state).wrap(free))
             } else {
                 // There were no free clusters, but there might be additional metaclusters. The
                 // outline of the algorithm is to update the freelist head pointer to point to the
@@ -497,7 +512,7 @@ impl Manager {
                         // Update the head metacluster to the decoded cluster.
                         self.head_metacluster = metacluster;
                         // Update the state block with the data from the newly decoded metacluster.
-                        self.state_block.freelist_head = Some(state_block::FreelistHead {
+                        state.freelist_head = Some(state_block::FreelistHead {
                             // The pointer should point towards the new metacluster.
                             cluster: next_metacluster,
                             checksum: checksum,
@@ -507,7 +522,7 @@ impl Manager {
                         });
 
                         // We flush the state block flush to write down our changes to the state block.
-                        Some(self.flush_state_block())
+                        Some(self.flush_state_block(&state))
                     } else { None }
                 } else { None };
 
@@ -532,9 +547,10 @@ impl Manager {
     fn freelist_push(&mut self, cluster: cluster::Pointer) -> cache::Transaction {
         trace!(self, "pushing to freelist"; "cluster" => cluster);
 
-        let mut transaction = Transaction
+        // Lock the state.
+        let state = self.state.lock();
 
-        if let Some(freelist_head) = self.state_block.freelist_head {
+        if let Some(freelist_head) = state.freelist_head {
             if self.head_metacluster.free.len() + 2 == disk::SECTOR_SIZE / cluster::POINTER_SIZE {
                 // The head metacluster is full, so we will use the cluster to create a new
                 // head metacluster.
@@ -551,7 +567,7 @@ impl Manager {
                 self.head_metacluster.next_checksum = freelist_head.next_checksum;
                 // Update the state block freelist head metadata to point to the new head
                 // metacluster.
-                self.state_block.freelist_head = Some(state_block::FreelistHead {
+                state.freelist_head = Some(state_block::FreelistHead {
                     cluster: cluster,
                     // Calculate the checksum of the new head metacluster.
                     checksum: self.head_metacluster.checksum(),
@@ -564,7 +580,7 @@ impl Manager {
                 self.write_head_metacluster(cluster).then(
                     // Flush the state block. This won't leave the system in an inconsistent state
                     // either, as a new, valid metacluster is stored at `cluster`.
-                    self.flush_state_block();
+                    self.flush_state_block(&state)
                 )
             } else {
                 // There is more space in the head metacluster.
@@ -572,18 +588,18 @@ impl Manager {
                 // Push the new free cluster.
                 self.head_metacluster.free.push(cluster);
                 // Flush. Woosh!
-                self.flush_state_block()
+                self.flush_state_block(&state)
             }
         } else {
             // The freelist is empty, so we set the cluster up as an empty metacluster as the
             // head metacluster.
-            self.state_block.freelist_head = Some(state_block::FreelistHead {
+            state.freelist_head = Some(state_block::FreelistHead {
                 cluster: cluster,
                 checksum: 0,
                 counter: 0,
             });
             // Flush the state block to add the new cluster.
-            self.flush_state_block()
+            self.flush_state_block(&state)
         }
     }
 }

@@ -75,8 +75,20 @@ struct FreelistHead {
 
 /// The TFS state block.
 struct StateBlock {
+    /// The static configuration section of the state block.
+    config: Config,
+    /// The dynamic state section of the state block.
+    state: State,
+}
+
+/// The configuration sub-block.
+struct Config {
     /// The chosen compression algorithm.
     compression_algorithm: CompressionAlgorithm,
+}
+
+/// The state sub-block.
+struct State {
     /// A pointer to the superpage.
     superpage: Option<page::Pointer>,
     /// The freelist head.
@@ -99,35 +111,39 @@ impl StateBlock {
         }
 
         Ok(StateBlock {
-            // Load the compression algorithm config field.
-            compression_algorithm: CompressionAlgorithm::try_from(LittleEndian::read(buf[8..]))?,
-            // Load the superpage pointer.
-            superpage: page::Pointer::new(LittleEndian::read(buf[16..])),
-            // Construct the freelist head metadata. If the pointer is 0, we return `None`.
-            freelist_head: cluster::Pointer::new(LittleEndian::read(&buf[32..])).map(|freelist_head| {
-                FreelistHead {
-                    cluster: freelist_head,
-                    // Load the checksum of the freelist head.
-                    checksum: LittleEndian::read(&buf[40..]),
-                    // Load the pointer counter in the freelist head.
-                    counter: buf[48],
-                }
-            }),
+            config: Config {
+                // Load the compression algorithm config field.
+                compression_algorithm: CompressionAlgorithm::try_from(LittleEndian::read(buf[8..]))?,
+            },
+            state: State {
+                // Load the superpage pointer.
+                superpage: page::Pointer::new(LittleEndian::read(buf[16..])),
+                // Construct the freelist head metadata. If the pointer is 0, we return `None`.
+                freelist_head: cluster::Pointer::new(LittleEndian::read(&buf[32..])).map(|freelist_head| {
+                    FreelistHead {
+                        cluster: freelist_head,
+                        // Load the checksum of the freelist head.
+                        checksum: LittleEndian::read(&buf[40..]),
+                        // Load the pointer counter in the freelist head.
+                        counter: buf[48],
+                    }
+                }),
+            },
         })
     }
 
     /// Encode the state block into a sector-sized buffer.
     fn encode(&self, checksum_algorithm: header::ChecksumAlgorithm) -> disk::SectorBuf {
         // Create a buffer to hold the data.
-        let mut buf = [0; disk::SECTOR_SIZE];
+        let mut buf = disk::SectorBuf::default();
 
         // Write the compression algorithm.
-        LittleEndian::write(&mut buf[8..], self.compression_algorithm as u16);
+        LittleEndian::write(&mut buf[8..], self.config.compression_algorithm as u16);
         // Write the superpage pointer. If no superpage is initialized, we simply write a null
         // pointer.
-        LittleEndian::write(&mut buf[16..], self.superpage.map_or(0, |x| x.into()));
+        LittleEndian::write(&mut buf[16..], self.state.superpage.map_or(0, |x| x.into()));
 
-        if let Some(freelist_head) = self.freelist_head {
+        if let Some(freelist_head) = self.state.freelist_head {
             // Write the freelist head pointer.
             LittleEndian::write(&mut buf[32..], freelist_head.cluster);
             // Write the checksum of the freelist head.
@@ -139,7 +155,7 @@ impl StateBlock {
         // matching the buffer's current state.
 
         // Calculate and store the checksum.
-        let cksum = self.checksum_algorithm.hash(&buf[8..]);
+        let cksum = checksum_algorithm.hash(&buf[8..]);
         LittleEndian::write(&mut buf, cksum);
 
         buf
@@ -155,13 +171,13 @@ mod tests {
         let mut block = StateBlock::default();
         assert_eq!(StateBlock::decode(block.encode()).unwrap(), block);
 
-        block.compression_algorithm = CompressionAlgorithm::Identity;
+        block.config.compression_algorithm = CompressionAlgorithm::Identity;
         assert_eq!(StateBlock::decode(block.encode()).unwrap(), block);
 
-        block.superpage = 200;
+        block.state.superpage = 200;
         assert_eq!(StateBlock::decode(block.encode()).unwrap(), block);
 
-        block.freelist_head = Some(FreelistHead {
+        block.state.freelist_head = Some(FreelistHead {
             cluster: 22,
             checksum: 2,
             counter: 2,
@@ -174,17 +190,17 @@ mod tests {
         let mut block = StateBlock::default();
         let mut sector = block.encode();
 
-        block.compression_algorithm = CompressionAlgorithm::Identity;
+        block.config.compression_algorithm = CompressionAlgorithm::Identity;
         sector[9] = 0;
         LittleEndian::write(&mut sector, seahash::hash(sector[8..]));
         assert_eq!(sector, block.encode());
 
-        block.superpage = 29;
+        block.state.superpage = 29;
         sector[16] = 29;
         LittleEndian::write(&mut sector, seahash::hash(sector[8..]));
         assert_eq!(sector, block.encode());
 
-        block.freelist_head = Some(FreelistHead {
+        block.state.freelist_head = Some(FreelistHead {
             cluster: 22,
             checksum: 2,
             counter: 3,

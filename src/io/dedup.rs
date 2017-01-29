@@ -5,7 +5,12 @@
 
 extern crate ring;
 
+use crossbeam::sync::AtomicOption;
 use ring::digest;
+use std::sync::atomic;
+
+/// The atomic ordering used in the table.
+const ORDERING: atomic::Ordering = atomic::Ordering::Relaxed;
 
 /// A SHA-256 fingerprint of a page.
 ///
@@ -32,6 +37,7 @@ const MAX_PAGES_IN_TABLE: usize = 1 << 16;
 /// A deduplication candidate.
 ///
 /// This is a potential match. It stores data to check if it is a complete match.
+#[derive(Copy, Clone)]
 struct Candidate {
     /// The candidate for deduplication.
     ///
@@ -69,7 +75,7 @@ struct Table {
     ///
     /// When looking up a particular candidate, the checksum modulo the table size is used. If this
     /// entry is `None`, there is no candidate.
-    table: [Option<Candidate>; MAX_PAGES_IN_TABLE]
+    table: [AtomicOption<Candidate>; MAX_PAGES_IN_TABLE],
 }
 
 impl Table {
@@ -81,8 +87,14 @@ impl Table {
         // We look up in the table with the checksum under some modulus, since that is faster to
         // calculate than a cryptographic hash, meaning that we can refine candidates based on a
         // rougher first-hand measure.
-        if let Some(candidate) = self.table[cksum % MAX_PAGES_IN_TABLE] {
+        let entry = self.table[cksum % MAX_PAGES_IN_TABLE];
+
+        // Temporarily remove the entry from the table.
+        if let Some(candidate) = entry.take(ORDERING) {
             // A candidate exists.
+
+            // Put it back into the entry.
+            entry.swap(candidate);
 
             // Check if the checksum and fingerprint matches.
             if cksum == candidate.page.checksum && candidate.isMatch(buf) {
@@ -103,11 +115,11 @@ impl Table {
     /// This inserts page `page` with data `buf` into the deduplication table.
     fn insert(&mut self, buf: &disk::SectorBuf, page: page::Pointer) {
         // Overwrite the old entry with the new updated entry.
-        self.table[page.checksum % MAX_PAGES_IN_TABLE] = Some(Candidate {
+        self.table[page.checksum % MAX_PAGES_IN_TABLE].swap(Candidate {
             page: page,
             // TODO: This fingerprint might be double-calculated due to the use in `dedup`.
             fingerprint: fingerprint(buf),
-        });
+        }, ORDERING);
     }
 }
 

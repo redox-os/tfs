@@ -1,5 +1,71 @@
 use crossbeam::sync::SegQueue;
 
+// TODO: Merge `Transaction` and `Transacting`.
+
+/// A transaction handler
+///
+/// This is used for representing a write transaction node. It has a reference to the cache and a
+/// mutable reference to the block, allowing it to create child transactions of the write.
+///
+/// The transaction will be flushable when this handler is dropped.
+#[derive(Copy, Clone)]
+#[must_use]
+struct Transaction<'a> {
+    /// The sector of the transaction.
+    sector: disk::Sector,
+    /// The block in question.
+    ///
+    /// This is a lock guard, and thus as long it is held, the block cannot be flushed.
+    block: chashmap::WriteGuard<'a, Block>,
+}
+
+impl<'a> Transaction<'a> {
+    /// Wrap a value in the transaction.
+    ///
+    /// This makes a `Transacting` with the transaction and inner value `inner`.
+    pub fn wrap<T>(self, inner: T) -> Transacting<T> {
+        Transacting {
+            inner: T,
+            transaction: self,
+        }
+    }
+
+    /// Execute a transaction depending on the current.
+    ///
+    /// This makes a new transaction which will execute `self` transaction then `other`.
+    ///
+    /// Beware that it will make `self` flushable, by executing the lock.
+    pub fn then(self, other: Transaction) -> Transaction {
+        // Make `other` depend on `self`.
+        other.block.flush_dependencies.push(self.sector);
+
+        // Since `other` depends on `self`, we can safely use `other`.
+        Transaction {
+            sector: other.sector,
+            block: other.block,
+        }
+
+        // Now `self` will drop, releasing the lock, and making it flushable.
+    }
+
+    /// Execute the transaction.
+    pub fn execute(self) {
+        // Release the lock.
+        drop(self.block);
+        // To avoid the safety destructor from running, we leak `self`, knowing that everything is
+        // deallocated.
+        mem::forget(self);
+    }
+}
+
+impl<'a> Drop for Transaction<'a> {
+    fn drop(&mut self) {
+        // In order to avoid accidentally dropping transactions, we force the programmer to
+        // manually execute transactions.
+        panic!("Dropping a `Transaction` automatically. Use `.execute()` instead.");
+    }
+}
+
 /// A monad-like wrapper telling that some data depends on a transaction.
 ///
 /// This wraps some inner data, adding a transaction, which it depends on.
@@ -46,53 +112,6 @@ impl<'a, T> Transacting<'a, T> {
             // `self` contained no transaction, so we'll simply execute `other`.
             other
         }
-    }
-}
-
-/// A transaction handler
-///
-/// This is used for representing a write transaction node. It has a reference to the cache and a
-/// mutable reference to the block, allowing it to create child transactions of the write.
-///
-/// The transaction will be flushable when this handler is dropped.
-#[derive(Copy, Clone)]
-#[must_use]
-struct Transaction<'a> {
-    /// The sector of the transaction.
-    sector: disk::Sector,
-    /// The block in question.
-    ///
-    /// This is a lock guard, and thus as long it is held, the block cannot be flushed.
-    block: chashmap::WriteGuard<'a, Block>,
-}
-
-impl<'a> Transaction<'a> {
-    /// Wrap a value in the transaction.
-    ///
-    /// This makes a `Transacting` with the transaction and inner value `inner`.
-    fn wrap<T>(self, inner: T) -> Transacting<T> {
-        Transacting {
-            inner: T,
-            transaction: self,
-        }
-    }
-
-    /// Execute a transaction depending on the current.
-    ///
-    /// This makes a new transaction which will execute `self` transaction then `other`.
-    ///
-    /// Beware that it will make `self` flushable, by executing the lock.
-    fn then(self, other: Transaction) -> Transaction {
-        // Make `other` depend on `self`.
-        other.block.flush_dependencies.push(self.sector);
-
-        // Since `other` depends on `self`, we can safely use `other`.
-        Transaction {
-            sector: other.sector,
-            block: other.block,
-        }
-
-        // Now `self` will drop, releasing the lock, and making it flushable.
     }
 }
 
@@ -172,7 +191,7 @@ struct Cache {
     tracker: Mutex<mlcr::Cache>,
 
     /// The sector-to-cache block map.
-    sector_map: CHashMap<disk::Sector, Block,
+    sector_map: CHashMap<disk::Sector, Block>,
 }
 
 impl Cache {
