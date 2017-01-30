@@ -11,6 +11,7 @@ const ORDERING: atomic::Ordering = atomic::Ordering::SeqCst;
 const LENGTH_MULTIPLIER: usize = 4;
 const MAX_LOAD_FACTOR_NUM: usize = 100 - 15;
 const MAX_LOAD_FACTOR_DENOM: usize = 100;
+const DEFAULT_INITIAL_SIZE: usize = 32;
 
 fn hash<K: Hash>(key: K) -> usize {
     let mut h = hash::SipHasher::new();
@@ -41,6 +42,18 @@ struct Table<K, V> {
 }
 
 impl<K: PartialEq + Hash, V> Table<K, V> {
+    fn with_capacity(cap: usize) -> Table<K, V> {
+        // TODO: For some obscure reason `RwLock` doesn't implement `Clone`.
+        let mut vec = Vec::with_capacity(cap);
+        for _ in 0..cap {
+            vec.push(RwLock::new(Bucket::Empty));
+        }
+
+        Table {
+            buckets: vec,
+        }
+    }
+
     fn scan<F>(&self, key: &K, matches: F) -> RwLockReadGuard<Bucket<K, V>>
         where F: Fn(&Bucket<K, V>) -> bool {
         let hash = hash(key);
@@ -113,8 +126,8 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
         })
     }
 
-    fn fill(&mut self, table: Vec<RwLock<Bucket<K, V>>>) {
-        for mut i in table {
+    fn fill(&mut self, table: Table<K, V>) {
+        for mut i in table.buckets {
             if let Bucket::Contains(key, val) = i.get_mut().remove() {
                 let mut bucket = self.scan_mut_no_lock(&key, |x| match *x {
                     Bucket::Removed | Bucket::Empty => true,
@@ -162,6 +175,19 @@ pub struct CHashMap<K, V> {
     table: RwLock<Table<K, V>>,
 }
 
+impl<K, V> CHashMap<K, V> {
+    pub fn with_capacity(cap: usize) -> CHashMap<K, V> {
+        CHashMap {
+            total: AtomicUsize::new(0),
+            table: RwLock::new(Table::with_capacity(cap)),
+        }
+    }
+
+    pub fn new() -> CHashMap<K, V> {
+        CHashMap::with_capacity(DEFAULT_INITIAL_SIZE)
+    }
+}
+
 impl<K: PartialEq + Hash, V> CHashMap<K, V> {
     pub fn get(&self, key: &K) -> Option<ReadGuard<K, V>> {
         if let Ok(inner) = OwningRef::new(OwningHandle::new(self.table.read(), |x| unsafe { &*x }.lookup(key)))
@@ -204,37 +230,53 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
 
     pub fn remove(&self, key: &K) -> Option<V> {
         let lock = self.table.read();
-        self.total.fetch_sub(1, ORDERING);
 
         let mut bucket = lock.lookup_mut(&key);
-        bucket.remove().value()
+        let ret = bucket.remove().value();
+
+        if ret.is_some() {
+            self.total.fetch_sub(1, ORDERING);
+        }
+
+        ret
     }
 
-    pub fn reserve(&self, len: usize) {
-        if self.total.load(ORDERING) < len {
-            let mut lock = self.table.write();
-            let vec = mem::replace(&mut lock.buckets, Vec::with_capacity(len * LENGTH_MULTIPLIER));
-            lock.fill(vec);
-        }
+    pub fn reserve(&self, additional: usize) {
+        let len = self.total.load(ORDERING) + additional;
+        let mut lock = self.table.write();
+        let table = mem::replace(&mut *lock, Table::with_capacity(len * LENGTH_MULTIPLIER));
+        lock.fill(table);
     }
 
     pub fn shrink_to_fit(&self) {
         let mut lock = self.table.write();
-        let vec = mem::replace(&mut lock.buckets, Vec::with_capacity(self.total.load(ORDERING) * LENGTH_MULTIPLIER));
-        lock.fill(vec);
+        let table = mem::replace(&mut *lock, Table::with_capacity(self.total.load(ORDERING) * LENGTH_MULTIPLIER));
+        lock.fill(table);
     }
 
     fn expand(&self) -> RwLockReadGuard<Table<K, V>> {
         let lock = self.table.read();
-        let total = self.total.fetch_add(1, ORDERING);
+        let total = self.total.fetch_add(1, ORDERING) + 1;
 
         // Extend if necessary. We multiply by some constant to adjust our load factor.
         if total * MAX_LOAD_FACTOR_DENOM >= lock.buckets.len() * MAX_LOAD_FACTOR_NUM {
             drop(lock);
-            self.reserve(total + 1);
+
+            {
+                let mut lock = self.table.write();
+                let table = mem::replace(&mut *lock, Table::with_capacity(total * LENGTH_MULTIPLIER));
+                lock.fill(table);
+            }
+
             self.table.read()
         } else {
             lock
         }
+    }
+}
+
+impl<K, V> Default for CHashMap<K, V> {
+    fn default() -> CHashMap<K, V> {
+        CHashMap::new()
     }
 }
