@@ -1,0 +1,8 @@
+[package]
+name = "chashmap"
+version = "0.1.0"
+authors = ["ticki <ticki@users.noreply.github.com>"]
+
+[dependencies]
+parking_lot = "0"
+owning_ref = "0"
