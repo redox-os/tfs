@@ -80,13 +80,12 @@ FAQ
 
 Why do you use SPECK as the default cipher?
     SPECK is a relatively young cipher, yet it has been subject to a lot of
-    (ineffective) cryptanalysis, so it is quite secure, but more importantly is
-    that it has really good performance and a simple implementation.
-    Portability is an important part of the TFS design, and truely portable AES
-    implementations without side-channel attacks is harder than many think
-    (particularly, there are issues with `SubBytes` in most portable
-    implementations). SPECK does not have this issue, and can be implemented
-    portably with minimal effort.
+    (ineffective) cryptanalysis, so it is relatively secure. It has has really
+    good performance and a simple implementation. Portability is an important
+    part of the TFS design, and truely portable AES implementations without
+    side-channel attacks is harder than many think (particularly, there are
+    issues with `SubBytes` in most portable implementations). SPECK does not
+    have this issue, and can be implemented portably with minimal effort.
 How similar is TFS and ZFS?
     Not that similar, actually. The share many of the basic ideas, but
     otherwise they are essentially unconnected.

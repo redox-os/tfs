@@ -228,6 +228,39 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
             }
         }
 
+        // TODO
+        unreachable!();
+    }
+
+    /// Find a bucket with some key, or a free bucket in same cluster.
+    ///
+    /// This scans for buckets with key `key`. If one is found, it will be returned. If none are
+    /// found, it will return a free bucket in the same cluster.
+    fn lookup_or_free(&self, key: &K) -> RwLockWriteGuard<Bucket<K, V>> {
+        // Hash the key.
+        let hash = hash(key);
+        // The encountered free bucket.
+        let mut free = None;
+
+        // Start at the first priority bucket, and then move upwards, searching for the matching
+        // bucket.
+        for i in 0.. {
+            // Get the lock of the `i`'th bucket after the first priority bucket (wrap on end).
+            let lock = self.buckets[(hash + i) % self.buckets.len()].write();
+
+            match *lock {
+                // We found a match.
+                Bucket::Contains(ref candidate_key, _) if key == candidate_key => return lock,
+                // The cluster is over. Use the encountered free bucket, if any.
+                Bucket::Empty => return free.unwrap_or(lock),
+                // We found a free bucket, so we can store it to later (if we don't already have
+                // one).
+                Bucket::Removed if free.is_none() => free = Some(lock),
+                _ => {},
+            }
+        }
+
+        // TODO
         unreachable!();
     }
 
@@ -498,11 +531,11 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
     ///
     /// This will replace an existing entry and return the old entry, if any. If no entry exists,
     /// it will simply insert the new entry and return `None`.
-    pub fn replace(&self, key: K, val: V) -> Option<V> {
+    pub fn insert(&self, key: K, val: V) -> Option<V> {
         // Expand and lock the table. We need to expand to ensure the bounds on the load factor.
         let lock = self.expand();
-        // Lookup the key in the inner table.
-        let mut bucket = lock.lookup_mut(&key);
+        // Lookup the key or a free bucket in the inner table.
+        let mut bucket = lock.lookup_or_free(&key);
 
         // Replace the bucket.
         mem::replace(&mut *bucket, Bucket::Contains(key, val)).value()
