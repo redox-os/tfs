@@ -26,8 +26,21 @@ enum Bucket<K, V> {
 }
 
 impl<K, V> Bucket<K, V> {
+    fn is_free(&self) -> bool {
+        match *self {
+            Bucket::Removed | Bucket::Empty => true,
+            _ => false,
+        }
+    }
+
     fn remove(&mut self) -> Bucket<K, V> {
         mem::replace(self, Bucket::Removed)
+    }
+
+    fn pair(self) -> Option<(K, V)> {
+        if let Bucket::Contains(key, val) = self {
+            Some((key, val))
+        } else { None }
     }
 
     fn value(self) -> Option<V> {
@@ -35,13 +48,21 @@ impl<K, V> Bucket<K, V> {
             Some(val)
         } else { None }
     }
+
+    fn value_ref(&self) -> Result<&V, ()> {
+        if let Bucket::Contains(_, ref val) = *self {
+            Ok(val)
+        } else {
+            Err(())
+        }
+    }
 }
 
 struct Table<K, V> {
     buckets: Vec<RwLock<Bucket<K, V>>>,
 }
 
-impl<K: PartialEq + Hash, V> Table<K, V> {
+impl<K, V> Table<K, V> {
     fn with_capacity(cap: usize) -> Table<K, V> {
         // TODO: For some obscure reason `RwLock` doesn't implement `Clone`.
         let mut vec = Vec::with_capacity(cap);
@@ -53,7 +74,9 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
             buckets: vec,
         }
     }
+}
 
+impl<K: PartialEq + Hash, V> Table<K, V> {
     fn scan<F>(&self, key: &K, matches: F) -> RwLockReadGuard<Bucket<K, V>>
         where F: Fn(&Bucket<K, V>) -> bool {
         let hash = hash(key);
@@ -119,11 +142,7 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
     }
 
     fn find_free(&self, key: &K) -> RwLockWriteGuard<Bucket<K, V>> {
-        self.scan_mut(key, |x| match *x {
-            // Halt if and only if the bucket is free.
-            Bucket::Removed | Bucket::Empty => true,
-            _ => false,
-        })
+        self.scan_mut(key, |x| x.is_free())
     }
 
     fn fill(&mut self, table: Table<K, V>) {
@@ -136,6 +155,36 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
 
                 *bucket = Bucket::Contains(key, val);
             }
+        }
+    }
+}
+
+pub struct IntoIter<K, V> {
+    table: Table<K, V>,
+}
+
+impl<K, V> Iterator for IntoIter<K, V> {
+    type Item = (K, V);
+
+    fn next(&mut self) -> Option<(K, V)> {
+        while let Some(bucket) = self.table.buckets.pop() {
+            let ret = bucket.into_inner().pair();
+            if ret.is_some() {
+                return ret;
+            }
+        }
+
+        None
+    }
+}
+
+impl<K, V> IntoIterator for Table<K, V> {
+    type Item = (K, V);
+    type IntoIter = IntoIter<K, V>;
+
+    fn into_iter(mut self) -> IntoIter<K, V> {
+        IntoIter {
+            table: self,
         }
     }
 }
@@ -191,11 +240,7 @@ impl<K, V> CHashMap<K, V> {
 impl<K: PartialEq + Hash, V> CHashMap<K, V> {
     pub fn get(&self, key: &K) -> Option<ReadGuard<K, V>> {
         if let Ok(inner) = OwningRef::new(OwningHandle::new(self.table.read(), |x| unsafe { &*x }.lookup(key)))
-            .try_map(|x| if let Bucket::Contains(_, ref val) = *x {
-            Ok(val)
-        } else {
-            Err(())
-        }) {
+            .try_map(|x| x.value_ref()) {
             Some(ReadGuard {
                 inner: inner,
             })
@@ -278,5 +323,14 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
 impl<K, V> Default for CHashMap<K, V> {
     fn default() -> CHashMap<K, V> {
         CHashMap::new()
+    }
+}
+
+impl<K, V> IntoIterator for CHashMap<K, V> {
+    type Item = (K, V);
+    type IntoIter = IntoIter<K, V>;
+
+    fn into_iter(mut self) -> IntoIter<K, V> {
+        self.table.into_inner().into_iter()
     }
 }
