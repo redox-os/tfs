@@ -3,17 +3,22 @@
 //! This crate implements concurrent hash maps, based on bucket-level multi-reader locks. It has
 //! excellent performance characteristics¹ and supports resizing, in-place mutation and more.
 //!
+//! The API derives directly from `std::collections::HashMap`, giving it a familiar feel.
+//!
 //! ¹Note that it heavily depends on the behavior of your program, but in most cases, it's really
 //!  good. In some (rare) cases you might want atomic hash maps instead.
 
 extern crate parking_lot;
 extern crate owning_ref;
 
+#[cfg(test)]
+mod tests;
+
 use parking_lot::{RwLock, RwLockWriteGuard, RwLockReadGuard};
 use owning_ref::{OwningHandle, OwningRef};
 use std::sync::atomic::{self, AtomicUsize};
 use std::hash::{self, Hash, Hasher};
-use std::{mem, ops};
+use std::{mem, ops, iter};
 
 /// The atomic ordering used throughout the code.
 const ORDERING: atomic::Ordering = atomic::Ordering::SeqCst;
@@ -306,6 +311,14 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
         self.scan_mut(key, |x| x.is_free())
     }
 
+    /// Find a free bucket in the same cluster as some key (bypassing locks).
+    ///
+    /// This is similar to `find_free`, except that it safely bypasses locks through the aliasing
+    /// guarantees of `&mut`.
+    fn find_free_no_lock(&mut self, key: &K) -> &mut Bucket<K, V> {
+        self.scan_mut_no_lock(key, |x| x.is_free())
+    }
+
     /// Fill the table with data from another table.
     ///
     /// This is used to efficiently copy the data of `table` into `self`.
@@ -492,11 +505,28 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
         } else { None }
     }
 
+    /// Does the hash map contain this key?
+    pub fn contains(&self, key: &K) -> bool {
+        // Acquire the lock.
+        let lock = self.table.read();
+        // Look the key up in the table
+        let bucket = lock.lookup(key);
+        // Test if it is free or not.
+        !bucket.is_free()
+
+        // fuck im sleepy rn
+    }
+
     /// Get the number of entries in the hash table.
     ///
     /// This is entirely atomic, and will not acquire any locks.
     pub fn len(&self) -> usize {
         self.len.load(ORDERING)
+    }
+
+    /// Get the capacity of the hash table.
+    pub fn capacity(&self) -> usize {
+        self.table.read().buckets.len()
     }
 
     /// Insert a **new** entry.
@@ -639,7 +669,29 @@ impl<K, V> IntoIterator for CHashMap<K, V> {
     type IntoIter = IntoIter<K, V>;
 
     fn into_iter(mut self) -> IntoIter<K, V> {
-        // duh
         self.table.into_inner().into_iter()
+    }
+}
+
+impl<K: PartialEq + Hash, V> iter::FromIterator<(K, V)> for CHashMap<K, V> {
+    fn from_iter<I: IntoIterator<Item = (K, V)>>(iter: I) -> CHashMap<K, V> {
+        // TODO: This step is required to obtain the length of the iterator. Eliminate it.
+        let vec: Vec<_> = iter.into_iter().collect();
+        let len = vec.len();
+
+        // Start with an empty table.
+        let mut table = Table::with_capacity(len * LENGTH_MULTIPLIER);
+        // Fill the table with the pairs from the iterator.
+        for (key, val) in vec {
+            // Insert the KV pair. This is fine, as we are ensured that there are no duplicates in
+            // the iterator.
+            let bucket = table.find_free_no_lock(&key);
+            *bucket = Bucket::Contains(key, val);
+        }
+
+        CHashMap {
+            table: RwLock::new(table),
+            len: AtomicUsize::new(len),
+        }
     }
 }
