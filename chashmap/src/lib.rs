@@ -1,3 +1,11 @@
+//! Concurrent hash maps.
+//!
+//! This crate implements concurrent hash maps, based on bucket-level multi-reader locks. It has
+//! excellent performance characteristics¹ and supports resizing, in-place mutation and more.
+//!
+//! ¹Note that it heavily depends on the behavior of your program, but in most cases, it's really
+//!  good. In some (rare) cases you might want atomic hash maps instead.
+
 extern crate parking_lot;
 extern crate owning_ref;
 
@@ -7,10 +15,15 @@ use std::sync::atomic::{self, AtomicUsize};
 use std::hash::{self, Hash, Hasher};
 use std::{mem, ops};
 
+/// The atomic ordering used throughout the code.
 const ORDERING: atomic::Ordering = atomic::Ordering::SeqCst;
+/// The length-to-capacity factor.
 const LENGTH_MULTIPLIER: usize = 4;
+/// The maximal load factor's numerator.
 const MAX_LOAD_FACTOR_NUM: usize = 100 - 15;
+/// The maximal load factor's denominator.
 const MAX_LOAD_FACTOR_DENOM: usize = 100;
+/// The default initial capacity.
 const DEFAULT_INITIAL_CAPACITY: usize = 32;
 
 /// Hash a key.
