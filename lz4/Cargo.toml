@@ -7,7 +7,7 @@ repository = "https://github.com/ticki/tfs"
 documentation = "https://docs.rs/lz4-compress"
 license = "MIT"
 keywords = ["compression", "lz4", "compress", "decompression", "decompress"]
-exclude = ["target", "CHANGELOG.md", "Cargo.lock"]
+exclude = ["target", "Cargo.lock"]
 
 [dependencies]
 byteorder = "0.5"
