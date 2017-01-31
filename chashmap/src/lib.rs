@@ -219,6 +219,7 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
         let hash = hash(key);
         // TODO: To tame the borrowchecker, we fetch this in advance.
         let len = self.buckets.len();
+        let mut matched = None;
 
         // Start at the first priority bucket, and then move upwards, searching for the matching
         // bucket.
@@ -229,12 +230,16 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
             // Check if it is a match.
             if matches(&bucket) {
                 // Yup. Return.
-                return bucket;
+                matched = Some((hash + i) % len);
+                break;
             }
         }
-
-        // TODO
-        unreachable!();
+        if let Some(i) = matched {
+            self.buckets[i].get_mut()
+        } else {
+            // TODO
+            unreachable!();
+        }
     }
 
     /// Find a bucket with some key, or a free bucket in same cluster.
@@ -253,15 +258,21 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
             // Get the lock of the `i`'th bucket after the first priority bucket (wrap on end).
             let lock = self.buckets[(hash + i) % self.buckets.len()].write();
 
-            match *lock {
+            let hack = match *lock {
                 // We found a match.
-                Bucket::Contains(ref candidate_key, _) if key == candidate_key => return lock,
+                Bucket::Contains(ref candidate_key, _) if key == candidate_key => 0, //return lock,
                 // The cluster is over. Use the encountered free bucket, if any.
-                Bucket::Empty => return free.unwrap_or(lock),
+                Bucket::Empty => 1, //return free.unwrap_or(lock),
                 // We found a free bucket, so we can store it to later (if we don't already have
                 // one).
-                Bucket::Removed if free.is_none() => free = Some(lock),
-                _ => {},
+                Bucket::Removed if free.is_none() => 2, //free = Some(lock),
+                _ => 3, //{},
+            };
+            match hack {
+                0 => return lock,
+                1 => return free.unwrap_or(lock),
+                2 => free = Some(lock),
+                _ => {}
             }
         }
 
