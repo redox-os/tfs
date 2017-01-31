@@ -42,13 +42,20 @@ Full-disk compression
     through a scheme we call RACC (random-access cluster compression). This
     means that every cluster is compressed only affecting performance slightly.
     It is estimated that you get 60-120% more usable space.
-O(1) snapshots
-    TFS allows full or partial disk revertable and writable snapshots in
-    constant-time without clones or the alike.
+Revision history
+    TFS stores a revision history of every file, without imposing extra
+    overhead. This means that you can revert any file into an earlier version,
+    backing up the system automatically and without imposed overhead from
+    copying.
 Copy-on-write semantics
     Similarly to Btrfs and ZFS, TFS uses CoW semantics, meaning that no cluster
     is ever overwritten directly, but instead it is copied and written to a new
     cluster.
+O(1) recursive copies
+    Like some other file systems, TFS can do recursive copies in constant time,
+    but there is an unique addition: TFS doesn't copy even after it is mutated.
+    How? It maintains segments of the file individually, such that only the
+    updated segment needs copy.
 Guaranteed atomicity
     The system will never enter an inconsistent state (unless there is hardware
     failure), meaning that unexpected power-off at worst results in a 4 KiB
@@ -57,7 +64,8 @@ Guaranteed atomicity
 Improved caching
     TFS puts a lot of effort into caching the disk to speed up disk accesses.
     It uses machine learning to learn patterns and predict future uses to
-    reduce the number of cache misses.
+    reduce the number of cache misses. TFS also compresses the in-memory cache,
+    reducing the amount of memory needed.
 Concurrent
     TFS contains very few locks and aims to be as suitable for multithreaded
     systems as possible. It makes use of multiple truly concurrent structures
