@@ -71,6 +71,16 @@ enum Bucket<K, V> {
 }
 
 impl<K, V> Bucket<K, V> {
+    /// Is this bucket 'empty'?
+    fn is_empty(&self) -> bool {
+        if let Bucket::Empty = *self { true } else { false }
+    }
+
+    /// Is this bucket 'removed'?
+    fn is_removed(&self) -> bool {
+        if let Bucket::Empty = *self { true } else { false }
+    }
+
     /// Is this bucket free?
     ///
     /// "Free" means that it can safely be replace by another bucket — namely that the bucket is
@@ -106,6 +116,9 @@ impl<K, V> Bucket<K, V> {
 
     /// Get a reference to the value of the bucket (if any).
     ///
+    /// This returns a reference to the value of the bucket, if it is a KV pair. If not, it will
+    /// return `None`.
+    ///
     /// Rather than `Option`, it returns a `Result`, in order to make it easier to work with the
     /// `owning_ref` crate (`try_new` and `try_map` of `OwningHandle` and `OwningRef`
     /// respectively).
@@ -114,6 +127,20 @@ impl<K, V> Bucket<K, V> {
             Ok(val)
         } else {
             Err(())
+        }
+    }
+
+    /// Does the bucket match a given key?
+    ///
+    /// This returns `true` if the bucket is a KV pair with key `key`. If not, `false` is returned.
+    fn key_matches(&self, key: &K) -> bool where K: PartialEq {
+        if let Bucket::Contains(ref candidate_key, _) = *self {
+            // Check if the keys matches.
+            candidate_key == key
+        } else {
+            // The bucket isn't a KV pair, so we'll return false, since there is no key to test
+            // against.
+            false
         }
     }
 }
@@ -253,15 +280,16 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
             // Get the lock of the `i`'th bucket after the first priority bucket (wrap on end).
             let lock = self.buckets[(hash + i) % self.buckets.len()].write();
 
-            match *lock {
+            if lock.key_matches(key) {
                 // We found a match.
-                Bucket::Contains(ref candidate_key, _) if key == candidate_key => return lock,
+                return lock;
+            } else if lock.is_empty() {
                 // The cluster is over. Use the encountered free bucket, if any.
-                Bucket::Empty => return free.unwrap_or(lock),
+                return free.unwrap_or(lock);
+            } else if lock.is_removed() && free.is_none() {
                 // We found a free bucket, so we can store it to later (if we don't already have
                 // one).
-                Bucket::Removed if free.is_none() => free = Some(lock),
-                _ => {},
+                free = Some(lock)
             }
         }
 
