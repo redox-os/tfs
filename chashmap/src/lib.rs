@@ -18,7 +18,7 @@ use parking_lot::{RwLock, RwLockWriteGuard, RwLockReadGuard};
 use owning_ref::{OwningHandle, OwningRef};
 use std::sync::atomic::{self, AtomicUsize};
 use std::hash::{Hash, Hasher};
-use std::{mem, ops, iter, collections};
+use std::{mem, ops, cmp, fmt, iter, collections};
 
 /// The atomic ordering used throughout the code.
 const ORDERING: atomic::Ordering = atomic::Ordering::SeqCst;
@@ -44,6 +44,7 @@ fn hash<K: Hash>(key: K) -> usize {
 /// A bucket state.
 ///
 /// Buckets are the bricks of hash tables. They represent a single entry into the table.
+#[derive(Clone)]
 enum Bucket<K, V> {
     /// The bucket contains a key-value pair.
     Contains(K, V),
@@ -92,16 +93,6 @@ impl<K, V> Bucket<K, V> {
             // KV pairs can't be replaced as they contain data.
             Bucket::Contains(..) => false,
         }
-    }
-
-    /// Transform the bucket into an (optional) KV pair.
-    ///
-    /// `None` means that the bucket was not of the form `Bucket::Contains(key, val)`. Otherwise,
-    /// `Some((key, val))` is returned.
-    fn pair(self) -> Option<(K, V)> {
-        if let Bucket::Contains(key, val) = self {
-            Some((key, val))
-        } else { None }
     }
 
     /// Get the value (if any) of this bucket.
@@ -380,6 +371,32 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
     }
 }
 
+impl<K: Clone, V: Clone> Clone for Table<K, V> {
+    fn clone(&self) -> Table<K, V> {
+        Table {
+            // Lock and clone every bucket individually.
+            buckets: self.buckets.iter().map(|x| RwLock::new(x.read().clone())).collect(),
+        }
+    }
+}
+
+impl<K: fmt::Debug, V: fmt::Debug> fmt::Debug for Table<K, V> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // We'll just run over all buckets and output one after one.
+        for i in &self.buckets {
+            // Acquire the lock.
+            let lock = i.read();
+            // Check if the bucket actually contains anything.
+            if let Bucket::Contains(ref key, ref val) = *lock {
+                // Write it to the output stream in a nice format.
+                write!(f, "{:?} => {:?}", key, val)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
 /// An iterator over the entries of some table.
 pub struct IntoIter<K, V> {
     /// The inner table.
@@ -394,10 +411,9 @@ impl<K, V> Iterator for IntoIter<K, V> {
         // buckets until we find a bucket containing data.
         while let Some(bucket) = self.table.buckets.pop() {
             // We can bypass dem ebil locks.
-            let ret = bucket.into_inner().pair();
-            if ret.is_some() {
+            if let Bucket::Contains(key, val) = bucket.into_inner() {
                 // The bucket contained data, so we'll return the pair.
-                return ret;
+                return Some((key, val));
             }
         }
 
@@ -434,6 +450,19 @@ impl<'a, K, V> ops::Deref for ReadGuard<'a, K, V> {
     }
 }
 
+impl<'a, K, V: PartialEq> cmp::PartialEq for ReadGuard<'a, K, V> {
+    fn eq(&self, other: &ReadGuard<'a, K, V>) -> bool {
+        self == other
+    }
+}
+impl<'a, K, V: Eq> cmp::Eq for ReadGuard<'a, K, V> {}
+
+impl<'a, K: fmt::Debug, V: fmt::Debug> fmt::Debug for ReadGuard<'a, K, V> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "ReadGuard({:?})", self)
+    }
+}
+
 /// A mutable RAII guard for reading an entry of a hash map.
 ///
 /// This is an access type dereferencing to the inner value of the entry. It will handle unlocking
@@ -454,6 +483,19 @@ impl<'a, K, V> ops::Deref for WriteGuard<'a, K, V> {
 impl<'a, K, V> ops::DerefMut for WriteGuard<'a, K, V> {
     fn deref_mut(&mut self) -> &mut V {
         &mut self.inner
+    }
+}
+
+impl<'a, K, V: PartialEq> cmp::PartialEq for WriteGuard<'a, K, V> {
+    fn eq(&self, other: &WriteGuard<'a, K, V>) -> bool {
+        self == other
+    }
+}
+impl<'a, K, V: Eq> cmp::Eq for WriteGuard<'a, K, V> {}
+
+impl<'a, K: fmt::Debug, V: fmt::Debug> fmt::Debug for WriteGuard<'a, K, V> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "WriteGuard({:?})", self)
     }
 }
 
@@ -539,7 +581,7 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
     }
 
     /// Does the hash map contain this key?
-    pub fn contains(&self, key: &K) -> bool {
+    pub fn contains_key(&self, key: &K) -> bool {
         // Acquire the lock.
         let lock = self.table.read();
         // Look the key up in the table
@@ -560,6 +602,11 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
     /// Get the capacity of the hash table.
     pub fn capacity(&self) -> usize {
         self.table.read().buckets.len()
+    }
+
+    /// Is the hash table empty?
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// Insert a **new** entry.
@@ -694,6 +741,21 @@ impl<K, V> Default for CHashMap<K, V> {
     fn default() -> CHashMap<K, V> {
         // Forward the call to `new`.
         CHashMap::new()
+    }
+}
+
+impl<K: Clone, V: Clone> Clone for CHashMap<K, V> {
+    fn clone(&self) -> CHashMap<K, V> {
+        CHashMap {
+            table: RwLock::new(self.table.read().clone()),
+            len: AtomicUsize::new(self.len.load(ORDERING)),
+        }
+    }
+}
+
+impl<K: fmt::Debug, V: fmt::Debug> fmt::Debug for CHashMap<K, V> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", *self.table.read())
     }
 }
 

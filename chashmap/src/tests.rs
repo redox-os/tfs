@@ -8,13 +8,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::thread;
 use std::cell::RefCell;
 use CHashMap;
 
 #[test]
 fn test_create_capacity_zero() {
-    let mut m = CHashMap::with_capacity(0);
+    let m = CHashMap::with_capacity(0);
 
     assert!(m.insert(1, 1).is_none());
 
@@ -24,7 +23,7 @@ fn test_create_capacity_zero() {
 
 #[test]
 fn test_insert() {
-    let mut m = CHashMap::new();
+    let m = CHashMap::new();
     assert_eq!(m.len(), 0);
     assert!(m.insert(1, 2).is_none());
     assert_eq!(m.len(), 1);
@@ -72,7 +71,7 @@ fn test_drops() {
     });
 
     {
-        let mut m = CHashMap::new();
+        let m = CHashMap::new();
 
         DROP_VECTOR.with(|v| {
             for i in 0..200 {
@@ -131,7 +130,7 @@ fn test_move_iter_drops() {
     });
 
     let hm = {
-        let mut hm = CHashMap::new();
+        let hm = CHashMap::new();
 
         DROP_VECTOR.with(|v| {
             for i in 0..200 {
@@ -191,13 +190,13 @@ fn test_move_iter_drops() {
 
 #[test]
 fn test_empty_pop() {
-    let mut m: CHashMap<isize, bool> = CHashMap::new();
+    let m: CHashMap<isize, bool> = CHashMap::new();
     assert_eq!(m.remove(&0), None);
 }
 
 #[test]
 fn test_lots_of_insertions() {
-    let mut m = CHashMap::new();
+    let m = CHashMap::new();
 
     // Try this a few times to make sure we never screw up the hashmap's
     // internal state.
@@ -209,7 +208,7 @@ fn test_lots_of_insertions() {
 
             for j in 1..i+1 {
                 let r = m.get(&j);
-                assert_eq!(r, Some(&j));
+                assert_eq!(*r.unwrap(), j);
             }
 
             for j in i+1..1001 {
@@ -260,20 +259,20 @@ fn test_lots_of_insertions() {
 
 #[test]
 fn test_find_mut() {
-    let mut m = CHashMap::new();
+    let m = CHashMap::new();
     assert!(m.insert(1, 12).is_none());
     assert!(m.insert(2, 8).is_none());
     assert!(m.insert(5, 14).is_none());
     let new = 100;
     match m.get_mut(&5) {
-        None => panic!(), Some(x) => *x = new
+        None => panic!(), Some(mut x) => *x = new
     }
-    assert_eq!(m.get(&5), Some(&new));
+    assert_eq!(*m.get(&5).unwrap(), new);
 }
 
 #[test]
 fn test_insert_overwrite() {
-    let mut m = CHashMap::new();
+    let m = CHashMap::new();
     assert!(m.insert(1, 2).is_none());
     assert_eq!(*m.get(&1).unwrap(), 2);
     assert!(!m.insert(1, 3).is_none());
@@ -282,7 +281,7 @@ fn test_insert_overwrite() {
 
 #[test]
 fn test_insert_conflicts() {
-    let mut m = CHashMap::with_capacity(4);
+    let m = CHashMap::with_capacity(4);
     assert!(m.insert(1, 2).is_none());
     assert!(m.insert(5, 3).is_none());
     assert!(m.insert(9, 4).is_none());
@@ -293,7 +292,7 @@ fn test_insert_conflicts() {
 
 #[test]
 fn test_conflict_remove() {
-    let mut m = CHashMap::with_capacity(4);
+    let m = CHashMap::with_capacity(4);
     assert!(m.insert(1, 2).is_none());
     assert_eq!(*m.get(&1).unwrap(), 2);
     assert!(m.insert(5, 3).is_none());
@@ -310,7 +309,7 @@ fn test_conflict_remove() {
 
 #[test]
 fn test_is_empty() {
-    let mut m = CHashMap::with_capacity(4);
+    let m = CHashMap::with_capacity(4);
     assert!(m.insert(1, 2).is_none());
     assert!(!m.is_empty());
     assert!(m.remove(&1).is_some());
@@ -319,122 +318,27 @@ fn test_is_empty() {
 
 #[test]
 fn test_pop() {
-    let mut m = CHashMap::new();
+    let m = CHashMap::new();
     m.insert(1, 2);
     assert_eq!(m.remove(&1), Some(2));
     assert_eq!(m.remove(&1), None);
 }
 
 #[test]
-fn test_keys() {
-    let vec = vec![(1, 'a'), (2, 'b'), (3, 'c')];
-    let map: CHashMap<_, _> = vec.into_iter().collect();
-    let keys: Vec<_> = map.keys().cloned().collect();
-    assert_eq!(keys.len(), 3);
-    assert!(keys.contains(&1));
-    assert!(keys.contains(&2));
-    assert!(keys.contains(&3));
-}
-
-#[test]
-fn test_values() {
-    let vec = vec![(1, 'a'), (2, 'b'), (3, 'c')];
-    let map: CHashMap<_, _> = vec.into_iter().collect();
-    let values: Vec<_> = map.values().cloned().collect();
-    assert_eq!(values.len(), 3);
-    assert!(values.contains(&'a'));
-    assert!(values.contains(&'b'));
-    assert!(values.contains(&'c'));
-}
-
-#[test]
 fn test_find() {
-    let mut m = CHashMap::new();
+    let m = CHashMap::new();
     assert!(m.get(&1).is_none());
     m.insert(1, 2);
-    match m.get(&1) {
+    let lock = m.get(&1);
+    match lock {
         None => panic!(),
         Some(v) => assert_eq!(*v, 2)
     }
 }
 
 #[test]
-fn test_expand() {
-    let mut m = CHashMap::new();
-
-    assert_eq!(m.len(), 0);
-    assert!(m.is_empty());
-
-    let mut i = 0;
-    let old_cap = m.table.capacity();
-    while old_cap == m.table.capacity() {
-        m.insert(i, i);
-        i += 1;
-    }
-
-    assert_eq!(m.len(), i);
-    assert!(!m.is_empty());
-}
-
-#[test]
-fn test_behavior_resize_policy() {
-    let mut m = CHashMap::new();
-
-    assert_eq!(m.len(), 0);
-    assert_eq!(m.table.capacity(), 0);
-    assert!(m.is_empty());
-
-    m.insert(0, 0);
-    m.remove(&0);
-    assert!(m.is_empty());
-    let initial_cap = m.table.capacity();
-    m.reserve(initial_cap);
-    let cap = m.table.capacity();
-
-    assert_eq!(cap, initial_cap * 2);
-
-    let mut i = 0;
-    for _ in 0..cap * 3 / 4 {
-        m.insert(i, i);
-        i += 1;
-    }
-    // three quarters full
-
-    assert_eq!(m.len(), i);
-    assert_eq!(m.table.capacity(), cap);
-
-    for _ in 0..cap / 4 {
-        m.insert(i, i);
-        i += 1;
-    }
-    // half full
-
-    let new_cap = m.table.capacity();
-    assert_eq!(new_cap, cap * 2);
-
-    for _ in 0..cap / 2 - 1 {
-        i -= 1;
-        m.remove(&i);
-        assert_eq!(m.table.capacity(), new_cap);
-    }
-    // A little more than one quarter full.
-    m.shrink_to_fit();
-    assert_eq!(m.table.capacity(), cap);
-    // again, a little more than half full
-    for _ in 0..cap / 2 - 1 {
-        i -= 1;
-        m.remove(&i);
-    }
-    m.shrink_to_fit();
-
-    assert_eq!(m.len(), i);
-    assert!(!m.is_empty());
-    assert_eq!(m.table.capacity(), initial_cap);
-}
-
-#[test]
 fn test_reserve_shrink_to_fit() {
-    let mut m = CHashMap::new();
+    let m = CHashMap::new();
     m.insert(0, 0);
     m.remove(&0);
     assert!(m.capacity() >= m.len());
@@ -476,65 +380,13 @@ fn test_from_iter() {
     let map: CHashMap<_, _> = xs.iter().cloned().collect();
 
     for &(k, v) in &xs {
-        assert_eq!(map.get(&k), Some(&v));
+        assert_eq!(*map.get(&k).unwrap(), v);
     }
 }
 
 #[test]
-fn test_size_hint() {
-    let xs = [(1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6)];
-
-    let map: CHashMap<_, _>  = xs.iter().cloned().collect();
-
-    let mut iter = map.iter();
-
-    for _ in iter.by_ref().take(3) {}
-
-    assert_eq!(iter.size_hint(), (3, Some(3)));
-}
-
-#[test]
-fn test_iter_len() {
-    let xs = [(1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6)];
-
-    let map: CHashMap<_, _>  = xs.iter().cloned().collect();
-
-    let mut iter = map.iter();
-
-    for _ in iter.by_ref().take(3) {}
-
-    assert_eq!(iter.len(), 3);
-}
-
-#[test]
-fn test_mut_size_hint() {
-    let xs = [(1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6)];
-
-    let mut map: CHashMap<_, _>  = xs.iter().cloned().collect();
-
-    let mut iter = map.iter_mut();
-
-    for _ in iter.by_ref().take(3) {}
-
-    assert_eq!(iter.size_hint(), (3, Some(3)));
-}
-
-#[test]
-fn test_iter_mut_len() {
-    let xs = [(1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6)];
-
-    let mut map: CHashMap<_, _>  = xs.iter().cloned().collect();
-
-    let mut iter = map.iter_mut();
-
-    for _ in iter.by_ref().take(3) {}
-
-    assert_eq!(iter.len(), 3);
-}
-
-#[test]
 fn test_capacity_not_less_than_len() {
-    let mut a = CHashMap::new();
+    let a = CHashMap::new();
     let mut item = 0;
 
     for _ in 0..116 {
