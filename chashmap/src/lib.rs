@@ -154,21 +154,24 @@ struct Table<K, V> {
 }
 
 impl<K, V> Table<K, V> {
-    /// Create a table with a certain capacity.
-    ///
-    /// "Capacity" in this case refers to how many buckets it stores.
-    fn with_capacity(cap: usize) -> Table<K, V> {
+    /// Create a table with a certain number of buckets.
+    fn new(buckets: usize) -> Table<K, V> {
         // TODO: For some obscure reason `RwLock` doesn't implement `Clone`.
 
-        // Fill a vector with `cap` of `Empty` buckets.
-        let mut vec = Vec::with_capacity(cap);
-        for _ in 0..cap {
+        // Fill a vector with `buckets` of `Empty` buckets.
+        let mut vec = Vec::with_capacity(buckets);
+        for _ in 0..buckets {
             vec.push(RwLock::new(Bucket::Empty));
         }
 
         Table {
             buckets: vec,
         }
+    }
+
+    /// Create a table with at least some capacity.
+    fn with_capacity(cap: usize) -> Table<K, V> {
+        Table::new(cap * LENGTH_MULTIPLIER)
     }
 }
 
@@ -521,8 +524,8 @@ pub struct CHashMap<K, V> {
 impl<K, V> CHashMap<K, V> {
     /// Create a new hash map with a certain capacity.
     ///
-    /// "Capacity" means the amount of entries the hash map can hold. Note that in practice, it
-    /// resizes before it reaches the capacity, in order to keep the load factor bounded.
+    /// "Capacity" means the amount of entries the hash map can hold before reallocating. This
+    /// function allocates a hash map with at least the capacity of `cap`.
     pub fn with_capacity(cap: usize) -> CHashMap<K, V> {
         CHashMap {
             // Start at 0 KV pairs.
@@ -600,7 +603,18 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
     }
 
     /// Get the capacity of the hash table.
+    ///
+    /// The capacity is equal to the number of entries the table can hold before reallocating.
     pub fn capacity(&self) -> usize {
+        self.buckets() * MAX_LOAD_FACTOR_NUM / MAX_LOAD_FACTOR_DENOM
+    }
+
+    /// Get the number of buckets of the hash table.
+    ///
+    /// "Buckets" refers to the amount of potential entries in the inner table. It is different
+    /// from capacity, in the sense that the map cannot hold this number of entries, since it needs
+    /// to keep the load factor low.
+    pub fn buckets(&self) -> usize {
         self.table.read().buckets.len()
     }
 
@@ -690,7 +704,7 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
         // lock.
         if lock.buckets.len() <= len {
             // Swap the table out with a new table of desired size (multiplied by some factor).
-            let table = mem::replace(&mut *lock, Table::with_capacity(len * LENGTH_MULTIPLIER));
+            let table = mem::replace(&mut *lock, Table::with_capacity(len));
             // Fill the new table with the data from the old table.
             lock.fill(table);
         }
@@ -708,7 +722,7 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
         // Acquire the write lock (needed because we'll mess with the table).
         let mut lock = self.table.write();
         // Swap the table out with a new table of desired size (multiplied by some factor).
-        let table = mem::replace(&mut *lock, Table::with_capacity(self.len() * LENGTH_MULTIPLIER));
+        let table = mem::replace(&mut *lock, Table::with_capacity(self.len()));
         // Fill the new table with the data from the old table.
         lock.fill(table);
     }
@@ -723,7 +737,7 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
         let len = self.len.fetch_add(1, ORDERING) + 1;
 
         // Extend if necessary. We multiply by some constant to adjust our load factor.
-        if len * MAX_LOAD_FACTOR_DENOM >= lock.buckets.len() * MAX_LOAD_FACTOR_NUM {
+        if len * MAX_LOAD_FACTOR_DENOM > lock.buckets.len() * MAX_LOAD_FACTOR_NUM {
             // Drop the read lock to avoid deadlocks when acquiring the write lock.
             drop(lock);
             // Reserve 1 entry in space (the function will handle the excessive space logic).
@@ -775,7 +789,7 @@ impl<K: PartialEq + Hash, V> iter::FromIterator<(K, V)> for CHashMap<K, V> {
         let len = vec.len();
 
         // Start with an empty table.
-        let mut table = Table::with_capacity(len * LENGTH_MULTIPLIER);
+        let mut table = Table::with_capacity(len);
         // Fill the table with the pairs from the iterator.
         for (key, val) in vec {
             // Insert the KV pair. This is fine, as we are ensured that there are no duplicates in
