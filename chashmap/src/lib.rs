@@ -17,8 +17,8 @@ mod tests;
 use parking_lot::{RwLock, RwLockWriteGuard, RwLockReadGuard};
 use owning_ref::{OwningHandle, OwningRef};
 use std::sync::atomic::{self, AtomicUsize};
-use std::hash::{self, Hash, Hasher};
-use std::{mem, ops, iter};
+use std::hash::{Hash, Hasher};
+use std::{mem, ops, iter, collections};
 
 /// The atomic ordering used throughout the code.
 const ORDERING: atomic::Ordering = atomic::Ordering::SeqCst;
@@ -34,7 +34,7 @@ const DEFAULT_INITIAL_CAPACITY: usize = 32;
 /// Hash a key.
 fn hash<K: Hash>(key: K) -> usize {
     // We'll use SipHash for now.
-    let mut h = hash::SipHasher::new();
+    let mut h = collections::hash_map::DefaultHasher::new();
     // Write the data into the hash.
     key.hash(&mut h);
     // Hash-hash-hashely-hash!
@@ -250,13 +250,18 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
         // Start at the first priority bucket, and then move upwards, searching for the matching
         // bucket.
         for i in 0.. {
+            // TODO: hacky hacky
+            let idx = (hash + i) % len;
+
             // Get the lock of the `i`'th bucket after the first priority bucket (wrap on end).
-            let bucket = self.buckets[(hash + i) % len].get_mut();
 
             // Check if it is a match.
-            if matches(&bucket) {
+            if {
+                let bucket = self.buckets[idx].get_mut();
+                matches(&bucket)
+            } {
                 // Yup. Return.
-                return bucket;
+                return self.buckets[idx].get_mut();
             }
         }
 
@@ -356,7 +361,7 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
     /// The table should be empty for this to work correctly/logically.
     fn fill(&mut self, table: Table<K, V>) {
         // Run over all the buckets.
-        for mut i in table.buckets {
+        for i in table.buckets {
             // We'll only transfer the bucket if it is a KV pair.
             if let Bucket::Contains(key, val) = i.into_inner() {
                 // Find a bucket where the KV pair can be inserted.
@@ -405,7 +410,7 @@ impl<K, V> IntoIterator for Table<K, V> {
     type Item = (K, V);
     type IntoIter = IntoIter<K, V>;
 
-    fn into_iter(mut self) -> IntoIter<K, V> {
+    fn into_iter(self) -> IntoIter<K, V> {
         IntoIter {
             table: self,
         }
@@ -696,7 +701,7 @@ impl<K, V> IntoIterator for CHashMap<K, V> {
     type Item = (K, V);
     type IntoIter = IntoIter<K, V>;
 
-    fn into_iter(mut self) -> IntoIter<K, V> {
+    fn into_iter(self) -> IntoIter<K, V> {
         self.table.into_inner().into_iter()
     }
 }
