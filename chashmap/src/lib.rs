@@ -641,7 +641,14 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
     /// errors.
     ///
     /// For most other purposes, use `replace`
+    ///
+    /// # Panics
+    ///
+    /// This might perform checks in debug mode testing if the key exists already.
     pub fn insert_new(&self, key: K, val: V) {
+        debug_assert!(self.contains_key(&key), "Hash table contains already key, contrary to the \
+                      assumptions about `insert_new`'s arguments.");
+
         // Expand and lock the table. We need to expand to ensure the bounds on the load factor.
         let lock = self.expand();
         // Find the free bucket.

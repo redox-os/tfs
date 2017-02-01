@@ -8,8 +8,121 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::thread;
 use std::cell::RefCell;
+use std::sync::Arc;
 use CHashMap;
+
+#[test]
+fn spam_insert() {
+    let m = Arc::new(CHashMap::new());
+    let mut joins = Vec::new();
+
+    for t in 0..10 {
+        let m = m.clone();
+        joins.push(thread::spawn(move || {
+            for i in t * 1000..(t + 1) * 1000 {
+                assert!(m.insert(i, !i).is_none());
+                assert_eq!(m.insert(i, i).unwrap(), !i);
+            }
+        }));
+    }
+
+    for j in joins.drain(..) {
+        j.join().unwrap();
+    }
+
+    for t in 0..5 {
+        let m = m.clone();
+        joins.push(thread::spawn(move || {
+            for i in t * 2000..(t + 1) * 2000 {
+                assert_eq!(*m.get(&i).unwrap(), i);
+            }
+        }));
+    }
+
+    for j in joins {
+        j.join().unwrap();
+    }
+}
+
+#[test]
+fn spam_insert_new() {
+    let m = Arc::new(CHashMap::new());
+    let mut joins = Vec::new();
+
+    for t in 0..10 {
+        let m = m.clone();
+        joins.push(thread::spawn(move || {
+            for i in t * 1000..(t + 1) * 1000 {
+                m.insert_new(i, i);
+            }
+        }));
+    }
+
+    for j in joins.drain(..) {
+        j.join().unwrap();
+    }
+
+    for t in 0..5 {
+        let m = m.clone();
+        joins.push(thread::spawn(move || {
+            for i in t * 2000..(t + 1) * 2000 {
+                assert_eq!(*m.get(&i).unwrap(), i);
+            }
+        }));
+    }
+
+    for j in joins {
+        j.join().unwrap();
+    }
+}
+
+#[test]
+fn lock_compete() {
+    let m = Arc::new(CHashMap::new());
+
+    m.insert("hey", "nah");
+
+    let k = m.clone();
+    let a = thread::spawn(move || {
+        *k.get_mut(&"hey").unwrap() = "hi";
+    });
+    let k = m.clone();
+    let b = thread::spawn(move || {
+        *k.get_mut(&"hey").unwrap() = "hi";
+    });
+
+    a.join().unwrap();
+    b.join().unwrap();
+
+    assert_eq!(*m.get(&"hey").unwrap(), "hi");
+}
+
+#[test]
+fn simultanous_reserve() {
+    let m = Arc::new(CHashMap::new());
+    let mut joins = Vec::new();
+
+    m.insert(1, 2);
+    m.insert(3, 6);
+    m.insert(8, 16);
+
+    for _ in 0..10 {
+        let m = m.clone();
+        joins.push(thread::spawn(move || {
+            m.reserve(1000);
+        }));
+    }
+
+    for j in joins {
+        j.join().unwrap();
+    }
+
+    assert_eq!(*m.get(&1).unwrap(), 2);
+    assert_eq!(*m.get(&3).unwrap(), 6);
+    assert_eq!(*m.get(&8).unwrap(), 16);
+}
 
 #[test]
 fn create_capacity_zero() {
