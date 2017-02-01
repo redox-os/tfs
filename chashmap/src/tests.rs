@@ -12,7 +12,7 @@ use std::cell::RefCell;
 use CHashMap;
 
 #[test]
-fn test_create_capacity_zero() {
+fn create_capacity_zero() {
     let m = CHashMap::with_capacity(0);
 
     assert!(m.insert(1, 1).is_none());
@@ -22,7 +22,7 @@ fn test_create_capacity_zero() {
 }
 
 #[test]
-fn test_insert() {
+fn insert() {
     let m = CHashMap::new();
     assert_eq!(m.len(), 0);
     assert!(m.insert(1, 2).is_none());
@@ -65,7 +65,7 @@ impl Clone for Dropable {
 }
 
 #[test]
-fn test_drops() {
+fn drops() {
     DROP_VECTOR.with(|slot| {
         *slot.borrow_mut() = vec![0; 200];
     });
@@ -124,7 +124,7 @@ fn test_drops() {
 }
 
 #[test]
-fn test_move_iter_drops() {
+fn move_iter_drops() {
     DROP_VECTOR.with(|v| {
         *v.borrow_mut() = vec![0; 200];
     });
@@ -189,13 +189,13 @@ fn test_move_iter_drops() {
 }
 
 #[test]
-fn test_empty_pop() {
+fn empty_pop() {
     let m: CHashMap<isize, bool> = CHashMap::new();
     assert_eq!(m.remove(&0), None);
 }
 
 #[test]
-fn test_lots_of_insertions() {
+fn lots_of_insertions() {
     let m = CHashMap::new();
 
     // Try this a few times to make sure we never screw up the hashmap's
@@ -258,7 +258,7 @@ fn test_lots_of_insertions() {
 }
 
 #[test]
-fn test_find_mut() {
+fn find_mut() {
     let m = CHashMap::new();
     assert!(m.insert(1, 12).is_none());
     assert!(m.insert(2, 8).is_none());
@@ -271,7 +271,7 @@ fn test_find_mut() {
 }
 
 #[test]
-fn test_insert_overwrite() {
+fn insert_overwrite() {
     let m = CHashMap::new();
     assert!(m.insert(1, 2).is_none());
     assert_eq!(*m.get(&1).unwrap(), 2);
@@ -280,7 +280,7 @@ fn test_insert_overwrite() {
 }
 
 #[test]
-fn test_insert_conflicts() {
+fn insert_conflicts() {
     let m = CHashMap::with_capacity(4);
     assert!(m.insert(1, 2).is_none());
     assert!(m.insert(5, 3).is_none());
@@ -291,7 +291,7 @@ fn test_insert_conflicts() {
 }
 
 #[test]
-fn test_conflict_remove() {
+fn conflict_remove() {
     let m = CHashMap::with_capacity(4);
     assert!(m.insert(1, 2).is_none());
     assert_eq!(*m.get(&1).unwrap(), 2);
@@ -308,7 +308,7 @@ fn test_conflict_remove() {
 }
 
 #[test]
-fn test_is_empty() {
+fn is_empty() {
     let m = CHashMap::with_capacity(4);
     assert!(m.insert(1, 2).is_none());
     assert!(!m.is_empty());
@@ -317,7 +317,7 @@ fn test_is_empty() {
 }
 
 #[test]
-fn test_pop() {
+fn pop() {
     let m = CHashMap::new();
     m.insert(1, 2);
     assert_eq!(m.remove(&1), Some(2));
@@ -325,7 +325,7 @@ fn test_pop() {
 }
 
 #[test]
-fn test_find() {
+fn find() {
     let m = CHashMap::new();
     assert!(m.get(&1).is_none());
     m.insert(1, 2);
@@ -337,7 +337,7 @@ fn test_find() {
 }
 
 #[test]
-fn test_reserve_shrink_to_fit() {
+fn reserve_shrink_to_fit() {
     let m = CHashMap::new();
     m.insert(0, 0);
     m.remove(&0);
@@ -374,7 +374,7 @@ fn test_reserve_shrink_to_fit() {
 }
 
 #[test]
-fn test_from_iter() {
+fn from_iter() {
     let xs = [(1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6)];
 
     let map: CHashMap<_, _> = xs.iter().cloned().collect();
@@ -385,7 +385,7 @@ fn test_from_iter() {
 }
 
 #[test]
-fn test_capacity_not_less_than_len() {
+fn capacity_not_less_than_len() {
     let a = CHashMap::new();
     let mut item = 0;
 
