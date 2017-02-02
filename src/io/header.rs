@@ -122,7 +122,7 @@ impl ChecksumAlgorithm {
     /// Produce the checksum of the buffer through the algorithm.
     pub fn hash(self, buf: &[u8]) -> u64 {
         // The behavior depends on the chosen checksum algorithm.
-        match self.state.state_block.checksum {
+        match self {
             // Hash the thing via SeaHash, then take the 16 lowest bits (truncating cast).
             ChecksumAlgorithm::SeaHash => seahash::hash(buf),
         }
@@ -185,8 +185,6 @@ struct DiskHeader {
     version_number: u32,
     /// The chosen checksum algorithm.
     checksum_algorithm: ChecksumAlgorithm,
-    /// The address of the state block.
-    state_block_address: clusters::Pointer,
     /// The state flag.
     state_flag: StateFlag,
     /// The vdev setup.
@@ -242,11 +240,8 @@ impl DiskHeader {
         // This section holds the state of disk and pointers to information on the state of the
         // file system.
 
-        // Load the state block pointer.
-        let state_block_address = clusters::Pointer::new(LittleEndian::read(buf[32..]));
-
         // Load the state flag.
-        let state_flag = StateFlag::from(buf[40])?;
+        let state_flag = StateFlag::from(buf[32])?;
 
         // # Vdev setup
         //
@@ -315,7 +310,6 @@ impl DiskHeader {
             magic_number: magic_number,
             version_number: version_number,
             checksum_algorithm: checksum_algorithm,
-            state_block_address: state_block_address,
             state_flag: state_flag,
             vdev_stack: vdev_stack,
         }
@@ -335,11 +329,8 @@ impl DiskHeader {
         // Write the checksum algorithm.
         LittleEndian::write(&mut buf[16..], self.checksum_algorithm as u16);
 
-        // Write the state block address.
-        LittleEndian::write(&mut buf[32..], self.state_block_address);
-
         // Write the state flag.
-        buf[40] = self.state_flag as u8;
+        buf[32] = self.state_flag as u8;
 
         // Write the vdev stack.
         let mut vdev_section = &mut buf[64..504];
@@ -387,9 +378,6 @@ mod tests {
         header.version_number = 1;
         assert_eq!(DiskHeader::decode(header.encode()).unwrap(), header);
 
-        header.state_block_address = 500;
-        assert_eq!(DiskHeader::decode(header.encode()).unwrap(), header);
-
         header.vdev_stack.push(Vdev::Speck {
             salt: 228309220937918,
         });
@@ -427,14 +415,8 @@ mod tests {
         LittleEndian::write(&mut sector[504..], seahash::hash(sector[..504]));
         assert_eq!(sector, header.encode());
 
-        header.state_block_address |= 0xFF;
-        sector[32] = 0xFF;
-
-        LittleEndian::write(&mut sector[504..], seahash::hash(sector[..504]));
-        assert_eq!(sector, header.encode());
-
         header.state_flag = StateFlag::Open;
-        sector[40] = 1;
+        sector[32] = 1;
 
         LittleEndian::write(&mut sector[504..], seahash::hash(sector[..504]));
         assert_eq!(sector, header.encode());

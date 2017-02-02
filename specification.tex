@@ -95,19 +95,8 @@
             \item [$\geq 2^{15}$] Implementation defined.
         \end{description}
 
-    \section{State (byte 32-48)}
-        \subsection{State block address (byte 32-40)}
-        \label{header:stateblock}
-        This little-endian integer takes following values:
-
-        \begin{description}
-            \item [$n = 0$]    state block uninitialized.
-            \item [$n \neq 0$] the $n$'th cluster (starting at byte
-                $\clustersize n$) is used as the state block and abides the
-                format set out in~\ref{stateblock}.
-        \end{description}
-
-        \subsection{State flag (byte 40)}
+    \section{State (byte 32-64)}
+        \subsection{State flag (byte 32)}
         \label{header:consistency}
         This little-endian integer takes one of the following
         values\footnote{The reason it takes two bytes instead of one is to be
@@ -136,7 +125,7 @@
         The vdevs are specified in~\ref{vdev}.
 
     \section{Integrity checking (byte 504-512)}
-        \subsection{Checksum (byte 128-136)}
+        \subsection{Checksum (byte 504-512)}
         This field stores a little-endian integer equal to the checksum of the
         state block preceding the checksum itself, calculated by the algorithm
         specified in~\ref{config:checksum}.
@@ -154,7 +143,7 @@
 
         \section{SPECK encryption}
         This vdev has label 2 and encrypts everything after the disk header
-        (~\ref{header}) in the parent vdev with SPECK-128 (XEX mode) with
+        (\ref{header}) in the parent vdev with SPECK-128 (XEX mode) with
         scrypt key stretching. The salt is stored as a 128-bit little-endian
         integer after the label.
 
@@ -172,8 +161,8 @@
 
     \chapter{State block}
     \label{stateblock}
-    At the address (cluster number) chosen in~\ref{header:stateblock}, a block
-    defining the state of the file system is stored.
+    The first ``virtual sector'' (the sector following the disk header)
+    contains the state block as defined below.
 
     \section{Integrity checking (0-8)}
         \subsection{Checksum (byte 0-8)}
@@ -202,23 +191,19 @@
 
         \begin{description}
             \item [$n = 0$]    super-page uninitialized.
-            \item [$n \neq 0$] $n$ is a pointer (~\ref{cluster:page}) to the
+            \item [$n \neq 0$] $n$ is a pointer (\ref{cluster:page}) to the
                 superpage, defined in~\ref{fs:superpage}.
         \end{description}
 
         \subsection{Freelist head pointer (byte 32-40)}
         \label{state:freelist_head}
-        This field stores some number (in little-endian), which takes values
-
-        \begin{description}
-            \item [$n = 0$]    no free, allocatable cluster.
-            \item [$n \neq 0$] the $n$'th cluster is free and conforms
-                to~\ref{cluster:metacluster}.
-        \end{description}
+        This field stores a cluster pointer (as specified in~\ref{cluster:ptr})
+        to some metacluster, subject to the format specified
+        in~\ref{cluster:metacluster}.
 
         \subsection{Checksum of the freelist head (byte 40-48)}
         This field stores the checksum (in little-endian) of the active part
-        (~\ref{cluster:metacluster}) of the freelist head, by the algorithm
+        (\ref{cluster:metacluster}) of the freelist head, by the algorithm
         specified in~\ref{config:checksum}.
 
         If the freelist is empty, this field is 0.
@@ -233,7 +218,14 @@
     \section{Clusters and pages}
         The disk is divided into clusters of \clustersize bytes each.
 
-        \subsection{Data clusters and pages}
+        \subsection{Cluster pointers}
+        \label{cluster:ptr}
+        Cluster pointers are written as 64-bit little-endian integers, and
+        enumerates the sectors, starting at the first non-disk header sector.
+        As such, the pointer 0 points to the state block (\ref{stateblock}) and
+        can thus be considered a trap value (null pointer).
+
+        \subsection{Pages}
         \label{cluster:page}
         A data cluster contain some number of \clustersize bytes blocks called
         ``pages''.
@@ -242,8 +234,8 @@
         significant bits to more significant):
 
         \begin{description}
-            \item [Little-endian 64-bit cluster number] This is the cluster in
-                which the page is stored.
+            \item [Cluster pointer] This is the cluster pointer in the format
+                described in~\ref{cluster:ptr}.
             \item [Little-endian 32-bit page number] If this number is $2^{32}
                 - 1$, the page can be read directly from the cluster without
                 any specialized logic.  Otherwise, this is the offset (in
@@ -262,11 +254,11 @@
 
         It starts with an 64-bit little-endian checksum of the next
         metacluster. If no next metacluster exists, this integer is 0. This is
-        followed by a 64-bit little-endian pointer to the next metacluster.
-        Similarly, this is 0 if no next metacluster exists.
+        followed by a cluster pointer (\ref{cluster:ptr}) to the next
+        metacluster. Similarly, this is 0 if no next metacluster exists.
 
-        Following this, there is some number of 64-bit little-endian pointers
-        to other free clusters. If the metacluster is the top metacluster
+        Following this, there is some number of cluster points to other free
+        clusters. If the metacluster is the top metacluster
         (\ref{state:freelist_head}), the pointers up to the cluster counter
         (\ref{state:freelist_head_counter}). Otherwise, all the pointers from
         the first in this section up to the first null pointer must be free.
@@ -359,7 +351,7 @@
         that no duplicates part is needed.
 
     \section{Cryptography}
-        \subsection{Speck}
+        \subsection{SPECK}
         \label{algorithm:speck}
         This algorithm uses the 128 block size version of the SPECK
         cipher\cite{speck} with the key generated by \cite{scrypt} with $N =
