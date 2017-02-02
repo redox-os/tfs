@@ -1,5 +1,8 @@
 use crossbeam::sync::SegQueue;
 
+/// A writable guard to a cache block.
+type WriteGuard<'a> = chashmap::WriteGuard<'a, disk::Sector, Block>;
+
 // TODO: Merge `Transaction` and `Transacting`.
 
 /// A transaction handler
@@ -16,7 +19,7 @@ struct Transaction<'a> {
     /// The block in question.
     ///
     /// This is a lock guard, and thus as long it is held, the block cannot be flushed.
-    block: chashmap::WriteGuard<'a, Block>,
+    block: chashmap::WriteGuard<'a>,
 }
 
 impl<'a> Transaction<'a> {
@@ -199,6 +202,8 @@ impl Cache {
     ///
     /// This creates a transaction writing `buf` into sector `sector`, when dropped.
     fn write<F>(&self, sector: disk::Sector, buf: disk::SectorBuf) -> Transaction {
+        debug!(self, "writing sector"; "sector" => sector);
+
         // Acquire the lock to the block, and initialize if it doesn't already exist.
         let lock = self.sector_map.get_mut_or(sector, Block::default());
         // Set the dirty flag.
@@ -291,9 +296,11 @@ impl Cache {
         while let Some(tl_sector) = flush.drain().first() {
             debug!(self, "flushing and removing block"; "sector" => tl_sector);
 
-            // We grab the reference and lock in order to avoid the block changing while we
-            // traverse.
-            let tl_block = self.sector_map.find_mut(tl_sector);
+            // Acquire the lock. To avoid changes while we traverse, we use mutable locks,
+            // excluding other writes.
+            // TODO: Perhaps use immutable locks and then upgrade them to mutable when changing the
+            //       dirty flag. This could improve performance significantly.
+            let tl_block = self.sector_map.get_mut(tl_sector);
             // Skip flushing, if the block is not dirty.
             if !tl_block.dirty {
                 continue;
@@ -323,9 +330,8 @@ impl Cache {
                         // Check if the block is dirty, or we can skip it. This holds up the
                         // invariant that every block in `stack` are dirty.
                         if block.dirty {
-                            // Push the dependency to the stack. Again, we use `find_mut` to make sure
-                            // other threads doesn't access it while we traverse.
-                            stack.push((dep, self.sector_map.find_mut(sector)));
+                            // Push the dependency to the stack.
+                            stack.push((dep, self.sector_map.get_mut(sector)));
                         }
                     } else {
                         // The block is dirty and needs to be flushed. Note that we need not to
@@ -353,7 +359,7 @@ impl Cache {
                         }
 
                         // We don't need to pop from the stack, since we have already popped an
-                        // element, which we won't push back. The lock originating from `find_mut`
+                        // element, which we won't push back. The lock originating from `get_mut`
                         // is dropped here, and the block can then freely be modified.
                     }
                 } else {
