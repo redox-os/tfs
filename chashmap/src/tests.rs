@@ -311,8 +311,7 @@ fn empty_pop() {
 fn lots_of_insertions() {
     let m = CHashMap::new();
 
-    // Try this a few times to make sure we never screw up the hashmap's
-    // internal state.
+    // Try this a few times to make sure we never screw up the hashmap's internal state.
     for _ in 0..10 {
         assert!(m.is_empty());
 

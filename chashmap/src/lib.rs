@@ -14,11 +14,12 @@ extern crate owning_ref;
 #[cfg(test)]
 mod tests;
 
-use parking_lot::{RwLock, RwLockWriteGuard, RwLockReadGuard};
 use owning_ref::{OwningHandle, OwningRef};
+use parking_lot::{RwLock, RwLockWriteGuard, RwLockReadGuard};
+use std::collections::hash_map;
+use std::hash::{Hash, Hasher, BuildHasher};
 use std::sync::atomic::{self, AtomicUsize};
-use std::hash::{Hash, Hasher};
-use std::{mem, ops, cmp, fmt, iter, collections};
+use std::{mem, ops, cmp, fmt, iter};
 
 /// The atomic ordering used throughout the code.
 const ORDERING: atomic::Ordering = atomic::Ordering::SeqCst;
@@ -30,16 +31,6 @@ const MAX_LOAD_FACTOR_NUM: usize = 100 - 15;
 const MAX_LOAD_FACTOR_DENOM: usize = 100;
 /// The default initial capacity.
 const DEFAULT_INITIAL_CAPACITY: usize = 32;
-
-/// Hash a key.
-fn hash<K: Hash>(key: K) -> usize {
-    // We'll use SipHash for now.
-    let mut h = collections::hash_map::DefaultHasher::new();
-    // Write the data into the hash.
-    key.hash(&mut h);
-    // Hash-hash-hashely-hash!
-    h.finish() as usize
-}
 
 /// A bucket state.
 ///
@@ -144,12 +135,17 @@ impl<K, V> Bucket<K, V> {
 /// 2. It does not track the number of occupied buckets, making it expensive to obtain the load
 ///    factor.
 struct Table<K, V> {
+    /// The hash function builder.
+    ///
+    /// This randomly picks a hash function from some family of functions in libstd. This
+    /// effectively eliminates the issue of hash flooding.
+    hash_builder: hash_map::RandomState,
     /// The bucket array.
     ///
     /// This vector stores the buckets. The order in which they're stored is far from arbitrary: A
-    /// KV pair `(key, val)`'s first priority location is at `hash(&key) % len`. If not possible,
-    /// the next bucket is used, and this process repeats until the bucket is free (or the end is
-    /// reached, in which we simply wrap around).
+    /// KV pair `(key, val)`'s first priority location is at `self.hash(&key) % len`. If not
+    /// possible, the next bucket is used, and this process repeats until the bucket is free (or
+    /// the end is reached, in which we simply wrap around).
     buckets: Vec<RwLock<Bucket<K, V>>>,
 }
 
@@ -165,6 +161,8 @@ impl<K, V> Table<K, V> {
         }
 
         Table {
+            // Generate a hash function.
+            hash_builder: hash_map::RandomState::new(),
             buckets: vec,
         }
     }
@@ -176,6 +174,17 @@ impl<K, V> Table<K, V> {
 }
 
 impl<K: PartialEq + Hash, V> Table<K, V> {
+    /// Hash some key through the internal hash function.
+    fn hash(&self, key: &K) -> usize {
+        // Build the initial hash function state.
+        let mut hasher = self.hash_builder.build_hasher();
+        // Hash the key.
+        key.hash(&mut hasher);
+        // Cast to `usize`. Since the hash function returns `u64`, this cast won't ever cause
+        // entropy less than the ouput space.
+        hasher.finish() as usize
+    }
+
     /// Scan from the first priority of a key until a match is found.
     ///
     /// This scans from the first priority of `key` (as defined by its hash), until a match is
@@ -185,7 +194,7 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
     fn scan<F>(&self, key: &K, matches: F) -> RwLockReadGuard<Bucket<K, V>>
         where F: Fn(&Bucket<K, V>) -> bool {
         // Hash the key.
-        let hash = hash(key);
+        let hash = self.hash(key);
 
         // Start at the first priority bucket, and then move upwards, searching for the matching
         // bucket.
@@ -211,7 +220,7 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
     fn scan_mut<F>(&self, key: &K, matches: F) -> RwLockWriteGuard<Bucket<K, V>>
         where F: Fn(&Bucket<K, V>) -> bool {
         // Hash the key.
-        let hash = hash(key);
+        let hash = self.hash(key);
 
         // Start at the first priority bucket, and then move upwards, searching for the matching
         // bucket.
@@ -237,7 +246,7 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
     fn scan_mut_no_lock<F>(&mut self, key: &K, matches: F) -> &mut Bucket<K, V>
         where F: Fn(&Bucket<K, V>) -> bool {
         // Hash the key.
-        let hash = hash(key);
+        let hash = self.hash(key);
         // TODO: To tame the borrowchecker, we fetch this in advance.
         let len = self.buckets.len();
 
@@ -269,7 +278,7 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
     /// found, it will return a free bucket in the same cluster.
     fn lookup_or_free(&self, key: &K) -> RwLockWriteGuard<Bucket<K, V>> {
         // Hash the key.
-        let hash = hash(key);
+        let hash = self.hash(key);
         // The encountered free bucket.
         let mut free = None;
 
@@ -377,6 +386,9 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
 impl<K: Clone, V: Clone> Clone for Table<K, V> {
     fn clone(&self) -> Table<K, V> {
         Table {
+            // Since we copy plainly without rehashing etc., it is important that we keep the same
+            // hash function.
+            hash_builder: self.hash_builder.clone(),
             // Lock and clone every bucket individually.
             buckets: self.buckets.iter().map(|x| RwLock::new(x.read().clone())).collect(),
         }
