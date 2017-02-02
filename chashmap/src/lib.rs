@@ -721,7 +721,7 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
         let mut lock = self.table.write();
         // Handle the case where another thread has resized the table while we were acquiring the
         // lock.
-        if lock.buckets.len() <= len * LENGTH_MULTIPLIER {
+        if lock.buckets.len() < len * LENGTH_MULTIPLIER {
             // Swap the table out with a new table of desired size (multiplied by some factor).
             let table = mem::replace(&mut *lock, Table::with_capacity(len));
             // Fill the new table with the data from the old table.
