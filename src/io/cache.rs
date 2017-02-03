@@ -3,6 +3,9 @@ use crossbeam::sync::SegQueue;
 /// A writable guard to a cache block.
 type WriteGuard<'a> = chashmap::WriteGuard<'a, disk::Sector, Block>;
 
+/// The default initial capacity of the sector map.
+const INITIAL_CAPACITY: usize = 256;
+
 // TODO: Merge `Transaction` and `Transacting`.
 
 /// A transaction handler
@@ -197,6 +200,19 @@ struct Cache {
     sector_map: CHashMap<disk::Sector, Block>,
 }
 
+impl From<vdev::Driver> for Cache {
+    fn from(driver: vdev::Driver) -> Cache {
+        Cache {
+            // Store the driver.
+            driver: driver,
+            // Set empty/default values.
+            queue: SegQueue::new(),
+            tracker: Mutex::new(mlcr::Cache::new()),
+            sector_map: CHashMap::with_capacity(INITIAL_CAPACITY),
+        }
+    }
+}
+
 impl Cache {
     /// Execute a write transaction.
     ///
@@ -247,7 +263,7 @@ impl Cache {
             self.queue.push(CacheOperation::Create(sector));
 
             // Fetch the data from the disk.
-            self.disk.read(sector, &mut block.data)?;
+            self.disk.read_to(sector, &mut block.data)?;
 
             // Handle the block through the closure, and resolve respective verification issues.
             match map(&block.data) {
@@ -261,7 +277,7 @@ impl Cache {
                     // Attempt to heal the sector.
                     self.disk.heal(sector)?;
                     // Read it again.
-                    self.disk.read(sector, &mut block.data)?;
+                    self.disk.read_to(sector, &mut block.data)?;
 
                     // Try to verify it once again.
                     map(&block.data)

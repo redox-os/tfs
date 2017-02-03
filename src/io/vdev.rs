@@ -38,9 +38,9 @@ impl Disk for Mirror {
         // inconsistent state, despite being out of sync.
         self.inner.write(sector + self.number_of_sectors(), buf)
     }
-    fn read(sector: Sector, buf: &mut SectorBuf) -> Result<(), disk::Error> {
+    fn read_to(sector: Sector, buf: &mut SectorBuf) -> Result<(), disk::Error> {
         // Forward the call to the inner.
-        self.inner.read(sector, buf)
+        self.inner.read_to(sector, buf)
     }
 
     fn heal(&mut self, sector: disk::Sector) -> Result<(), disk::Error> {
@@ -49,12 +49,8 @@ impl Disk for Mirror {
         // Check if in bound.
         if sector < half {
             // Read the mirrored sector from the higher half, in the hope that it isn't corrupt as
-            // well.
-            let mut buf = disk::SectorBuf::default();
-            self.read(sector + half, &mut buf)?;
-
-            // Write the mirror sector the healing sector.
-            self.write(sector, &buf)
+            // well, then write the mirror sector the healing sector.
+            self.write(sector, self.read(sector + half)?)
         } else {
             // Out of bounds sector; throw an error.
             Err(disk::Error::OutOfBounds {
@@ -86,7 +82,7 @@ impl Disk for Speck {
         // TODO: implement. NB: Dont' encrypt it if it is the header!
         unimplemented!()
     }
-    fn read(sector: Sector, buf: &mut SectorBuf) -> Result<(), disk::Error> {
+    fn read_to(sector: Sector, buf: &mut SectorBuf) -> Result<(), disk::Error> {
         unimplemented!()
     }
 
@@ -153,14 +149,9 @@ impl Driver {
     fn open<T: Disk>(log: L, disk: T, password: &[u8]) -> Result<Driver, Error> {
         info!(log, "initializing the driver");
 
-        // Load the disk header into some buffer.
-        debug!(log, "reading the disk header");
-        let mut header_buf = [0; disk::SECTOR_SIZE];
-        disk.read(0, &mut header_buf)?;
-
-        // Decode the disk header.
-        debug!(log, "decoding the disk header");
-        let mut header = DiskHeader::decode(header_buf)?;
+        // Read the disk header.
+        debug!(log, "read the disk header");
+        let mut header = DiskHeader::decode(disk.read(0)?)?;
 
         match header.state_flag {
             // Throw a warning if it wasn't properly shut down.
@@ -253,14 +244,14 @@ impl Disk for Driver {
         // Forward the call to the inner disk.
         self.disk.write(sector, buf)
     }
-    fn read(&mut self, sector: Sector, buf: &mut [u8]) -> Result<(), Error> {
+    fn read_to(&mut self, sector: Sector, buf: &mut [u8]) -> Result<(), Error> {
         trace!(self, "reading data"; "sector" => sector);
 
         // Make sure it doesn't write to the null sector reserved for the disk header.
         assert_ne!(sector, 0, "Trying to read from the null sector.");
 
         // Forward the call to the inner disk.
-        self.disk.read(sector, buf)
+        self.disk.read_to(sector, buf)
     }
 
     fn heal(&mut self, sector: disk::Sector) -> Result<(), disk::Error> {

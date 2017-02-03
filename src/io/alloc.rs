@@ -168,6 +168,14 @@ struct Manager {
 }
 
 impl Manager {
+    /// Open the manager from some driver.
+    ///
+    /// This loads the state page and other things from a vdev driver `driver`. If it fails, an
+    /// error is returned.
+    fn open(driver: vdev::Driver) -> Result<Manager, Error> {
+        unimplemented!();
+    }
+
     /// Allocate a page.
     ///
     /// This allocates a page with content `buf`.

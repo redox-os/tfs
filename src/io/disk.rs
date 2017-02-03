@@ -53,10 +53,22 @@ trait Disk {
     ///
     /// This writes buffer `buf` into sector `sector`.
     fn write(&mut self, sector: Sector, buf: &SectorBuf) -> Result<(), Error>;
-    /// Read data from the disk.
+
+    /// Read data from the disk into some buffer.
     ///
     /// This reads sector `sector` into buffer `buf`.
-    fn read(&self, sector: Sector, buf: &mut SectorBuf) -> Result<(), Error>;
+    fn read_to(&self, sector: Sector, buf: &mut SectorBuf) -> Result<(), Error>;
+    /// Read data from the disk directly into the return value.
+    #[inline]
+    fn read(&self, sector: Sector) -> Result<SectorBuf, Error> {
+        // Make a temporary buffer.
+        let mut buf = SectorBuf::default();
+        // Read the data into the buffer.
+        self.read_to(sector, &mut buf)?;
+
+        Ok(buf)
+    }
+
     /// Heal a sector.
     ///
     /// This heals sector `sector`, through the provided redundancy, if possible.
@@ -64,37 +76,4 @@ trait Disk {
     /// Note that after it is called, it is still necessary to check if the healed sector is valid,
     /// as there is a certain probability that the recovery will fail.
     fn heal(&mut self, sector: disk::Sector) -> Result<(), disk::Error>;
-}
-
-/// For testing, we allow byte slices to act as disks.
-#[cfg(tests)]
-impl Disk for &mut [u8] {
-    fn number_of_sectors(&self) -> Sector {
-        self.len() as Sector / SECTOR_SIZE
-    }
-
-    fn write(sector: Sector, buffer: SectorBuf) -> Result<(), Error> {
-        // Check if the sector is within bounds.
-        if sector as usize >= self.number_of_sectors() {
-            Err(Error::OutOfBounds)
-        } else {
-            Ok(self[sector as usize / SECTOR_SIZE as usize..][..disk::SECTO ]
-               .copy_from_slice(buf))
-        }
-    }
-
-    fn read(sector: Sector, buf: &mut SectorBuf) -> Result<(), Error> {
-        // Check if the sector is within bounds.
-        if sector as usize >= self.number_of_sectors() {
-            Err(Error::OutOfBounds)
-        } else {
-            Ok(buf.copy_from_slice(self[sector as usize / SECTOR_SIZE as usize..][..disk::SECTOR_SIZE]))
-        }
-    }
-
-    fn heal(&mut self, sector: disk::Sector) -> Result<(), disk::Error> {
-        Err(Error::HealFailed {
-            sector: sector,
-        })
-    }
 }
