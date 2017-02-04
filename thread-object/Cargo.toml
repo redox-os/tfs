@@ -1,0 +1,10 @@
+[package]
+name = "thread-object"
+version = "0.1.0"
+authors = ["ticki <ticki@users.noreply.github.com>"]
+description = "Abstraction over thread-local storage allowing dynamic creation of TLS variables."
+repository = "https://github.com/ticki/tfs"
+documentation = "https://docs.rs/thread-object"
+license = "MIT"
+keywords = ["tls", "thread-local", "storage", "object", "thread"]
+exclude = ["target", "Cargo.lock"]
