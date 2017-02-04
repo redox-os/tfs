@@ -101,7 +101,7 @@ impl<K, V> Bucket<K, V> {
 
     /// Is this bucket 'removed'?
     fn is_removed(&self) -> bool {
-        if let Bucket::Empty = *self { true } else { false }
+        if let Bucket::Removed = *self { true } else { false }
     }
 
     /// Is this bucket free?
