@@ -675,7 +675,7 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
     /// To be more specific, it assumes that the entry does not already exist, and will simply skip
     /// to the end of the cluster, even if it does exist.
     ///
-    /// This is faster than e.g. `replace`, but should only be used, if you know that the entry
+    /// This is faster than e.g. `insert`, but should only be used, if you know that the entry
     /// doesn't already exist.
     ///
     /// # Warning
@@ -683,7 +683,7 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
     /// Only use this, if you know what you're doing. This can easily introduce very complex logic
     /// errors.
     ///
-    /// For most other purposes, use `replace`
+    /// For most other purposes, use `insert`.
     ///
     /// # Panics
     ///
