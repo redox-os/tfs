@@ -1,6 +1,6 @@
 [package]
 name = "thread-object"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["ticki <ticki@users.noreply.github.com>"]
 description = "Abstraction over thread-local storage allowing dynamic creation of TLS variables."
 repository = "https://github.com/ticki/tfs"

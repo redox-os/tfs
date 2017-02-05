@@ -14,8 +14,10 @@
 
 #![feature(const_fn)]
 
+use std::any::Any;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::mem;
 use std::sync::atomic;
 
 /// The ID counter.
@@ -27,7 +29,7 @@ thread_local! {
     /// This thread's thread object maps.
     ///
     /// This maps IDs to pointers to the associated object.
-    static THREAD_OBJECTS: RefCell<BTreeMap<usize, *mut ()>> = RefCell::new(BTreeMap::new());
+    static THREAD_OBJECTS: RefCell<BTreeMap<usize, Box<Any>>> = RefCell::new(BTreeMap::new());
 }
 
 /// A multi-faced object.
@@ -44,7 +46,7 @@ pub struct Object<T> {
     id: usize,
 }
 
-impl<T: Clone> Object<T> {
+impl<T> Object<T> {
     /// Create a new thread object with some initial value.
     ///
     /// The specified value `initial` will be the value assigned when new threads read the object.
@@ -56,7 +58,9 @@ impl<T: Clone> Object<T> {
             id: ID_COUNTER.fetch_add(1, atomic::Ordering::Relaxed),
         }
     }
+}
 
+impl<T: Clone + Any> Object<T> {
     /// Read and/or modify the value associated with this thread.
     ///
     /// This reads the object's value associated with the current thread, and initializes it if
@@ -71,12 +75,28 @@ impl<T: Clone> Object<T> {
             // TODO: Eliminate this `RefCell`.
             let mut guard = map.borrow_mut();
             // Fetch the pointer to the object, and initialize if it doesn't exist.
-            let ptr = guard.entry(self.id).or_insert_with(|| Box::into_raw(Box::new(self.initial.clone())) as *mut ());
+            let ptr = guard.entry(self.id).or_insert_with(|| Box::new(self.initial.clone()));
             // Run it through the provided closure.
-            f(unsafe {
-                &mut *(*ptr as *mut T)
-            })
+            f(ptr.downcast_mut().unwrap())
         })
+    }
+
+    /// Replace the inner value.
+    ///
+    /// This replaces the inner value with `new` and returns the old value.
+    pub fn replace(&self, new: T) -> T {
+        self.with(|x| mem::replace(x, new))
+    }
+
+    /// Copy the inner value.
+    pub fn get(&self) -> T where T: Copy {
+        self.with(|x| *x)
+    }
+}
+
+impl<T: Default> Default for Object<T> {
+    fn default() -> Object<T> {
+        Object::new(T::default())
     }
 }
 
@@ -85,6 +105,7 @@ mod tests {
     use super::*;
 
     use std::thread;
+    use std::sync::{Mutex, Arc};
 
     #[test]
     fn initial_value() {
@@ -140,5 +161,46 @@ mod tests {
         }).join().unwrap();
 
         obj.with(|&mut x| assert_eq!(x, 0));
+    }
+
+    #[test]
+    fn replace() {
+        let obj = Object::new(420); // blaze it
+        assert_eq!(obj.replace(42), 420);
+        assert_eq!(obj.replace(32), 42);
+        assert_eq!(obj.replace(0), 32);
+    }
+
+    #[test]
+    fn default() {
+        assert_eq!(Object::<usize>::default().get(), 0);
+    }
+
+    #[derive(Clone)]
+    struct Dropper {
+        is_dropped: Arc<Mutex<bool>>,
+    }
+
+    impl Drop for Dropper {
+        fn drop(&mut self) {
+            *self.is_dropped.lock().unwrap() = true;
+        }
+    }
+
+    #[test]
+    fn drop() {
+        let is_dropped = Arc::new(Mutex::new(false));
+        let arc = is_dropped.clone();
+        thread::spawn(move || {
+            let obj = Object::new(Dropper {
+                is_dropped: arc,
+            });
+
+            obj.with(|_| {});
+
+            mem::forget(obj);
+        }).join().unwrap();
+
+        assert!(*is_dropped.lock().unwrap());
     }
 }
