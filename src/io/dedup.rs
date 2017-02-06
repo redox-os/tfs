@@ -70,6 +70,7 @@ impl Candidate {
 /// disk or not. They're heuristic in the sense that sometimes a duplicate may exists but not be
 /// deduplicated. This is due to the fact that there is no probing and thus checksum collisions
 /// cannot be resolved. Therefore, it will replace a random old candidate.
+#[derive(Default)]
 struct Table {
     /// The table of candidates.
     ///

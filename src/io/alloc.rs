@@ -128,7 +128,19 @@ impl Manager {
     /// This loads the state page and other things from a vdev driver `driver`. If it fails, an
     /// error is returned.
     fn open(driver: vdev::Driver) -> Result<Manager, Error> {
-        unimplemented!();
+        // Load the state block.
+        let state_block::StateBlock { state, config } =
+            state_block::StateBlock::decode(&driver.read(0), driver.header.checksum_algorithm);
+
+        // I'm sure you're smart enough to figure out what is happening here. I trust you ^^.
+        Manager {
+            cache: Cache::from(driver),
+            state: Mutex::new(state),
+            config: config,
+            free: SegQueue::new(),
+            last_cluster: thread_object::Object::default(),
+            dedup_table: dedup::Table::default(),
+        }
     }
 
     /// Allocate a page.
