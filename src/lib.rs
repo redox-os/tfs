@@ -9,4 +9,5 @@ extern crate slog;
 extern crate quick_error;
 
 mod macros;
+mod alloc;
 mod io;
