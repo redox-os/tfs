@@ -86,50 +86,6 @@ struct ClusterState {
     uncompressed: Vec<u8>,
 }
 
-/// A metacluster.
-///
-/// Metaclusters points to other free clusters, and possibly a metacluster. Metacluters can be seen
-/// as nodes of the unrolled linked list of free blocks.
-struct Metacluster {
-    /// Checksum of the next metacluster.
-    next_checksum: u64,
-    /// Pointer to the next metacluster.
-    next: Option<cluster::Pointer>,
-    /// Pointers to free clusters.
-    free: Vec<cluster::Pointer>,
-}
-
-impl Metacluster {
-    /// Encode the metacluster.
-    ///
-    /// This encodes the metacluster into its binary representation.
-    fn encode(&self) -> [u8; disk::SECTOR_SIZE] {
-        // Start with an all-null buffer.
-        let mut buf = [0; disk::SECTOR_SIZE];
-
-        // Write the checksum of the next metacluster.
-        LittleEndian::write(&mut buf, self.next_checksum);
-        // Write the pointer to the next metacluster.
-        LittleEndian::write(&mut buf[8..], self.next.map_or(0, |x| x.into()));
-
-        // Write every pointer of the freelist into the buffer.
-        for (n, i) in self.head_metacluster.free.iter().enumerate() {
-            LittleEndian::write(&mut buf[cluster::POINTER_SIZE * i + 8..], i);
-        }
-
-        buf
-    }
-
-    /// Calculate the checksum of this metacluster.
-    ///
-    /// This calculates the checksum of the non-empty part of its serialization with algorithm
-    /// `algorithm`.
-    fn checksum(&self, algorithm: header::ChecksumAlgorithm) -> u64 {
-        // Only hash the initialized/active part of the metacluster.
-        algorithm.hash(self.encode()[..(self.free + 1) * cluster::POINTER_SIZE + 8])
-    }
-}
-
 /// The page manager.
 ///
 /// This is the center point of the I/O stack, providing allocation, deallocation, compression,
@@ -148,18 +104,17 @@ struct Manager {
     /// This is the configuration part of the state block. We don't need a lock, since we won't
     /// mutate it while the system is initialized.
     config: state_block::Config,
-    /// The first metacluster of the freelist.
+    /// The free-cache.
     ///
-    /// This list is used as the allocation primitive of TFS. It is a simple freelist-based cluster
-    /// allocation system, but there is one twist: To optimize the data locality, the list is
-    /// unrolled.
-    head_metacluster: Mutex<Metacluster>,
-    /// The last allocated cluster.
+    /// This contains some number of pointers to free clusters, allowing multiple threads to
+    /// efficiently allocate simultaneously.
+    free: SegQueue<cluster::Pointer>,
+    /// The last allocated cluster for this thread.
     ///
     /// If possible, newly allocated pages will be appended to this cluster. When it is filled
     /// (i.e. the pages cannot compress to the cluster size or less), a new cluster will be
     /// allocated.
-    last_cluster: AtomicOption<ClusterState>,
+    last_cluster: thread_object::Object<Option<ClusterState>>,
     /// The deduplication table.
     ///
     /// This table allows the allocator for searching for candidates to use instead of allocating a
@@ -221,7 +176,7 @@ impl Manager {
             return Ok(cluster.then(self.cache.write(cluster, buf)).wrap(ptr));
         }
 
-        if let Some(state) = self.last_cluster.take(ORDERING) {
+        self.last_cluster.with(|x| if let Some(state) = x {
             // We have earlier allocated a cluster, meaning that we can potentially append more
             // pages into the cluster.
 
@@ -237,10 +192,6 @@ impl Manager {
 
                 // Check if we can compress the extended buffer into a single cluster.
                 if let Some(compressed) = self.compress(state.uncompressed) {
-                    // Put back the "last cluster", as it might be possible to fit in even more
-                    // pages later on.
-                    self.last_cluster.swap(Some(state), ORDERING);
-
                     let ptr = Ok(page::Pointer {
                         cluster: state.cluster,
                         // Calculate the offset into the decompressed buffer, where the page is
@@ -258,7 +209,7 @@ impl Manager {
                     return self.cache.write(state.cluster, compressed).wrap(ptr);
                 }
             }
-        }
+        });
 
         // We were unable to extend the last allocated cluster, either because there is no last
         // allocated cluster, or because the cluster could not contain the page. We'll allocate a
@@ -277,11 +228,11 @@ impl Manager {
             // there is no change in how the other pages are read.
 
             // Make the "last cluster" the newly allocated cluster.
-            self.last_cluster.swap(Some(ClusterState {
+            self.last_cluster.replace(Some(ClusterState {
                 cluster: cluster,
                 // So far, it only contains one page.
                 uncompressed: buf.as_vec(),
-            }), ORDERING);
+            }));
 
             // Write the compressed data into the cluster.
             cluster.then(self.cache.write(cluster, compressed)).wrap(page::Pointer {
@@ -357,7 +308,7 @@ impl Manager {
     }
 
     /// Calculate the checksum of some buffer, based on the user configuration.
-    fn checksum(&self, buf: &[u8]) -> u64 {
+    fn checksum(&self, buf: &disk::SectorBuf) -> u64 {
         trace!(self, "calculating checksum");
 
         self.driver.header.hash(buf)
@@ -439,176 +390,132 @@ impl Manager {
         }.encode())
     }
 
-    /// Write the head metacluster to some cluster.
-    ///
-    /// The cache transaction is returned.
-    fn write_head_metacluster(&mut self, cluster: cluster::Pointer) -> cache::Transaction {
-        trace!(self, "writing the head metacluster"; "target cluster" => cluster);
-
-        self.cache.write(cluster, self.head_metacluster.encode());
-    }
-
     /// Pop from the freelist.
     ///
     /// The returned pointer is wrapped in a cache transaction, representing the operations done in
     /// order to pop it.
-    ///
-    /// The algorithm works as follows: If the head metacluster contains more free clusters, simply
-    /// pop and return the pointer. If not, make the next metacluster the head metacluster and
-    /// return the old metacluster.
     fn freelist_pop(&mut self) -> Result<cache::Transacting<cluster::Pointer>, Error> {
         trace!(self, "popping from freelist");
 
-        // Lock the state.
-        let state = self.state.lock();
-
-        if let Some(freelist_head) = state.freelist_head.take() {
-            if let Some(free) = self.head_metacluster.free.pop() {
-                // There were one or more free clusters in the head metacluster, we pop the last
-                // free cluster in the metacluster.
-
-                // Decrement the cluster counter to "truncate" the metacluster. This trick saves us
-                // from passing through an inconsistent state as we can update the checksum and the
-                // counter in the same sector write.
-                freelist_head.counter -= 1;
-                // Update the checksum to reflect the change made to the metacluster.
-                freelist_head.checksum = self.head_metacluster.checksum();
-
-                // Put back the freelist head into the state block.
-                state.freelist_head = freelist_head;
-
-                // Flush the state block to reflect the changes above. Because both the checksum
-                // and counter are updated, this will be atomic and consistent. Wrap the output in
-                // the transaction.
-                Ok(self.flush_state_block(&state).wrap(free))
-            } else {
-                // There were no free clusters, but there might be additional metaclusters. The
-                // outline of the algorithm is to update the freelist head pointer to point to the
-                // next metacluster, if any, and then use the current, exhausted metacluster as the
-                // allocated cluster.
-
-                // The head metacluster is now empty, update the head to the next metacluster, if
-                // it exist.
-                let transaction = if let Some(next_metacluster) = self.head_metacluster.next_metacluster.take() {
-                    // A new metacluster existed.
-                    debug!(self, "switching metacluster"; "new metacluster" => next_metacluster);
-
-                    // Read and decode the metacluster.
-                    if let Ok(metacluster) = self.cache.read_then(next_metacluster.into()?, |buf| {
-                        // Decode the new metacluster.
-                        let metacluter = Metacluster::decode(buf);
-                        // Calculate the checksum.
-                        // TODO: This can be done much more efficiently, as we already have the
-                        //       decoded buffer. No need for re-decoding it.
-                        let checksum = metacluster.checksum();
-
-                        // Check the metacluster against the checksum stored in the older block.
-                        if checksum != self.head_metacluster.next_checksum {
-                            // Everything suceeded.
-                            Ok(metacluster)
-                        } else {
-                            // Checksum mismatched; throw an error.
-                            Err(Error::ChecksumMismatch {
-                                cluster: next_metacluster,
-                                // This was the stored checksum.
-                                expected: self.head_metacluster.next_checksum,
-                                // And the actual checksum.
-                                found: checksum,
-                            })
-                        }
-                    }) {
-                        // Update the head metacluster to the decoded cluster.
-                        self.head_metacluster = metacluster;
-                        // Update the state block with the data from the newly decoded metacluster.
-                        state.freelist_head = Some(state_block::FreelistHead {
-                            // The pointer should point towards the new metacluster.
-                            cluster: next_metacluster,
-                            checksum: checksum,
-                            // Since the cluster can at most contain 63 < 256 clusters, casting to u8
-                            // won't cause overflow.
-                            counter: self.head_metacluster.free.len() as u8,
-                        });
-
-                        // We flush the state block flush to write down our changes to the state block.
-                        Some(self.flush_state_block(&state))
-                    } else { None }
-                } else { None };
-
-                // Use _the old_ head metacluster as the allocated cluster, and wrap it in the
-                // potential transaction from updating the metacluster head.
-                Ok(cache::Transacting::new(freelist_head.cluster, transaction))
-            }
+        if let Some(free) = self.free.pop() {
+            // We had a cluster in the free-cache. We can simply return this, no transactions are
+            // required.
+            Transacting::no_transaction(free)
         } else {
-            // There is no freelist head, rendering the freelist empty, hence there is no cluster
-            // to allocate. Return an error.
-            Err(Error::OutOfClusters)
+            // We were unable to pop from the free-cache, so we must grab the next metacluster and
+            // load it.
+
+            // Lock the state.
+            let state = self.state.lock();
+            // Just in case that another thread have filled the free-cache while we were locking
+            // the state, we will check if new clusters are in the free-cache.
+            if Some(x) = self.free.pop() {
+                // We had a cluster in the free-cache. Again, we can simply return this, no
+                // transactions are required.
+                return Transacting::no_transaction(free)
+            }
+
+            // Grab the next metacluster. If no other metacluster exists, we return an error.
+            let head = state.freelist_head.ok_or(Error::OutOfClusters)?;
+            // Load the new metacluster, and return the old metacluster.
+            let free = self.cache.read_then(head.cluster, |buf| {
+                // Check that the checksum matches.
+                let found = self.checksum(buf);
+                if head.checksum != found {
+                    // Checksums do not match; throw an error.
+                    return Err(Error::MetacluterChecksumMismatch {
+                        cluster: head.cluster,
+                        expected: head.checksum,
+                        found: found,
+                    });
+                }
+
+                // Now, we'll replace the old head metacluster with the chained metacluster.
+                trace!(self, "metacluster checksum matched", "checksum" => found);
+
+                // Replace the checksum of the head metacluster with the checksum of the chained
+                // metacluster, which will soon be the head metacluster.
+                head.checksum = LittleEndian::read(buf);
+                // We'll initialize a window iterating over the pointers in this metacluster.
+                let mut window = &buf[8..];
+                // The first pointer points to the chained metacluster.
+                let old_head = mem::replace(&mut head.cluster, cluster::Pointer::from(LittleEndian::read(window)));
+
+                // The rest are free.
+                while window.len() >= 8 {
+                    // Slide the window to the right.
+                    window = &window[8..];
+                    // Read the pointer.
+                    if let Some(ptr) = cluster::Pointer::from(LittleEndian::read(window)) {
+                        // There was anohter pointer in the metacluster, push it to the free-cache.
+                        self.free.push(ptr)
+                    } else {
+                        // The pointer was a null pointer, so the metacluster is over.
+                        break;
+                    }
+                }
+
+                // We return the old head metacluster, and will use it as the popped free cluster.
+                // Mein gott, dis is incredibly convinient. *sniff*
+                old_head
+            });
+
+            // Release the lock.
+            drop(state)
+            // Flush the state block to account for the changes.
+            self.flush_state_block().wrap(free)
         }
     }
 
     /// Push to the freelist.
-    ///
-    /// This pushes `cluster` to the freelist and returns the cache transaction, or an error.
-    ///
-    /// The algorithm works as follows: If the metacluster is full, the pushed cluster is used as
-    /// the new, empty head metacluster, which is linked to the old head metacluster. If not, the
-    /// free cluster is simply pushed.
     fn freelist_push(&mut self, cluster: cluster::Pointer) -> cache::Transaction {
         trace!(self, "pushing to freelist"; "cluster" => cluster);
 
-        // Lock the state.
+        self.free.push(cluster);
+    }
+
+    /// Flush the free-cache to the head metacluster.
+    ///
+    /// This clears the free-cache and writes it to the head metacluster.
+    fn flush_free(&self) -> Transacting<()> {
+        /* TODO (buggy and incomplete)
         let state = self.state.lock();
+        let mut ret = Transacting::no_transaction();
+        let mut (ptr, cksum) = state.freelist_head.map_or(|x| (x.cluster, x.checksum), (0, 0));
 
-        if let Some(freelist_head) = state.freelist_head {
-            if self.head_metacluster.free.len() + 2 == disk::SECTOR_SIZE / cluster::POINTER_SIZE {
-                // The head metacluster is full, so we will use the cluster to create a new
-                // head metacluster.
-                debug!(self, "creating new metacluster"; "cluster" => cluster);
+        let mut buf = disk::SectorBuf::default();
+        let mut window = 8 + cluster::POINTER_SIZE;
+        while let Some(free) = self.free.pop() {
+            if window == disk::SECTOR_SIZE {
+                LittleEndian::write(&mut buf, cksum);
+                LittleEndian::write(&mut buf[8..], ptr);
 
-                // Clear the free clusters to make ensure that there isn't duplicates.
-                self.head_metacluster.free.clear();
-                // Update the head metacluster's next pointer to point to the old head metacluster.
-                self.head_metacluster.next = Some(freelist.cluster);
-                // Update the head metacluster's next metacluster checksum to be the checksum of
-                // the old metacluster as stored in the state block, since the old metacluster will
-                // become the new metacluster's next. This simple trick is allows us to bypass
-                // recalculation of the checksum. Small optimization, but hey, it works.
-                self.head_metacluster.next_checksum = freelist_head.next_checksum;
-                // Update the state block freelist head metadata to point to the new head
-                // metacluster.
-                state.freelist_head = Some(state_block::FreelistHead {
-                    cluster: cluster,
-                    // Calculate the checksum of the new head metacluster.
-                    checksum: self.head_metacluster.checksum(),
-                    // Currently, no free clusters are stored in the new head metacluster, so the
-                    // counter is 0.
-                    counter: 0,
-                });
-                // Write the metacluster to `cluster`. This won't leave the system in an
-                // inconsistent state, as only `cluster`, which is free, will be changed.
-                self.write_head_metacluster(cluster).then(
-                    // Flush the state block. This won't leave the system in an inconsistent state
-                    // either, as a new, valid metacluster is stored at `cluster`.
-                    self.flush_state_block(&state)
-                )
+                ptr = free;
+                cksum = self.checksum(buf);
+
+                ret = ret.then(self.cache.write(ptr, &buf));
+
+                window = 8 + cluster::POINTER_SIZE;
             } else {
-                // There is more space in the head metacluster.
-
-                // Push the new free cluster.
-                self.head_metacluster.free.push(cluster);
-                // Flush. Woosh!
-                self.flush_state_block(&state)
+                LittleEndian::write(&mut buf[window..], x);
+                window += cluster::POINTER_SIZE;
             }
-        } else {
-            // The freelist is empty, so we set the cluster up as an empty metacluster as the
-            // head metacluster.
-            state.freelist_head = Some(state_block::FreelistHead {
-                cluster: cluster,
-                checksum: 0,
-                counter: 0,
-            });
-            // Flush the state block to add the new cluster.
-            self.flush_state_block(&state)
         }
+
+        state.freelist_head = Some(FreelistHead {
+            cluster: ptr,
+            checksum: cksum,
+        });
+
+        ret.then(self.flush_state_block())
+        */
+    }
+}
+
+impl Drop for Manager {
+    fn drop(&mut self) {
+        // Flush the free-cache before exiting.
+        self.flush_free();
     }
 }
 

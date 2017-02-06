@@ -202,16 +202,8 @@
         in~\ref{cluster:metacluster}.
 
         \subsection{Checksum of the freelist head (byte 40-48)}
-        This field stores the checksum (in little-endian) of the active part
-        (\ref{cluster:metacluster}) of the freelist head, by the algorithm
-        specified in~\ref{config:checksum}.
-
-        If the freelist is empty, this field is 0.
-
-        \subsection{Freelist head counter (byte 48)}
-        \label{state:freelist_head_counter}
-        This field counts the number of free clusters in the freelist head. If
-        the freelist is empty, this field is 0.
+        This field stores the checksum (in little-endian) of the freelist
+        head, by the algorithm specified in~\ref{config:checksum}.
 
     \chapter{Cluster management}
 
@@ -264,8 +256,7 @@
         the first in this section up to the first null pointer must be free.
 
         The checksum of a metacluster is calculated
-        through~\ref{config:checksum} up to the last free cluster pointer in
-        the metacluster.
+        through~\ref{config:checksum}.
 
         \subsection{Allocation and deallocation}
         The algorithm for allocation and deallocation is implementation

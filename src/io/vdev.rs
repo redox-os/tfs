@@ -241,7 +241,7 @@ impl Disk for Driver {
         // Make sure it doesn't write to the null sector reserved for the disk header.
         assert_ne!(sector, 0, "Trying to write to the null sector.");
 
-        // Forward the call to the inner disk.
+        // Forward the call to the inner disk. We subtract 1 to account for the disk header.
         self.disk.write(sector, buf)
     }
     fn read_to(&mut self, sector: Sector, buf: &mut [u8]) -> Result<(), Error> {
@@ -250,14 +250,14 @@ impl Disk for Driver {
         // Make sure it doesn't write to the null sector reserved for the disk header.
         assert_ne!(sector, 0, "Trying to read from the null sector.");
 
-        // Forward the call to the inner disk.
-        self.disk.read_to(sector, buf)
+        // Forward the call to the inner disk. We subtract 1 to account for the disk header.
+        self.disk.read_to(sector - 1, buf)
     }
 
     fn heal(&mut self, sector: disk::Sector) -> Result<(), disk::Error> {
         debug!(self, "healing possibly corrupt sector"; "sector" => sector);
 
-        // Forward the call to the inner disk.
-        self.disk.heal(sector)
+        // Forward the call to the inner disk. We subtract 1 to account for the disk header.
+        self.disk.heal(sector - 1)
     }
 }

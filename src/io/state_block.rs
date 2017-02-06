@@ -54,23 +54,14 @@ impl TryFrom<u16> for CompressionAlgorithm {
 /// freelist.
 struct FreelistHead {
     /// A pointer to the head of the freelist.
+    ///
+    /// This cluster contains pointers to other free clusters. If not full, it is padded with
+    /// zeros.
     cluster: cluster::Pointer,
     /// The checksum of the freelist head up to the last free cluster.
     ///
-    /// This is the checksum from the start of the metacluster (at `self.cluster`) to the last free
-    /// cluster.
-    ///
-    /// The beautiful thing is that we can update this without passing through an inconsistent
-    /// state as we can simultaneously increment or decrement `self.counter`, since the state block
-    /// is stored on only one sector.
+    /// This is the checksum of the metacluster (at `self.cluster`).
     checksum: u64,
-    /// The number of free clusters in the freelist head.
-    ///
-    /// The reason for having this counter as opposed to simply zeroing the used pointers is that
-    /// with this counter, we don't have to worry about inconsistency as the checksum can be
-    /// updated together with the counter, and furthermore, we don't need to write the
-    /// metacluster's sector, improving performance.
-    counter: u8,
 }
 
 /// The TFS state block.
@@ -124,8 +115,6 @@ impl StateBlock {
                         cluster: freelist_head,
                         // Load the checksum of the freelist head.
                         checksum: LittleEndian::read(&buf[40..]),
-                        // Load the pointer counter in the freelist head.
-                        counter: buf[48],
                     }
                 }),
             },
@@ -148,11 +137,9 @@ impl StateBlock {
             LittleEndian::write(&mut buf[32..], freelist_head.cluster);
             // Write the checksum of the freelist head.
             LittleEndian::write(&mut buf[40..], freelist_head.checksum);
-            // Write the freelist head counter.
-            buf[48] = freelist_head.counter;
         }
-        // If the free list was empty, both the checksum, counter, and pointer are zero, which
-        // matching the buffer's current state.
+        // If the free list was empty, both the checksum, and pointer are zero, which matching the
+        // buffer's current state.
 
         // Calculate and store the checksum.
         let cksum = checksum_algorithm.hash(&buf[8..]);
@@ -180,7 +167,6 @@ mod tests {
         block.state.freelist_head = Some(FreelistHead {
             cluster: 22,
             checksum: 2,
-            counter: 2,
         });
         assert_eq!(StateBlock::decode(block.encode()).unwrap(), block);
     }
@@ -203,11 +189,9 @@ mod tests {
         block.state.freelist_head = Some(FreelistHead {
             cluster: 22,
             checksum: 2,
-            counter: 3,
         });
         sector[32] = 22;
         sector[40] = 2;
-        sector[48] = 3;
         LittleEndian::write(&mut sector, seahash::hash(sector[8..]));
         assert_eq!(sector, block.encode());
     }
