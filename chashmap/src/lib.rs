@@ -715,6 +715,24 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
         mem::replace(&mut *bucket, Bucket::Contains(key, val)).value()
     }
 
+    /// Insert or update.
+    ///
+    /// This inserts `val` at key `key` if it already exists, or else it updates `key`'s associated
+    /// value through the closure `update`.
+    pub fn upsert<F: Fn(&mut V)>(&self, key: K, val: V, update: F) {
+        // Expand and lock the table. We need to expand to ensure the bounds on the load factor.
+        let lock = self.expand();
+        // Lookup the key or a free bucket in the inner table.
+        let mut bucket = lock.lookup_or_free(&key);
+
+        match *bucket {
+            // Run it through the closure.
+            Bucket::Contains(_, ref mut val) => update(val),
+            // The bucket was empty, simply insert.
+            ref mut x => *x = Bucket::Contains(key, val),
+        }
+    }
+
     /// Remove an entry.
     ///
     /// This removes and returns the entry with key `key`. If no entry with said key exists, it
