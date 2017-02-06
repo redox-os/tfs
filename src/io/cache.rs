@@ -1,5 +1,3 @@
-use crossbeam::sync::SegQueue;
-
 /// A writable guard to a cache block.
 type WriteGuard<'a> = chashmap::WriteGuard<'a, disk::Sector, Block>;
 
@@ -163,14 +161,6 @@ impl Block {
     }
 }
 
-/// A cache operation.
-enum CacheOperation {
-    /// Create a new cache block for some sector.
-    Create(disk::Sector),
-    /// Touch a cache block of some sector.
-    Touch(disk::Sector),
-}
-
 /// A cached disk.
 ///
 /// This wrapper manages caching and the consistency issues originating from it.
@@ -184,17 +174,12 @@ struct Cache {
     /// The inner driver.
     driver: vdev::Driver,
 
-    /// The cache tracker operation queue.
-    ///
-    /// In order to avoid excessively locking and unlocking the cache tracker, we buffer the
-    /// operations, which will then be executed in one go, when needed.
-    queue: SegQueue<CacheOperation>,
     /// The cache replacement tracker.
     ///
     /// This tracks the state of the replacement algorithm, which chooses which cache block shall
     /// be replaced in favor of a new cache. It serves to estimate/guess which block is likely not
     /// used in the near future.
-    tracker: Mutex<mlcr::Cache>,
+    tracker: mlcr::ConcurrentCache,
 
     /// The sector-to-cache block map.
     sector_map: CHashMap<disk::Sector, Block>,
@@ -206,7 +191,6 @@ impl From<vdev::Driver> for Cache {
             // Store the driver.
             driver: driver,
             // Set empty/default values.
-            queue: SegQueue::new(),
             tracker: Mutex::new(mlcr::Cache::new()),
             sector_map: CHashMap::with_capacity(INITIAL_CAPACITY),
         }
@@ -251,7 +235,7 @@ impl Cache {
             trace!(self, "cache hit; reading from cache"; "sector" => sector);
 
             // Touch the sector.
-            self.queue.push(CacheOperation::Touch(sector));
+            self.tracker.touch(sector);
 
             handler(accessor)
         } else {
@@ -260,7 +244,7 @@ impl Cache {
             // Occupy the block in the map, so that we can later on insert it.
             let block = self.sector_map.get_mut_or(sector, Block::default());
             // Insert the sector into the cache tracker.
-            self.queue.push(CacheOperation::Create(sector));
+            self.tracker.touch(sector);
 
             // Fetch the data from the disk.
             self.disk.read_to(sector, &mut block.data)?;
@@ -294,17 +278,7 @@ impl Cache {
     fn trim(&self, to: usize) -> Result<(), disk::Error> {
         info!(self, "trimming cache"; "to" => to);
 
-        // Lock the cache tracker.
         let tracker = self.tracker.lock();
-        // Commit the buffered operations to the tracker.
-        while let Some(op) = self.queue.try_pop() {
-            match op {
-                // Create new cache block.
-                CacheOperation::Create(sector) => tracker.create(sector),
-                // Touch a cache block.
-                CacheOperation::Touch(sector) => tracker.touch(sector),
-            }
-        }
 
         // The set of blocks to trim.
         let mut flush: HashSet<_> = tracker.trim(to).collect();

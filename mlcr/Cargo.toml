@@ -1,6 +1,6 @@
 [package]
 name = "mlcr"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["ticki <ticki@users.noreply.github.com>"]
 description = "An adaptive machine-learning-based cache tracker/replacement policy."
 repository = "https://github.com/ticki/tfs"
@@ -10,4 +10,6 @@ keywords = ["cache", "replacement", "machine", "neural", "lru"]
 exclude = ["target", "Cargo.lock"]
 
 [dependencies]
+crossbeam = "0.2"
 nn = "0.1"
+parking_lot = "0.3"

@@ -9,8 +9,13 @@
 //! used when the cached medium is significantly slower than training the network (e.g. hard disks or
 //! internet downloads).
 
+extern crate crossbeam;
 extern crate nn;
+extern crate parking_lot;
+
+use crossbeam::sync::SegQueue;
 use nn::NN;
+use parking_lot::{Mutex, MutexGuard};
 
 use std::{cmp, f64};
 use std::collections::{BinaryHeap, HashMap};
@@ -210,5 +215,72 @@ impl Cache {
     /// `remove` method.
     pub fn trim(&mut self, to: usize) -> ::std::iter::Take<ColdIter> {
         self.cold().take(self.blocks.len() - to)
+    }
+}
+
+/// A cache operation.
+enum CacheOperation {
+    /// Create a new cache block with some ID.
+    Insert(Id),
+    /// Remove a cache block.
+    Remove(Id),
+    /// Touch some block.
+    Touch(Id),
+}
+
+/// A concurrent cache tracker.
+///
+/// This has two parts to it:
+///
+/// - A normal cache tracker, protected by a lock.
+/// - A queue of cache operations that will be executed when the lock is acquired.
+pub struct ConcurrentCache {
+    /// The inner cache tracker, protected by a lock.
+    inner: Mutex<Cache>,
+    /// The cache tracker operation queue.
+    ///
+    /// In order to avoid excessively locking and unlocking the cache tracker, we buffer the
+    /// operations, which will then be executed in one go, when needed.
+    queue: SegQueue<CacheOperation>,
+}
+
+impl ConcurrentCache {
+    /// Create a new concurrent cache tracker.
+    pub fn new() -> ConcurrentCache {
+        ConcurrentCache {
+            inner: Mutex::new(Cache::new()),
+            queue: SegQueue::new(),
+        }
+    }
+
+    /// Lock the inner cache.
+    pub fn lock(&self) -> MutexGuard<Cache> {
+        // Lock the cache tracker.
+        let mut lock = self.inner.lock();
+        // Commit the buffered operations to the tracker.
+        while let Some(op) = self.queue.try_pop() {
+            match op {
+                CacheOperation::Insert(id) => lock.insert(id),
+                CacheOperation::Remove(id) => lock.remove(id),
+                CacheOperation::Touch(id) => lock.touch(id),
+            }
+        }
+
+        lock
+    }
+
+    /// Insert a new cache block.
+    pub fn insert(&mut self, id: Id) {
+        self.queue.push(CacheOperation::Insert(id));
+    }
+
+    /// Remove a cache block.
+    pub fn remove(&mut self, id: Id) {
+        self.queue.push(CacheOperation::Remove(id));
+    }
+
+    /// Touch a cache block.
+    pub fn touch(&mut self, id: Id) {
+        self.queue.push(CacheOperation::Touch(id));
     }
 }
