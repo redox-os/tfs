@@ -127,6 +127,13 @@ impl<K, V> Bucket<K, V> {
         } else { None }
     }
 
+    /// Set the bucket bucket to removed and return the value if any.
+    fn take_value(&mut self) -> Option<V> {
+        if let Bucket::Contains(_, val) = mem::replace(self, Bucket::Removed) {
+            Some(val)
+        } else { None }
+    }
+
     /// Get a reference to the value of the bucket (if any).
     ///
     /// This returns a reference to the value of the bucket, if it is a KV pair. If not, it will
@@ -732,6 +739,26 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
             Bucket::Contains(_, ref mut val) => update(val),
             // The bucket was empty, simply insert.
             ref mut x => *x = Bucket::Contains(key, insert()),
+        }
+    }
+
+    /// Map or insert an entry.
+    ///
+    /// This sets the value associated with key `key` to `f(Some(old_val))` (if it returns `None`,
+    /// the entry is removed) if it exists. If it does not exist, it inserts it with value
+    /// `f(None)`, unless the closure returns `None`.
+    ///
+    /// Note that if `f` returns `None`, the entry of key `key` is removed unconditionally.
+    pub fn alter<F>(&self, key: K, f: F)
+        where F: Fn(Option<V>) -> Option<V> {
+        // Expand and lock the table. We need to expand to ensure the bounds on the load factor.
+        let lock = self.expand();
+        // Lookup the key or a free bucket in the inner table.
+        let mut bucket = lock.lookup_or_free(&key);
+
+        // Insert the result of the closure, if not `None`.
+        if let Some(val) = f(bucket.take_value()) {
+            *bucket = Bucket::Contains(key, val);
         }
     }
 

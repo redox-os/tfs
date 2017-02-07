@@ -1,6 +1,6 @@
 [package]
 name = "chashmap"
-version = "1.0.0"
+version = "1.1.0"
 authors = ["ticki <Ticki@users.noreply.github.com>"]
 description = "Fast, concurrent hash maps with extensive API."
 repository = "https://github.com/ticki/tfs"

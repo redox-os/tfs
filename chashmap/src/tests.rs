@@ -112,6 +112,47 @@ fn spam_upsert() {
 }
 
 #[test]
+fn spam_alter() {
+    let m = Arc::new(CHashMap::new());
+    let mut joins = Vec::new();
+
+    for t in 0..10 {
+        let m = m.clone();
+        joins.push(thread::spawn(move || {
+            for i in t * 1000..(t + 1) * 1000 {
+                m.alter(i, |x| {
+                    assert!(x.is_none());
+                    Some(!i)
+                });
+                m.alter(i, |x| {
+                    assert_eq!(x, Some(!i));
+                    Some(!x.unwrap())
+                });
+            }
+        }));
+    }
+
+    for j in joins.drain(..) {
+        j.join().unwrap();
+    }
+
+    for t in 0..5 {
+        let m = m.clone();
+        joins.push(thread::spawn(move || {
+            for i in t * 2000..(t + 1) * 2000 {
+                assert_eq!(*m.get(&i).unwrap(), i);
+                m.alter(i, |_| None);
+                assert!(m.get(&i).is_none());
+            }
+        }));
+    }
+
+    for j in joins {
+        j.join().unwrap();
+    }
+}
+
+#[test]
 fn lock_compete() {
     let m = Arc::new(CHashMap::new());
 
@@ -200,6 +241,21 @@ fn upsert_update() {
     m.upsert(2, || unreachable!(), |x| *x += 3);
     assert_eq!(*m.get(&1).unwrap(), 4);
     assert_eq!(*m.get(&2).unwrap(), 6);
+}
+
+#[test]
+fn alter_string() {
+    let m = CHashMap::new();
+    assert_eq!(m.len(), 0);
+    m.alter(1, |_| Some(String::new()));
+    assert_eq!(m.len(), 1);
+    m.alter(1, |x| {
+        let mut x = x.unwrap();
+        x.push('a');
+        Some(x)
+    });
+    assert_eq!(m.len(), 2);
+    assert_eq!(&*m.get(&1).unwrap(), "a");
 }
 
 thread_local! { static DROP_VECTOR: RefCell<Vec<isize>> = RefCell::new(Vec::new()) }
