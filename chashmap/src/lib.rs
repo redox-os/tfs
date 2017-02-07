@@ -752,8 +752,8 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
     /// This looks up `key`. If it exists, the reference to its value is passed through closure
     /// `update`.  If it doesn't exist, the result of closure `insert` is inserted.
     pub fn upsert<F, G>(&self, key: K, insert: F, update: G)
-        where F: Fn() -> V,
-              G: Fn(&mut V) {
+        where F: FnOnce() -> V,
+              G: FnOnce(&mut V) {
         // Expand and lock the table. We need to expand to ensure the bounds on the load factor.
         let lock = self.table.read();
         {
@@ -786,7 +786,7 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
     ///
     /// Note that if `f` returns `None`, the entry of key `key` is removed unconditionally.
     pub fn alter<F>(&self, key: K, f: F)
-        where F: Fn(Option<V>) -> Option<V> {
+        where F: FnOnce(Option<V>) -> Option<V> {
         // Expand and lock the table. We need to expand to ensure the bounds on the load factor.
         let lock = self.table.read();
         {
