@@ -717,9 +717,11 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
 
     /// Insert or update.
     ///
-    /// This inserts `val` at key `key` if it already exists, or else it updates `key`'s associated
-    /// value through the closure `update`.
-    pub fn upsert<F: Fn(&mut V)>(&self, key: K, val: V, update: F) {
+    /// This looks up `key`. If it exists, the reference to its value is passed through closure
+    /// `update`.  If it doesn't exist, the result of closure `insert` is inserted.
+    pub fn upsert<F, G>(&self, key: K, insert: F, update: G)
+        where F: Fn() -> V,
+              G: Fn(&mut V) {
         // Expand and lock the table. We need to expand to ensure the bounds on the load factor.
         let lock = self.expand();
         // Lookup the key or a free bucket in the inner table.
@@ -729,7 +731,7 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
             // Run it through the closure.
             Bucket::Contains(_, ref mut val) => update(val),
             // The bucket was empty, simply insert.
-            ref mut x => *x = Bucket::Contains(key, val),
+            ref mut x => *x = Bucket::Contains(key, insert()),
         }
     }
 

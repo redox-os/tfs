@@ -87,8 +87,8 @@ fn spam_upsert() {
         let m = m.clone();
         joins.push(thread::spawn(move || {
             for i in t * 1000..(t + 1) * 1000 {
-                m.upsert(i, !i, |_| unreachable!());
-                m.upsert(i, 42, |x| *x = !*x);
+                m.upsert(i, || !i, |_| unreachable!());
+                m.upsert(i, || unreachable!(), |x| *x = !*x);
             }
         }));
     }
@@ -183,9 +183,9 @@ fn insert() {
 fn upsert() {
     let m = CHashMap::new();
     assert_eq!(m.len(), 0);
-    m.upsert(1, 2, |_| unreachable!());
+    m.upsert(1, || 2, |_| unreachable!());
     assert_eq!(m.len(), 1);
-    m.upsert(2, 4, |_| unreachable!());
+    m.upsert(2, || 4, |_| unreachable!());
     assert_eq!(m.len(), 2);
     assert_eq!(*m.get(&1).unwrap(), 2);
     assert_eq!(*m.get(&2).unwrap(), 4);
@@ -195,9 +195,9 @@ fn upsert() {
 fn upsert_update() {
     let m = CHashMap::new();
     m.insert(1, 2);
-    m.upsert(1, 100, |x| *x += 2);
+    m.upsert(1, || unreachable!(), |x| *x += 2);
     m.insert(2, 3);
-    m.upsert(2, 22, |x| *x += 3);
+    m.upsert(2, || unreachable!(), |x| *x += 3);
     assert_eq!(*m.get(&1).unwrap(), 4);
     assert_eq!(*m.get(&2).unwrap(), 6);
 }
