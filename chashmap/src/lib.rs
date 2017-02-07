@@ -586,6 +586,50 @@ impl<K, V> CHashMap<K, V> {
     pub fn new() -> CHashMap<K, V> {
         CHashMap::with_capacity(DEFAULT_INITIAL_CAPACITY)
     }
+
+    /// Get the number of entries in the hash table.
+    ///
+    /// This is entirely atomic, and will not acquire any locks.
+    pub fn len(&self) -> usize {
+        self.len.load(ORDERING)
+    }
+
+    /// Get the capacity of the hash table.
+    ///
+    /// The capacity is equal to the number of entries the table can hold before reallocating.
+    pub fn capacity(&self) -> usize {
+        self.buckets() * MAX_LOAD_FACTOR_NUM / MAX_LOAD_FACTOR_DENOM
+    }
+
+    /// Get the number of buckets of the hash table.
+    ///
+    /// "Buckets" refers to the amount of potential entries in the inner table. It is different
+    /// from capacity, in the sense that the map cannot hold this number of entries, since it needs
+    /// to keep the load factor low.
+    pub fn buckets(&self) -> usize {
+        self.table.read().buckets.len()
+    }
+
+    /// Is the hash table empty?
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Clear the map.
+    ///
+    /// This clears the hash map and returns the previous version of the map.
+    ///
+    /// It is relatively efficient, although it needs to write lock a RW lock.
+    pub fn clear(&self) -> CHashMap<K, V> {
+        // Acquire a writable lock.
+        let mut lock = self.table.write();
+        CHashMap {
+            // Replace the old table with an empty initial table.
+            table: RwLock::new(mem::replace(&mut *lock, Table::new(DEFAULT_INITIAL_CAPACITY))),
+            // Replace the length with 0 and use the old length.
+            len: AtomicUsize::new(self.len.swap(0, ORDERING)),
+        }
+    }
 }
 
 impl<K: PartialEq + Hash, V> CHashMap<K, V> {
@@ -638,34 +682,6 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
         !bucket.is_free()
 
         // fuck im sleepy rn
-    }
-
-    /// Get the number of entries in the hash table.
-    ///
-    /// This is entirely atomic, and will not acquire any locks.
-    pub fn len(&self) -> usize {
-        self.len.load(ORDERING)
-    }
-
-    /// Get the capacity of the hash table.
-    ///
-    /// The capacity is equal to the number of entries the table can hold before reallocating.
-    pub fn capacity(&self) -> usize {
-        self.buckets() * MAX_LOAD_FACTOR_NUM / MAX_LOAD_FACTOR_DENOM
-    }
-
-    /// Get the number of buckets of the hash table.
-    ///
-    /// "Buckets" refers to the amount of potential entries in the inner table. It is different
-    /// from capacity, in the sense that the map cannot hold this number of entries, since it needs
-    /// to keep the load factor low.
-    pub fn buckets(&self) -> usize {
-        self.table.read().buckets.len()
-    }
-
-    /// Is the hash table empty?
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 
     /// Insert a **new** entry.

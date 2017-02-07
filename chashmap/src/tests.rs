@@ -258,6 +258,26 @@ fn alter_string() {
     assert_eq!(&*m.get(&1).unwrap(), "a");
 }
 
+#[test]
+fn clear() {
+    let m = CHashMap::new();
+    assert!(m.insert(1, 2).is_none());
+    assert!(m.insert(2, 4).is_none());
+    assert_eq!(m.len(), 2);
+
+    let om = m.clear();
+    assert_eq!(om.len(), 2);
+    assert_eq!(*om.get(&1).unwrap(), 2);
+    assert_eq!(*om.get(&2).unwrap(), 4);
+
+    assert!(m.is_empty());
+    assert_eq!(m.len(), 0);
+
+    assert_eq!(m.get(&1), None);
+    assert_eq!(m.get(&2), None);
+}
+
+
 thread_local! { static DROP_VECTOR: RefCell<Vec<isize>> = RefCell::new(Vec::new()) }
 
 #[derive(Hash, PartialEq, Eq)]
