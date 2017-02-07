@@ -1,6 +1,6 @@
 [package]
 name = "mlcr"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["ticki <ticki@users.noreply.github.com>"]
 description = "An adaptive machine-learning-based cache tracker/replacement policy."
 repository = "https://github.com/ticki/tfs"

@@ -497,9 +497,13 @@ fn find_mut() {
 #[test]
 fn insert_overwrite() {
     let m = CHashMap::new();
+    assert_eq!(m.len(), 0);
     assert!(m.insert(1, 2).is_none());
+    assert_eq!(m.len(), 1);
     assert_eq!(*m.get(&1).unwrap(), 2);
+    assert_eq!(m.len(), 1);
     assert!(!m.insert(1, 3).is_none());
+    assert_eq!(m.len(), 1);
     assert_eq!(*m.get(&1).unwrap(), 3);
 }
 

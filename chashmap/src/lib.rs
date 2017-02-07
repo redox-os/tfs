@@ -61,7 +61,9 @@ const MAX_LOAD_FACTOR_NUM: usize = 100 - 15;
 /// The maximal load factor's denominator.
 const MAX_LOAD_FACTOR_DENOM: usize = 100;
 /// The default initial capacity.
-const DEFAULT_INITIAL_CAPACITY: usize = 32;
+const DEFAULT_INITIAL_CAPACITY: usize = 64;
+/// The lowest capacity a table can have.
+const MINIMUM_CAPACITY: usize = 8;
 
 /// A bucket state.
 ///
@@ -123,13 +125,6 @@ impl<K, V> Bucket<K, V> {
     /// returned.
     fn value(self) -> Option<V> {
         if let Bucket::Contains(_, val) = self {
-            Some(val)
-        } else { None }
-    }
-
-    /// Set the bucket bucket to removed and return the value if any.
-    fn take_value(&mut self) -> Option<V> {
-        if let Bucket::Contains(_, val) = mem::replace(self, Bucket::Removed) {
             Some(val)
         } else { None }
     }
@@ -207,7 +202,7 @@ impl<K, V> Table<K, V> {
 
     /// Create a table with at least some capacity.
     fn with_capacity(cap: usize) -> Table<K, V> {
-        Table::new(cap * LENGTH_MULTIPLIER)
+        Table::new(cmp::max(MINIMUM_CAPACITY, cap * LENGTH_MULTIPLIER))
     }
 }
 
@@ -580,7 +575,7 @@ impl<K, V> CHashMap<K, V> {
         CHashMap {
             // Start at 0 KV pairs.
             len: AtomicUsize::new(0),
-            // Make a new empty table.
+            // Make a new empty table. We will make sure that it is at least one.
             table: RwLock::new(Table::with_capacity(cap)),
         }
     }
@@ -700,12 +695,16 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
                       the assumptions about `insert_new`'s arguments.");
 
         // Expand and lock the table. We need to expand to ensure the bounds on the load factor.
-        let lock = self.expand();
-        // Find the free bucket.
-        let mut bucket = lock.find_free(&key);
+        let lock = self.table.read();
+        {
+            // Find the free bucket.
+            let mut bucket = lock.find_free(&key);
 
-        // Set the bucket to the new KV pair.
-        *bucket = Bucket::Contains(key, val);
+            // Set the bucket to the new KV pair.
+            *bucket = Bucket::Contains(key, val);
+        }
+        // Expand the table (we know beforehand that the entry didn't already exist).
+        self.expand(lock);
     }
 
     /// Replace an existing entry, or insert a new one.
@@ -713,13 +712,23 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
     /// This will replace an existing entry and return the old entry, if any. If no entry exists,
     /// it will simply insert the new entry and return `None`.
     pub fn insert(&self, key: K, val: V) -> Option<V> {
+        let ret;
         // Expand and lock the table. We need to expand to ensure the bounds on the load factor.
-        let lock = self.expand();
-        // Lookup the key or a free bucket in the inner table.
-        let mut bucket = lock.lookup_or_free(&key);
+        let lock = self.table.read();
+        {
+            // Lookup the key or a free bucket in the inner table.
+            let mut bucket = lock.lookup_or_free(&key);
 
-        // Replace the bucket.
-        mem::replace(&mut *bucket, Bucket::Contains(key, val)).value()
+            // Replace the bucket.
+            ret = mem::replace(&mut *bucket, Bucket::Contains(key, val)).value();
+        }
+
+        // Expand the table if no bucket was overwritten (i.e. the entry is fresh).
+        if ret.is_none() {
+            self.expand(lock);
+        }
+
+        ret
     }
 
     /// Insert or update.
@@ -730,16 +739,27 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
         where F: Fn() -> V,
               G: Fn(&mut V) {
         // Expand and lock the table. We need to expand to ensure the bounds on the load factor.
-        let lock = self.expand();
-        // Lookup the key or a free bucket in the inner table.
-        let mut bucket = lock.lookup_or_free(&key);
+        let lock = self.table.read();
+        {
+            // Lookup the key or a free bucket in the inner table.
+            let mut bucket = lock.lookup_or_free(&key);
 
-        match *bucket {
-            // Run it through the closure.
-            Bucket::Contains(_, ref mut val) => update(val),
-            // The bucket was empty, simply insert.
-            ref mut x => *x = Bucket::Contains(key, insert()),
+            match *bucket {
+                // The bucket had KV pair!
+                Bucket::Contains(_, ref mut val) => {
+                    // Run it through the closure.
+                    update(val);
+                    // TODO: We return to stop the borrowck to yell at us. This prevents the control flow
+                    //       from reaching the expansion after the match if it has been right here.
+                    return;
+                },
+                // The bucket was empty, simply insert.
+                ref mut x => *x = Bucket::Contains(key, insert()),
+            }
         }
+
+        // Expand the table (this will only happen if the function haven't returned yet).
+        self.expand(lock);
     }
 
     /// Map or insert an entry.
@@ -752,14 +772,33 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
     pub fn alter<F>(&self, key: K, f: F)
         where F: Fn(Option<V>) -> Option<V> {
         // Expand and lock the table. We need to expand to ensure the bounds on the load factor.
-        let lock = self.expand();
-        // Lookup the key or a free bucket in the inner table.
-        let mut bucket = lock.lookup_or_free(&key);
+        let lock = self.table.read();
+        {
+            // Lookup the key or a free bucket in the inner table.
+            let mut bucket = lock.lookup_or_free(&key);
 
-        // Insert the result of the closure, if not `None`.
-        if let Some(val) = f(bucket.take_value()) {
-            *bucket = Bucket::Contains(key, val);
+            match mem::replace(&mut *bucket, Bucket::Removed) {
+                Bucket::Contains(_, val) => if let Some(new_val) = f(Some(val)) {
+                    // Set the bucket to a KV pair with the new value.
+                    *bucket = Bucket::Contains(key, new_val);
+                    // No extension required, as the bucket already had a KV pair previously.
+                } else {
+                    // The old entry was removed, so we decrement the length of the map.
+                    self.len.fetch_sub(1, ORDERING);
+                    // TODO: We return as a hack to avoid the borrowchecker from thinking we moved a
+                    //       referenced object. Namely, under this match arm the expansion after the match
+                    //       statement won't ever be reached.
+                    return;
+                },
+                _ => if let Some(new_val) = f(None) {
+                    // The previously free cluster will get a KV pair with the new value.
+                    *bucket = Bucket::Contains(key, new_val);
+                } else { return; },
+            }
         }
+
+        // A new entry was inserted, so naturally, we expand the table.
+        self.expand(lock);
     }
 
     /// Remove an entry.
@@ -779,7 +818,7 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
             // TODO: We know that this is a `Bucket::Contains` variant, but to bypass borrowck
             //       madness, we do weird weird stuff.
             bucket => {
-                // Increment the length of the map.
+                // Decrement the length of the map.
                 self.len.fetch_sub(1, ORDERING);
 
                 // Set the bucket to "removed" and return its value.
@@ -824,12 +863,10 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
         lock.fill(table);
     }
 
-    /// Expand the size of the hash map so one more entry can fit in.
+    /// Increment the size of the hash map and expand it so one more entry can fit in.
     ///
     /// This returns the read lock, such that the caller won't have to acquire it twice.
-    fn expand(&self) -> RwLockReadGuard<Table<K, V>> {
-        // Acquire the read lock.
-        let lock = self.table.read();
+    fn expand(&self, lock: RwLockReadGuard<Table<K, V>>) {
         // Increment the length to take the new element into account.
         let len = self.len.fetch_add(1, ORDERING) + 1;
 
@@ -839,11 +876,6 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
             drop(lock);
             // Reserve 1 entry in space (the function will handle the excessive space logic).
             self.reserve(1);
-
-            // Get the read lock back.
-            self.table.read()
-        } else {
-            lock
         }
     }
 }
