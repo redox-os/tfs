@@ -169,6 +169,24 @@ enum Vdev {
     Speck,
 }
 
+struct Uid(u128);
+
+impl Into<u128> for Uid {
+    fn into(self) -> u128 {
+        self.0
+    }
+}
+
+impl Default for Uid {
+    fn default() -> Uid {
+        // Generate a random UID.
+        // TODO: While this is cryptographic by default, it provides no guarantee for its security.
+        //       It isn't a catastrophic if it isn't cryptographic (even if you knew the UID, the
+        //       things you can do are limited), but it's more secure if it is.
+        Uid(rand::random())
+    }
+}
+
 /// The disk header.
 #[derive(Default, PartialEq, Eq, Clone, Copy)]
 struct DiskHeader {
@@ -177,7 +195,7 @@ struct DiskHeader {
     /// The version number.
     version_number: u32,
     /// An secret number randomly picked when initializing.
-    uid: u128,
+    uid: Uid,
     /// The chosen checksum algorithm.
     checksum_algorithm: ChecksumAlgorithm,
     /// The state flag.
@@ -227,7 +245,7 @@ impl DiskHeader {
         //
         // This section stores a single number, namely the UID. The UID is supposed to be a secret
         // ID used throughout the code, such as seed for hashing and salt for key stretching.
-        let uid = LittleEndian::read(&buf[16..])
+        let uid = Uid(LittleEndian::read(&buf[16..]))
 
         // # Configuration
         //
@@ -315,7 +333,7 @@ impl DiskHeader {
         LittleEndian::write(&mut buf[8..], VERSION_NUMBER);
 
         // Write the UID.
-        LittleEndian::write(&mut buf[16..], self.uid);
+        LittleEndian::write(&mut buf[16..], self.uid.into());
 
         // Write the checksum algorithm.
         LittleEndian::write(&mut buf[32..], self.checksum_algorithm as u16);
@@ -360,7 +378,7 @@ mod tests {
         header.version_number = 1;
         assert_eq!(DiskHeader::decode(header.encode()).unwrap(), header);
 
-        header.uid = 12;
+        header.uid = Uid(12);
         assert_eq!(DiskHeader::decode(header.encode()).unwrap(), header);
 
         header.state_flag = StateFlag::Inconsistent;
