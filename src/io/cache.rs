@@ -201,7 +201,7 @@ impl Cache {
     /// Execute a write transaction.
     ///
     /// This creates a transaction writing `buf` into sector `sector`, when dropped.
-    fn write<F>(&self, sector: disk::Sector, buf: disk::SectorBuf) -> Transaction {
+    fn write(&self, sector: disk::Sector, buf: disk::SectorBuf) -> Transaction {
         debug!(self, "writing sector"; "sector" => sector);
 
         // Acquire the lock to the block, and initialize if it doesn't already exist.

@@ -69,10 +69,6 @@ quick_error! {
         UnknownVdev {
             description("Unknown, implementation defined vdev in the vdev stack.")
         }
-        /// Incomplete vdev codeword.
-        IncompleteVdevCode {
-            description("Incomplete vdev codeword.")
-        }
     }
 }
 
@@ -170,10 +166,7 @@ enum Vdev {
     /// SPECK encryption.
     ///
     /// This encrypts the disk with the SPECK cipher.
-    Speck {
-        /// The salt to generate the key.
-        salt: u128,
-    },
+    Speck,
 }
 
 /// The disk header.
@@ -183,6 +176,8 @@ struct DiskHeader {
     magic_number: MagicNumber,
     /// The version number.
     version_number: u32,
+    /// An secret number randomly picked when initializing.
+    uid: u128,
     /// The chosen checksum algorithm.
     checksum_algorithm: ChecksumAlgorithm,
     /// The state flag.
@@ -219,7 +214,7 @@ impl DiskHeader {
         let magic_number = MagicNumber::try_from(&buf[..8])?;
 
         // Load the version number.
-        let version_number = LittleEndian::read(buf[8..]);
+        let version_number = LittleEndian::read(&buf[8..]);
         // Check if the version is compatible. If the higher half doesn't match, there were a
         // breaking change. Otherwise, if the version number is lower or equal to the current
         // version, it's compatible.
@@ -228,12 +223,18 @@ impl DiskHeader {
             return Err(Error::IncompatibleVersion);
         }
 
+        // # Unique identifier
+        //
+        // This section stores a single number, namely the UID. The UID is supposed to be a secret
+        // ID used throughout the code, such as seed for hashing and salt for key stretching.
+        let uid = LittleEndian::read(&buf[16..])
+
         // # Configuration
         //
         // This section stores certain configuration options needs to properly load the disk header.
 
         // Load the checksum algorithm config field.
-        let checksum_algorithm = ChecksumAlgorithm::try_from(LittleEndian::read(buf[16..]))?;
+        let checksum_algorithm = ChecksumAlgorithm::try_from(LittleEndian::read(buf[32..]))?;
 
         // # State section
         //
@@ -241,7 +242,7 @@ impl DiskHeader {
         // file system.
 
         // Load the state flag.
-        let state_flag = StateFlag::from(buf[32])?;
+        let state_flag = StateFlag::from(buf[48])?;
 
         // # Vdev setup
         //
@@ -272,21 +273,7 @@ impl DiskHeader {
                 // A mirror vdev.
                 1 => vdev_stack.push(Vdev::Mirror),
                 // A SPECK encryption cipher.
-                2 => {
-                    // Check that the vdev codeword is complete.
-                    if vdev_section.len() < 16 {
-                        return Err(Error::IncompleteVdevCode);
-                    }
-
-                    vdev_stack.push(Vdev::Speck {
-                        // Just read the salt from the bytes following the label.
-                        salt: LittleEndian::read(vdev_stack),
-                    });
-
-                    // Cut off the 16 bytes of the salt in the remaining slice (this won't ever
-                    // panic due to the `if` statement above).
-                    vdev_stack = &vdev_stack[16..];
-                },
+                2 => vdev_stack.push(Vdev::Speck),
                 // Implementation defined vdev, which this implementation does not support.
                 0xFFFF => return Err(Error::UnknownVdev),
                 // Invalid vdevs (vdevs that are necessarily invalid under this version).
@@ -309,6 +296,7 @@ impl DiskHeader {
         DiskHeader {
             magic_number: magic_number,
             version_number: version_number,
+            uid: uid,
             checksum_algorithm: checksum_algorithm,
             state_flag: state_flag,
             vdev_stack: vdev_stack,
@@ -326,31 +314,25 @@ impl DiskHeader {
         // Write the current version number.
         LittleEndian::write(&mut buf[8..], VERSION_NUMBER);
 
+        // Write the UID.
+        LittleEndian::write(&mut buf[16..], self.uid);
+
         // Write the checksum algorithm.
-        LittleEndian::write(&mut buf[16..], self.checksum_algorithm as u16);
+        LittleEndian::write(&mut buf[32..], self.checksum_algorithm as u16);
 
         // Write the state flag.
-        buf[32] = self.state_flag as u8;
+        buf[48] = self.state_flag as u8;
 
         // Write the vdev stack.
         let mut vdev_section = &mut buf[64..504];
         for vdev in self.vdev_stack {
             match vdev {
-                Vdev::Mirror => {
-                    // Write the label.
-                    LittleEndian::write(vdev_section, 1u16);
-                    // Slide on.
-                    vdev_section = &mut vdev_section[2..];
-                },
-                Vdev::Speck { salt } => {
-                    // Write the label.
-                    LittleEndian::write(vdev_section, 2u16);
-                    // Write the salt.
-                    LittleEndian::write(vdev_section[2..], salt);
-                    // Slide on.
-                    vdev_section = vdev_section[18..];
-                },
+                Vdev::Mirror => LittleEndian::write(vdev_section, 1u16),
+                Vdev::Speck => LittleEndian::write(vdev_section, 2u16),
             }
+
+            // Slide on.
+            vdev_section = vdev_section[2..];
         }
         // Write the terminator vdev.
         vdev_section[0] = 0;
@@ -378,15 +360,18 @@ mod tests {
         header.version_number = 1;
         assert_eq!(DiskHeader::decode(header.encode()).unwrap(), header);
 
+        header.uid = 12;
+        assert_eq!(DiskHeader::decode(header.encode()).unwrap(), header);
+
+        header.state_flag = StateFlag::Inconsistent;
+        assert_eq!(DiskHeader::decode(header.encode()).unwrap(), header);
+
         header.vdev_stack.push(Vdev::Speck {
             salt: 228309220937918,
         });
         assert_eq!(DiskHeader::decode(header.encode()).unwrap(), header);
 
         header.vdev_stack.push(Vdev::Mirror);
-        assert_eq!(DiskHeader::decode(header.encode()).unwrap(), header);
-
-        header.state_flag = StateFlag::Inconsistent;
         assert_eq!(DiskHeader::decode(header.encode()).unwrap(), header);
     }
 
@@ -407,16 +392,22 @@ mod tests {
         LittleEndian::write(&mut sector[504..], seahash::hash(sector[..504]));
         assert_eq!(sector, header.encode());
 
+        header.uid |= 0xFF;
+        sector[16] = 0xFF;
+
+        LittleEndian::write(&mut sector[504..], seahash::hash(sector[..504]));
+        assert_eq!(sector, header.encode());
+
         // TODO: This is currently somewhat irrelevant as there is only one cksum algorithm. When a
         //       second is added, change this to the non-default.
         header.checksum = ChecksumAlgorithm::SeaHash;
-        sector[16] = 1;
+        sector[32] = 1;
 
         LittleEndian::write(&mut sector[504..], seahash::hash(sector[..504]));
         assert_eq!(sector, header.encode());
 
         header.state_flag = StateFlag::Open;
-        sector[32] = 1;
+        sector[48] = 1;
 
         LittleEndian::write(&mut sector[504..], seahash::hash(sector[..504]));
         assert_eq!(sector, header.encode());
@@ -459,7 +450,7 @@ mod tests {
     #[test]
     fn unknown_state_flag() {
         let mut sector = DiskHeader::default().encode();
-        sector[40] = 6;
+        sector[48] = 6;
         LittleEndian::write(&mut sector[504..], seahash::hash(sector[..504]));
         assert_eq!(DiskHeader::decode(sector), Err(Error::UnknownStateFlag));
     }
@@ -468,10 +459,10 @@ mod tests {
     fn wrong_checksum_algorithm() {
         let mut sector = DiskHeader::default().encode();
 
-        sector[0] = 0;
+        sector[32] = 0;
         LittleEndian::write(&mut sector[504..], seahash::hash(sector[..504]));
         assert_eq!(DiskHeader::decode(sector), Err(Error::InvalidChecksumAlgorithm));
-        sector[1] = 0x80;
+        sector[33] = 0x80;
         LittleEndian::write(&mut sector[504..], seahash::hash(sector[..504]));
         assert_eq!(DiskHeader::decode(sector), Err(Error::UnknownChecksumAlgorithm));
     }
