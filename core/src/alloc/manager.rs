@@ -127,7 +127,7 @@ impl Manager {
     ///
     /// This loads the state page and other things from a vdev driver `driver`. If it fails, an
     /// error is returned.
-    fn open(driver: vdev::Driver) -> Result<Manager, Error> {
+    pub fn open(driver: vdev::Driver) -> Result<Manager, Error> {
         // Load the state block.
         let state_block::StateBlock { state, config } =
             state_block::StateBlock::decode(&driver.read(0), driver.header.checksum_algorithm);
@@ -149,7 +149,7 @@ impl Manager {
     ///
     /// The algorithm works greedily by fitting as many pages as possible into the most recently
     /// used cluster.
-    pub fn alloc(&mut self, buf: disk::SectorBuf) -> Result<cache::Transacting<page::Pointer>, Error> {
+    pub fn alloc(&mut self, buf: disk::SectorBuf) -> Result<page::Pointer, Error> {
         // TODO: The variables are named things like `ptr`, which kinda contradicts the style of
         //       the rest of the code.
 
@@ -165,8 +165,8 @@ impl Manager {
         // Check if duplicate exists.
         if let Some(page) = self.dedup_table.dedup(buf, cksum) {
             debug!(self, "found duplicate page"; "page" => page);
-            // Deduplicate and simply use the already stored page. No transaction where required.
-            return Ok(cache::Transacting::no_transaction(page));
+            // Deduplicate and simply use the already stored page.
+            return Ok(page);
         }
 
         // Handle the case where compression is disabled.
@@ -174,7 +174,7 @@ impl Manager {
             // Pop a cluster from the freelist.
             let cluster = self.freelist_pop()?;
 
-            let ptr = page::Pointer {
+            let page = page::Pointer {
                 cluster: cluster,
                 offset: None,
                 checksum: cksum,
@@ -182,10 +182,13 @@ impl Manager {
 
             // Insert the page pointer into the deduplication table to allow future use as
             // duplicate.
-            self.dedup_table.insert(buf, ptr);
+            self.dedup_table.insert(buf, page);
 
-            // Write the cluster with the raw, uncompressed data, and return the transaction monad.
-            return Ok(cluster.then(self.cache.write(cluster, buf)).wrap(ptr));
+            // Write the cluster with the raw, uncompressed data.
+            self.cache.write(cluster, buf))?;
+
+            // Return the allocated pointer.
+            return Ok(page);
         }
 
         self.last_cluster.with(|x| if let Some(state) = x {
@@ -204,7 +207,7 @@ impl Manager {
 
                 // Check if we can compress the extended buffer into a single cluster.
                 if let Some(compressed) = self.compress(state.uncompressed) {
-                    let ptr = Ok(page::Pointer {
+                    let page = Ok(page::Pointer {
                         cluster: state.cluster,
                         // Calculate the offset into the decompressed buffer, where the page is
                         // stored.
@@ -214,11 +217,13 @@ impl Manager {
 
                     // Insert the page pointer into the deduplication table to allow future use as
                     // duplicate.
-                    self.dedup_table.insert(buf, ptr);
+                    self.dedup_table.insert(buf, page);
 
-                    // It succeeded! Write the compressed data into the cluster. Wrap the pointer
-                    // in the transaction and return it.
-                    return self.cache.write(state.cluster, compressed).wrap(ptr);
+                    // It succeeded! Write the compressed data into the cluster.
+                    self.cache.write(state.cluster, compressed)?;
+
+                    // Return the allocated pointer.
+                    return Ok(page);
                 }
             }
         });
@@ -229,7 +234,8 @@ impl Manager {
 
         // Pop the cluster from the freelist.
         let cluster = self.freelist_pop()?;
-        let ptr = if let Some(compressed) = self.compress(buf) {
+        // Attempt to compress the data.
+        let page = if let Some(compressed) = self.compress(buf) {
             trace!(self, "storing compressible page in cluster"; "cluster" => cluster);
 
             // We were able to compress the page to fit into the cluster. At first, compressing the
@@ -247,11 +253,14 @@ impl Manager {
             }));
 
             // Write the compressed data into the cluster.
-            cluster.then(self.cache.write(cluster, compressed)).wrap(page::Pointer {
+            self.cache.write(cluster, compressed))?;
+
+            // Return a pointer to the allocated page.
+            page::Pointer {
                 cluster: cluster,
                 offset: Some(0),
                 checksum: cksum,
-            })
+            }
         } else {
             trace!(self, "storing incompressible page in cluster"; "cluster" => cluster);
 
@@ -265,18 +274,21 @@ impl Manager {
             // (compressed) cluster comes in.
 
             // Write the data into the cluster, uncompressed.
-            cluster.then(self.cache.write(cluster, buf)).replace_inner(page::Pointer {
+            self.cache.write(cluster, buf);
+
+            // Return a pointer to the allocated (uncompressed) cluster.
+            (page::Pointer {
                 cluster: cluster,
                 offset: None,
                 checksum: cksum,
-            })
+            }
         };
 
         // Insert the page pointer into the deduplication table to allow future use as
         // duplicate.
-        self.dedup_table.insert(buf, ptr);
+        self.dedup_table.insert(buf, page);
 
-        Ok(ptr)
+        Ok(page)
     }
 
     /// Read/dereference a page.
@@ -317,6 +329,28 @@ impl Manager {
 
             Ok(ret)
         })
+    }
+
+    /// Set the superpage pointer.
+    pub fn set_superpage(&self, page: page::Pointer) -> Result<(), disk::Error> {
+        // Update the superpage pointer.
+        let old_superpage = self.state.superpage;
+        self.state.superpage = Some(page);
+        // Flush the state block.
+        self.flush_state_block()?;
+        // "Forget" the superpage if initialized. Forgetting in this case means clearing it from
+        // the cache. This can reduce memory significantly as the superpage is an extremely hot
+        // object, which is mutated on virtually every file system state change.
+        if let Some(old_superpage) = old_superpage {
+            self.forget(old_superpage);
+        }
+    }
+
+    /// Drop a sector from the cache.
+    pub fn forget(&self, page: page::Pointer) {
+        // TODO: This potentially forgets more than one pages (the whole cluster). Someone should
+        //       do something about it.
+        self.cache.forget(page.cluster)
     }
 
     /// Calculate the checksum of some buffer, based on the user configuration.
@@ -388,12 +422,9 @@ impl Manager {
 
     /// Flush the state block.
     ///
-    /// This flushes the state block (not to the disk, but to the cache), and returns the
-    /// transaction.
-    ///
     /// It takes a state in order to avoid re-acquiring the lock.
-    fn flush_state_block(&mut self, state: &state_block::State) -> cache::Transaction {
-        trace!(self, "flushing the state block to the cache");
+    fn flush_state_block(&mut self, state: &state_block::State) -> Result<(), disk::Error> {
+        trace!(self, "flushing the state block");
 
         // Do it, motherfucker.
         self.cache.write(self.driver.header.state_block_address, state_block::StateBlock {
@@ -403,16 +434,12 @@ impl Manager {
     }
 
     /// Pop from the freelist.
-    ///
-    /// The returned pointer is wrapped in a cache transaction, representing the operations done in
-    /// order to pop it.
-    fn freelist_pop(&mut self) -> Result<cache::Transacting<cluster::Pointer>, Error> {
+    fn freelist_pop(&mut self) -> Result<cluster::Pointer, Error> {
         trace!(self, "popping from freelist");
 
         if let Some(free) = self.free.pop() {
-            // We had a cluster in the free-cache. We can simply return this, no transactions are
-            // required.
-            Transacting::no_transaction(free)
+            // We had a cluster in the free-cache.
+            free
         } else {
             // We were unable to pop from the free-cache, so we must grab the next metacluster and
             // load it.
@@ -422,9 +449,8 @@ impl Manager {
             // Just in case that another thread have filled the free-cache while we were locking
             // the state, we will check if new clusters are in the free-cache.
             if Some(x) = self.free.pop() {
-                // We had a cluster in the free-cache. Again, we can simply return this, no
-                // transactions are required.
-                return Transacting::no_transaction(free)
+                // We had a cluster in the free-cache.
+                return free;
             }
 
             // Grab the next metacluster. If no other metacluster exists, we return an error.
@@ -458,9 +484,9 @@ impl Manager {
                     // Slide the window to the right.
                     window = &window[8..];
                     // Read the pointer.
-                    if let Some(ptr) = cluster::Pointer::from(LittleEndian::read(window)) {
+                    if let Some(cluster) = cluster::Pointer::from(LittleEndian::read(window)) {
                         // There was anohter pointer in the metacluster, push it to the free-cache.
-                        self.free.push(ptr)
+                        self.free.push(cluster)
                     } else {
                         // The pointer was a null pointer, so the metacluster is over.
                         break;
@@ -475,12 +501,15 @@ impl Manager {
             // Release the lock.
             drop(state)
             // Flush the state block to account for the changes.
-            self.flush_state_block().wrap(free)
+            self.flush_state_block();
+
+            // Return the popped cluster.
+            Ok(free)
         }
     }
 
     /// Push to the freelist.
-    fn freelist_push(&mut self, cluster: cluster::Pointer) -> cache::Transaction {
+    fn freelist_push(&mut self, cluster: cluster::Pointer) {
         trace!(self, "pushing to freelist"; "cluster" => cluster);
 
         self.free.push(cluster);
@@ -489,23 +518,22 @@ impl Manager {
     /// Flush the free-cache to the head metacluster.
     ///
     /// This clears the free-cache and writes it to the head metacluster.
-    fn flush_free(&self) -> Transacting<()> {
+    fn flush_free(&self) {
         /* TODO (buggy and incomplete)
         let state = self.state.lock();
-        let mut ret = Transacting::no_transaction();
-        let mut (ptr, cksum) = state.freelist_head.map_or(|x| (x.cluster, x.checksum), (0, 0));
+        let mut (cluster, cksum) = state.freelist_head.map_or(|x| (x.cluster, x.checksum), (0, 0));
 
         let mut buf = disk::SectorBuf::default();
         let mut window = 8 + cluster::POINTER_SIZE;
         while let Some(free) = self.free.pop() {
             if window == disk::SECTOR_SIZE {
                 LittleEndian::write(&mut buf, cksum);
-                LittleEndian::write(&mut buf[8..], ptr);
+                LittleEndian::write(&mut buf[8..], cluster);
 
-                ptr = free;
+                cluster = free;
                 cksum = self.checksum(buf);
 
-                ret = ret.then(self.cache.write(ptr, &buf));
+                self.cache.write(cluster, &buf)?;
 
                 window = 8 + cluster::POINTER_SIZE;
             } else {
@@ -515,19 +543,12 @@ impl Manager {
         }
 
         state.freelist_head = Some(FreelistHead {
-            cluster: ptr,
+            cluster: cluster,
             checksum: cksum,
         });
 
-        ret.then(self.flush_state_block())
+        self.flush_state_block()
         */
-    }
-}
-
-impl Drop for Manager {
-    fn drop(&mut self) {
-        // Flush the free-cache before exiting.
-        self.flush_free();
     }
 }
 
