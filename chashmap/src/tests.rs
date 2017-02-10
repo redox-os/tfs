@@ -277,6 +277,43 @@ fn clear() {
     assert_eq!(m.get(&2), None);
 }
 
+#[test]
+fn clear_with_filter() {
+    let m = CHashMap::new();
+    assert!(m.insert(1, 2).is_none());
+    assert!(m.insert(2, 4).is_none());
+    assert_eq!(m.len(), 2);
+
+    m.filter(|_, _| false);
+
+    assert!(m.is_empty());
+    assert_eq!(m.len(), 0);
+
+    assert_eq!(m.get(&1), None);
+    assert_eq!(m.get(&2), None);
+}
+
+#[test]
+fn filter() {
+    let m = CHashMap::new();
+    m.insert(1, 8);
+    m.insert(2, 9);
+    m.insert(3, 4);
+    m.insert(4, 7);
+    m.insert(5, 2);
+    m.insert(6, 5);
+    m.insert(7, 2);
+    m.insert(8, 3);
+
+    m.filter(|key, val| key & 1 == 0 && val & 1 == 1);
+
+    assert_eq!(m.len(), 4);
+
+    for (key, val) in m {
+        assert_eq!(key & 1, 0);
+        assert_eq!(val & 1, 1);
+    }
+}
 
 thread_local! { static DROP_VECTOR: RefCell<Vec<isize>> = RefCell::new(Vec::new()) }
 

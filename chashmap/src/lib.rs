@@ -590,6 +590,8 @@ impl<K, V> CHashMap<K, V> {
     /// Get the number of entries in the hash table.
     ///
     /// This is entirely atomic, and will not acquire any locks.
+    ///
+    /// This is guaranteed to reflect the number of entries _at this particular moment.
     pub fn len(&self) -> usize {
         self.len.load(ORDERING)
     }
@@ -628,6 +630,40 @@ impl<K, V> CHashMap<K, V> {
             table: RwLock::new(mem::replace(&mut *lock, Table::new(DEFAULT_INITIAL_CAPACITY))),
             // Replace the length with 0 and use the old length.
             len: AtomicUsize::new(self.len.swap(0, ORDERING)),
+        }
+    }
+
+    /// Filter the map based on some predicate
+    ///
+    /// This tests every entry in the hash map by closure `predicate`. If it returns `true`, the
+    /// map will retain the entry. If not, the entry will be removed.
+    ///
+    /// This won't lock the table. This can be a major performance trade-off, as it means that it
+    /// must lock on every table entry. However, it won't block other operations of the table,
+    /// while filtering.
+    pub fn filter<F>(&self, predicate: F)
+        where F: Fn(&K, &V) -> bool {
+        // Acquire the read lock to the table.
+        let table = self.table.read();
+        // Run over every bucket and apply the filter.
+        for bucket in &table.buckets {
+            // Acquire the read lock, which we will upgrade if necessary.
+            // TODO: Use read lock and upgrade later.
+            let mut lock = bucket.write();
+            // Skip the free buckets.
+            // TODO: Fold the `if` into the `match` when the borrowck gets smarter.
+            if match *lock {
+                Bucket::Contains(ref key, ref val) => !predicate(key, val),
+                _ => false,
+            } {
+                // Predicate didn't match. Set the bucket to removed.
+                *lock = Bucket::Removed;
+                // Decrement the length to account for the removed bucket.
+                // TODO: Can we somehow bundle these up to reduce the overhead of atomic
+                //       operations? Storing in a local variable and then subtracting causes
+                //       issues with consistency.
+                self.len.fetch_sub(1, ORDERING);
+            }
         }
     }
 }
