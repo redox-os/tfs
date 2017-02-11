@@ -493,6 +493,9 @@ impl Manager {
                     }
                 }
 
+                // Drop the old metacluster from the cache.
+                self.cache.forget(old_head)?;
+
                 // We return the old head metacluster, and will use it as the popped free cluster.
                 // Mein gott, dis is incredibly convinient. *sniff*
                 old_head
