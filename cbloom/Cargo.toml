@@ -1,5 +1,5 @@
 [package]
-name = "bloom-filter"
+name = "cbloom"
 version = "0.1.0"
 authors = ["ticki <Ticki@users.noreply.github.com>"]
 description = "Concurrent implementation of Bloom filters."
