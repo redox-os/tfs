@@ -1,0 +1,10 @@
+[package]
+name = "bloom-filter"
+version = "0.1.0"
+authors = ["ticki <Ticki@users.noreply.github.com>"]
+description = "Concurrent implementation of Bloom filters."
+repository = "https://github.com/ticki/tfs"
+documentation = "https://docs.rs/bloom-filter"
+license = "MIT"
+keywords = ["bloom", "concurrent", "set", "filter", "garbage-collection"]
+exclude = ["target", "Cargo.lock"]
