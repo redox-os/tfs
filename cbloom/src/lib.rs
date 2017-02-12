@@ -8,6 +8,7 @@
 
 #![feature(integer_atomics)]
 
+use std::cmp;
 use std::sync::atomic::{self, AtomicU64};
 
 /// The atomic ordering used throughout the crate.
@@ -61,14 +62,17 @@ impl Filter {
     /// `expected_elements` number of elements) of hash functions.
     pub fn new(bytes: usize, expected_elements: usize) -> Filter {
         // The number of hashers are calculated by multiplying the bits per element by ln(2), which
-        // we approximate through multiplying by an integer, then shifting.
-        Filter::with_size_and_hashers(bytes, (bytes / expected_elements * 45426) >> 16)
+        // we approximate through multiplying by an integer, then shifting. To make things more
+        // precise, we add 0x8000 to round the shift.
+        Filter::with_size_and_hashers(bytes, (bytes / expected_elements * 45426 + 0x8000) >> 16)
     }
 
     /// Create a new Bloom filter with some number of bytes and hashers.
     ///
     /// This creates a Bloom filter with at least `bytes` bytes of internal data and `hashers`
     /// number of hash functions.
+    ///
+    /// If `hashers` is 0, it will be rounded to 1.
     pub fn with_size_and_hashers(bytes: usize, hashers: usize) -> Filter {
         // Convert `bytes` to number of `u64`s, and ceil to avoid case where the output is 0.
         let len = (bytes + 7) / 8;
@@ -80,7 +84,8 @@ impl Filter {
 
         Filter {
             bits: vec,
-            hashers: hashers,
+            // Set hashers to 1, if it is 0, as there must be at least one hash function.
+            hashers: cmp::max(hashers, 1),
         }
     }
 
@@ -162,6 +167,25 @@ mod tests {
         for i in 14..60 {
             assert!(!filter.maybe_contains(!i));
         }
+    }
+
+    #[test]
+    fn clear() {
+        let filter = Filter::new(400, 4);
+        filter.insert(3);
+        filter.insert(5);
+        filter.insert(7);
+        filter.insert(13);
+
+        filter.clear();
+
+        assert!(!filter.maybe_contains(0));
+        assert!(!filter.maybe_contains(1));
+        assert!(!filter.maybe_contains(2));
+        assert!(!filter.maybe_contains(3));
+        assert!(!filter.maybe_contains(5));
+        assert!(!filter.maybe_contains(7));
+        assert!(!filter.maybe_contains(13));
     }
 
     #[test]

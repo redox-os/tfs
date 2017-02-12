@@ -58,9 +58,7 @@ O(1) recursive copies
     updated segment needs copy.
 Guaranteed atomicity
     The system will never enter an inconsistent state (unless there is hardware
-    failure), meaning that unexpected power-off at worst results in a 4 KiB
-    space leak. The system is never damaged by such shutdowns. The space can be
-    recovered easily by running the GC command.
+    failure), meaning that unexpected power-off won't ever damage the system.
 Improved caching
     TFS puts a lot of effort into caching the disk to speed up disk accesses.
     It uses machine learning to learn patterns and predict future uses to
