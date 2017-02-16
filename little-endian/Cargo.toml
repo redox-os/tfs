@@ -1,0 +1,10 @@
+[package]
+name = "little-endian"
+version = "0.1.0"
+authors = ["ticki <Ticki@users.noreply.github.com>"]
+description = "Encoding and decoding of little-endian format."
+repository = "https://github.com/ticki/tfs"
+documentation = "https://docs.rs/little-endian"
+license = "MIT"
+keywords = ["bit", "binary", "encode", "endian", "byteorder"]
+exclude = ["target", "Cargo.lock"]
