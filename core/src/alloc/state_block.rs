@@ -92,7 +92,7 @@ impl StateBlock {
     /// Parse the binary representation of a state block.
     fn decode(buf: &disk::SectorBuf, checksum_algorithm: header::ChecksumAlgorithm) -> Result<StateBlock, Error> {
         // Make sure that the checksum of the state block matches the 8 byte field in the start.
-        let expected = LittleEndian::read(&buf);
+        let expected = little_endian::read(&buf);
         let found = checksum_algorithm.hash(&buf[8..]);
         if expected != found {
             return Err(Error::ChecksumMismatch {
@@ -104,17 +104,17 @@ impl StateBlock {
         Ok(StateBlock {
             config: Config {
                 // Load the compression algorithm config field.
-                compression_algorithm: CompressionAlgorithm::try_from(LittleEndian::read(buf[8..]))?,
+                compression_algorithm: CompressionAlgorithm::try_from(little_endian::read(buf[8..]))?,
             },
             state: State {
                 // Load the superpage pointer.
-                superpage: page::Pointer::new(LittleEndian::read(buf[16..])),
+                superpage: page::Pointer::new(little_endian::read(buf[16..])),
                 // Construct the freelist head metadata. If the pointer is 0, we return `None`.
-                freelist_head: cluster::Pointer::new(LittleEndian::read(&buf[32..])).map(|freelist_head| {
+                freelist_head: cluster::Pointer::new(little_endian::read(&buf[32..])).map(|freelist_head| {
                     FreelistHead {
                         cluster: freelist_head,
                         // Load the checksum of the freelist head.
-                        checksum: LittleEndian::read(&buf[40..]),
+                        checksum: little_endian::read(&buf[40..]),
                     }
                 }),
             },
@@ -127,23 +127,23 @@ impl StateBlock {
         let mut buf = disk::SectorBuf::default();
 
         // Write the compression algorithm.
-        LittleEndian::write(&mut buf[8..], self.config.compression_algorithm as u16);
+        little_endian::write(&mut buf[8..], self.config.compression_algorithm as u16);
         // Write the superpage pointer. If no superpage is initialized, we simply write a null
         // pointer.
-        LittleEndian::write(&mut buf[16..], self.state.superpage.map_or(0, |x| x.into()));
+        little_endian::write(&mut buf[16..], self.state.superpage.map_or(0, |x| x.into()));
 
         if let Some(freelist_head) = self.state.freelist_head {
             // Write the freelist head pointer.
-            LittleEndian::write(&mut buf[32..], freelist_head.cluster);
+            little_endian::write(&mut buf[32..], freelist_head.cluster);
             // Write the checksum of the freelist head.
-            LittleEndian::write(&mut buf[40..], freelist_head.checksum);
+            little_endian::write(&mut buf[40..], freelist_head.checksum);
         }
         // If the free list was empty, both the checksum, and pointer are zero, which matching the
         // buffer's current state.
 
         // Calculate and store the checksum.
         let cksum = checksum_algorithm.hash(&buf[8..]);
-        LittleEndian::write(&mut buf, cksum);
+        little_endian::write(&mut buf, cksum);
 
         buf
     }
@@ -178,12 +178,12 @@ mod tests {
 
         block.config.compression_algorithm = CompressionAlgorithm::Identity;
         sector[9] = 0;
-        LittleEndian::write(&mut sector, seahash::hash(sector[8..]));
+        little_endian::write(&mut sector, seahash::hash(sector[8..]));
         assert_eq!(sector, block.encode());
 
         block.state.superpage = 29;
         sector[16] = 29;
-        LittleEndian::write(&mut sector, seahash::hash(sector[8..]));
+        little_endian::write(&mut sector, seahash::hash(sector[8..]));
         assert_eq!(sector, block.encode());
 
         block.state.freelist_head = Some(FreelistHead {
@@ -192,7 +192,7 @@ mod tests {
         });
         sector[32] = 22;
         sector[40] = 2;
-        LittleEndian::write(&mut sector, seahash::hash(sector[8..]));
+        little_endian::write(&mut sector, seahash::hash(sector[8..]));
         assert_eq!(sector, block.encode());
     }
 

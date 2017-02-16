@@ -473,18 +473,18 @@ impl Manager {
 
                 // Replace the checksum of the head metacluster with the checksum of the chained
                 // metacluster, which will soon be the head metacluster.
-                head.checksum = LittleEndian::read(buf);
+                head.checksum = little_endian::read(buf);
                 // We'll initialize a window iterating over the pointers in this metacluster.
                 let mut window = &buf[8..];
                 // The first pointer points to the chained metacluster.
-                let old_head = mem::replace(&mut head.cluster, cluster::Pointer::from(LittleEndian::read(window)));
+                let old_head = mem::replace(&mut head.cluster, cluster::Pointer::from(little_endian::read(window)));
 
                 // The rest are free.
                 while window.len() >= 8 {
                     // Slide the window to the right.
                     window = &window[8..];
                     // Read the pointer.
-                    if let Some(cluster) = cluster::Pointer::from(LittleEndian::read(window)) {
+                    if let Some(cluster) = cluster::Pointer::from(little_endian::read(window)) {
                         // There was anohter pointer in the metacluster, push it to the free-cache.
                         self.free.push(cluster)
                     } else {
@@ -530,8 +530,8 @@ impl Manager {
         let mut window = 8 + cluster::POINTER_SIZE;
         while let Some(free) = self.free.pop() {
             if window == disk::SECTOR_SIZE {
-                LittleEndian::write(&mut buf, cksum);
-                LittleEndian::write(&mut buf[8..], cluster);
+                little_endian::write(&mut buf, cksum);
+                little_endian::write(&mut buf[8..], cluster);
 
                 cluster = free;
                 cksum = self.checksum(buf);
@@ -540,7 +540,7 @@ impl Manager {
 
                 window = 8 + cluster::POINTER_SIZE;
             } else {
-                LittleEndian::write(&mut buf[window..], x);
+                little_endian::write(&mut buf[window..], x);
                 window += cluster::POINTER_SIZE;
             }
         }

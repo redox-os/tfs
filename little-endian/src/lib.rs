@@ -5,8 +5,22 @@
 
 #![feature(i128_type)]
 
-/// An integer type.
-trait Integer {
+/// Write some integer into a buffer.
+///
+/// This writes `from` into `buf` through the methods in `T`'s implementation of `Encode`.
+pub fn write<T: Encode>(buf: &mut [u8], from: T) {
+    from.write_le(buf)
+}
+
+/// Read an integer from a buffer.
+///
+/// This writes `buf` through the methods in `T`'s implementation of `Encode`.
+pub fn read<T: Encode>(buf: &[u8]) -> T {
+    T::read_le(buf)
+}
+
+/// An encodable/decodable type.
+pub trait Encode {
     /// Read an integer in little-endian format.
     ///
     /// This reads the first n bytes (depending on the size of `Self`) of `from` in little-endian
@@ -27,7 +41,7 @@ trait Integer {
     fn write_le(self, into: &mut [u8]);
 }
 
-impl Integer for u8 {
+impl Encode for u8 {
     fn read_le(from: &[u8]) -> u8 {
         from[0]
     }
@@ -37,7 +51,7 @@ impl Integer for u8 {
     }
 }
 
-impl Integer for u16 {
+impl Encode for u16 {
     fn read_le(from: &[u8]) -> u16 {
         from[0] as u16
             | (from[1] as u16) << 8
@@ -49,7 +63,7 @@ impl Integer for u16 {
     }
 }
 
-impl Integer for u32 {
+impl Encode for u32 {
     fn read_le(from: &[u8]) -> u32 {
         from[0] as u32
             | (from[1] as u32) << 8
@@ -65,7 +79,7 @@ impl Integer for u32 {
     }
 }
 
-impl Integer for u64 {
+impl Encode for u64 {
     fn read_le(from: &[u8]) -> u64 {
         from[0] as u64
             | (from[1] as u64) << 8
@@ -89,7 +103,7 @@ impl Integer for u64 {
     }
 }
 
-impl Integer for u128 {
+impl Encode for u128 {
     fn read_le(from: &[u8]) -> u128 {
         from[0] as u128
             | (from[1] as u128) << 8
@@ -135,17 +149,17 @@ mod tests {
     use std::{ops, mem, fmt};
 
     fn test_int<T>(n: T)
-        where T: Integer + Copy + PartialEq + ops::BitAnd<T, Output = T> + ops::Shr<T, Output = T>
+        where T: Encode + Copy + PartialEq + ops::BitAnd<T, Output = T> + ops::Shr<T, Output = T>
             + From<u8> + fmt::Debug {
         let len = mem::size_of::<T>();
         let mut buf = [0; 32];
-        n.write_le(&mut buf);
+        write(&mut buf, n);
 
         for i in 0..len {
             assert_eq!(T::from(buf[i]), (n >> T::from(i as u8 * 8)) & T::from(0xFF));
         }
 
-        assert_eq!(T::read_le(&buf), n);
+        assert_eq!(read(&buf), n);
     }
 
     #[test]

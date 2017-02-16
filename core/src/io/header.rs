@@ -162,11 +162,11 @@ enum Vdev {
     /// A mirror.
     ///
     /// This mirrors the lower half of the disk to the higher half to provide ability to heal data.
-    Mirror,
+    Mirror = 0,
     /// SPECK encryption.
     ///
     /// This encrypts the disk with the SPECK cipher.
-    Speck,
+    Speck = 1,
 }
 
 struct Uid(u128);
@@ -174,6 +174,16 @@ struct Uid(u128);
 impl Into<u128> for Uid {
     fn into(self) -> u128 {
         self.0
+    }
+}
+
+impl little_endian::Encode for Uid {
+    fn read_le(from: &[u8]) -> Uid {
+        Uid(little_endian::read(from))
+    }
+
+    fn write_le(self, into: &mut [u8]) {
+        little_endian::write(into, self.0);
     }
 }
 
@@ -232,7 +242,7 @@ impl DiskHeader {
         let magic_number = MagicNumber::try_from(&buf[..8])?;
 
         // Load the version number.
-        let version_number = LittleEndian::read(&buf[8..]);
+        let version_number = little_endian::read(&buf[8..]);
         // Check if the version is compatible. If the higher half doesn't match, there were a
         // breaking change. Otherwise, if the version number is lower or equal to the current
         // version, it's compatible.
@@ -245,14 +255,14 @@ impl DiskHeader {
         //
         // This section stores a single number, namely the UID. The UID is supposed to be a secret
         // ID used throughout the code, such as seed for hashing and salt for key stretching.
-        let uid = Uid(LittleEndian::read(&buf[16..]))
+        let uid = Uid(little_endian::read(&buf[16..]))
 
         // # Configuration
         //
         // This section stores certain configuration options needs to properly load the disk header.
 
         // Load the checksum algorithm config field.
-        let checksum_algorithm = ChecksumAlgorithm::try_from(LittleEndian::read(buf[32..]))?;
+        let checksum_algorithm = ChecksumAlgorithm::try_from(little_endian::read(buf[32..]))?;
 
         // # State section
         //
@@ -280,7 +290,7 @@ impl DiskHeader {
                 return Err(Error::MissingTerminatorVdev);
             }
             // Read the 16-bit label.
-            let label = LittleEndian::read(vdev_section);
+            let label = little_endian::read(vdev_section);
             // Cut off the two bytes of the label in the remaining slice (this won't ever panic due
             // to the `if` statement above).
             vdev_stack = &vdev_stack[2..];
@@ -302,7 +312,7 @@ impl DiskHeader {
         }
 
         // Make sure that the checksum of the disk header matches the 8 byte field in the end.
-        let expected = LittleEndian::read(&buf[128..]);
+        let expected = little_endian::read(&buf[128..]);
         let found = ret.checksum_algorithm.hash(&buf[..128]);
         if expected != found {
             return Err(Error::ChecksumMismatch {
@@ -330,13 +340,13 @@ impl DiskHeader {
         buf[..8].copy_from_slice(self.magic_number.into());
 
         // Write the current version number.
-        LittleEndian::write(&mut buf[8..], VERSION_NUMBER);
+        little_endian::write(&mut buf[8..], VERSION_NUMBER);
 
         // Write the UID.
-        LittleEndian::write(&mut buf[16..], self.uid.into());
+        little_endian::write(&mut buf[16..], self.uid);
 
         // Write the checksum algorithm.
-        LittleEndian::write(&mut buf[32..], self.checksum_algorithm as u16);
+        little_endian::write(&mut buf[32..], self.checksum_algorithm as u16);
 
         // Write the state flag.
         buf[48] = self.state_flag as u8;
@@ -345,8 +355,8 @@ impl DiskHeader {
         let mut vdev_section = &mut buf[64..504];
         for vdev in self.vdev_stack {
             match vdev {
-                Vdev::Mirror => LittleEndian::write(vdev_section, 1u16),
-                Vdev::Speck => LittleEndian::write(vdev_section, 2u16),
+                Vdev::Mirror => little_endian::write(vdev_section, 1u16),
+                Vdev::Speck => little_endian::write(vdev_section, 2u16),
             }
 
             // Slide on.
@@ -357,7 +367,7 @@ impl DiskHeader {
         vdev_section[1] = 0;
 
         // Calculate and write the checksum.
-        LittleEndian::write(&mut buf[504..], self.checksum_algorithm.hash(&buf[..128]));
+        little_endian::write(&mut buf[504..], self.checksum_algorithm.hash(&buf[..128]));
 
         buf
     }
@@ -401,19 +411,19 @@ mod tests {
         header.magic_number = MagicNumber::PartialCompatibility;
         sector[7] = b'~';
 
-        LittleEndian::write(&mut sector[504..], seahash::hash(sector[..504]));
+        little_endian::write(&mut sector[504..], seahash::hash(sector[..504]));
         assert_eq!(sector, header.encode());
 
         header.version_number |= 0xFF;
         sector[8] = 0xFF;
 
-        LittleEndian::write(&mut sector[504..], seahash::hash(sector[..504]));
+        little_endian::write(&mut sector[504..], seahash::hash(sector[..504]));
         assert_eq!(sector, header.encode());
 
         header.uid |= 0xFF;
         sector[16] = 0xFF;
 
-        LittleEndian::write(&mut sector[504..], seahash::hash(sector[..504]));
+        little_endian::write(&mut sector[504..], seahash::hash(sector[..504]));
         assert_eq!(sector, header.encode());
 
         // TODO: This is currently somewhat irrelevant as there is only one cksum algorithm. When a
@@ -421,13 +431,13 @@ mod tests {
         header.checksum = ChecksumAlgorithm::SeaHash;
         sector[32] = 1;
 
-        LittleEndian::write(&mut sector[504..], seahash::hash(sector[..504]));
+        little_endian::write(&mut sector[504..], seahash::hash(sector[..504]));
         assert_eq!(sector, header.encode());
 
         header.state_flag = StateFlag::Open;
         sector[48] = 1;
 
-        LittleEndian::write(&mut sector[504..], seahash::hash(sector[..504]));
+        little_endian::write(&mut sector[504..], seahash::hash(sector[..504]));
         assert_eq!(sector, header.encode());
 
         header.vdev_stack.push(Vdev::Speck {
@@ -437,13 +447,13 @@ mod tests {
         sector[66] = 0x55;
         sector[67] = 0x79;
 
-        LittleEndian::write(&mut sector[504..], seahash::hash(sector[..504]));
+        little_endian::write(&mut sector[504..], seahash::hash(sector[..504]));
         assert_eq!(sector, header.encode());
 
         header.vdev_stack.push(Vdev::Mirror);
         sector[82] = 1;
 
-        LittleEndian::write(&mut sector[504..], seahash::hash(sector[..504]));
+        little_endian::write(&mut sector[504..], seahash::hash(sector[..504]));
         assert_eq!(sector, header.encode());
     }
 
@@ -452,7 +462,7 @@ mod tests {
         let mut sector = DiskHeader::default().encode();
         sector[0] = b'A';
 
-        LittleEndian::write(&mut sector[504..], seahash::hash(sector[..504]));
+        little_endian::write(&mut sector[504..], seahash::hash(sector[..504]));
         assert_eq!(DiskHeader::decode(sector), Err(Error::UnknownFormat));
     }
 
@@ -461,7 +471,7 @@ mod tests {
         let mut sector = DiskHeader::default().encode();
         sector[11] = 0xFF;
 
-        LittleEndian::write(&mut sector[504..], seahash::hash(sector[..504]));
+        little_endian::write(&mut sector[504..], seahash::hash(sector[..504]));
         assert_eq!(DiskHeader::decode(sector), Err(Error::IncompatibleVersion));
     }
 
@@ -469,7 +479,7 @@ mod tests {
     fn unknown_state_flag() {
         let mut sector = DiskHeader::default().encode();
         sector[48] = 6;
-        LittleEndian::write(&mut sector[504..], seahash::hash(sector[..504]));
+        little_endian::write(&mut sector[504..], seahash::hash(sector[..504]));
         assert_eq!(DiskHeader::decode(sector), Err(Error::UnknownStateFlag));
     }
 
@@ -478,10 +488,10 @@ mod tests {
         let mut sector = DiskHeader::default().encode();
 
         sector[32] = 0;
-        LittleEndian::write(&mut sector[504..], seahash::hash(sector[..504]));
+        little_endian::write(&mut sector[504..], seahash::hash(sector[..504]));
         assert_eq!(DiskHeader::decode(sector), Err(Error::InvalidChecksumAlgorithm));
         sector[33] = 0x80;
-        LittleEndian::write(&mut sector[504..], seahash::hash(sector[..504]));
+        little_endian::write(&mut sector[504..], seahash::hash(sector[..504]));
         assert_eq!(DiskHeader::decode(sector), Err(Error::UnknownChecksumAlgorithm));
     }
 
@@ -489,19 +499,19 @@ mod tests {
     fn wrong_vdev() {
         let mut sector = DiskHeader::default().encode();
         sector[64] = 0xFF;
-        LittleEndian::write(&mut sector[504..], seahash::hash(sector[..504]));
+        little_endian::write(&mut sector[504..], seahash::hash(sector[..504]));
         assert_eq!(DiskHeader::decode(sector), Err(Error::InvalidVdev));
         sector[65] = 0xFF;
-        LittleEndian::write(&mut sector[504..], seahash::hash(sector[..504]));
+        little_endian::write(&mut sector[504..], seahash::hash(sector[..504]));
         assert_eq!(DiskHeader::decode(sector), Err(Error::UnknownVdev));
 
         sector = DiskHeader::default().encode();
         sector[64] = 1;
         sector[66] = 0xFF;
-        LittleEndian::write(&mut sector[504..], seahash::hash(sector[..504]));
+        little_endian::write(&mut sector[504..], seahash::hash(sector[..504]));
         assert_eq!(DiskHeader::decode(sector), Err(Error::InvalidVdev));
         sector[67] = 0xFF;
-        LittleEndian::write(&mut sector[504..], seahash::hash(sector[..504]));
+        little_endian::write(&mut sector[504..], seahash::hash(sector[..504]));
         assert_eq!(DiskHeader::decode(sector), Err(Error::UnknownVdev));
     }
 

@@ -14,5 +14,5 @@ pub fn derive_key(salt: u128, password: &[u8]) -> u128 {
     scrypt::scrypt(password, seed, &scrypt::ScryptParams::new(SCRYPT_LOG_N, SCRYPT_R, SCRYPT_P), &mut key);
 
     // Read the scrypt-generated pad into a single integer, used as the key for the cipher.
-    LittleEndian::read(key)
+    little_endian::read(key)
 }
