@@ -108,9 +108,9 @@ impl StateBlock {
             },
             state: State {
                 // Load the superpage pointer.
-                superpage: page::Pointer::new(little_endian::read(buf[16..])),
+                superpage: little_endian::read(buf[16..]),
                 // Construct the freelist head metadata. If the pointer is 0, we return `None`.
-                freelist_head: cluster::Pointer::new(little_endian::read(&buf[32..])).map(|freelist_head| {
+                freelist_head: little_endian::read(&buf[32..]).map(|freelist_head| {
                     FreelistHead {
                         cluster: freelist_head,
                         // Load the checksum of the freelist head.
@@ -130,7 +130,7 @@ impl StateBlock {
         little_endian::write(&mut buf[8..], self.config.compression_algorithm as u16);
         // Write the superpage pointer. If no superpage is initialized, we simply write a null
         // pointer.
-        little_endian::write(&mut buf[16..], self.state.superpage.map_or(0, |x| x.into()));
+        little_endian::write(&mut buf[16..], self.state.superpage);
 
         if let Some(freelist_head) = self.state.freelist_head {
             // Write the freelist head pointer.

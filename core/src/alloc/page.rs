@@ -16,6 +16,9 @@
 //! cluster by compressing the pages together. To avoid storing metadata in the clusters, the
 //! pointers contains this information instead.
 
+/// The size (in bytes) of a serialized page pointer.
+const POINTER_SIZE: usize = 16;
+
 /// A page pointer.
 ///
 /// Page pointer contains information necessary for read and write pages on the disk. They're
@@ -61,35 +64,55 @@ struct Pointer {
     checksum: u32,
 }
 
-impl Into<u128> for Pointer {
-    fn into(self) -> u128 {
-        // Shift and OR to set up the integer as described in the specification.
-        self.cluster as u128
-            | (self.offset.map_or(!0, |offset| {
-                // TODO: Consider removing this.
-                assert_ne!(offset, !0, "The page offset cannot be 0xFFFFFFFF, as it collides with \
-                           the serialization of `PageOffset::Uncompressed`.");
+impl little_endian::Encode for Pointer {
+    fn write_le(self, into: &mut [u8]) {
+        // The lowest bytes are dedicated to the cluster pointer.
+        little_endian::write(into, self.cluster);
+        // Next, we write the page offset, which is needed for knowing where the pointer points to
+        // in the decompressed stream.
+        little_endian::write(&mut into[cluster::POINTER_SIZE..], if let Some(offset) = self.offset {
+            // TODO: Consider removing this.
+            assert_ne!(offset, !0, "The page offset cannot be 0xFFFFFFFF, as it collides with \
+                       the serialization of the uncompressed page offset.");
 
-                offset
-            }) as u128) << 64
-            | (self.checksum as u128) << 64 << 32
+            offset
+        } else {
+            // When there is no offset, we use `!0` to represent that it is uncompressed.
+            !0
+        });
+        // Lastly, we write the checksum.
+        little_endian::write(&mut into[cluster::POINTER_SIZE..][32..], self.checksum);
     }
 }
 
-impl From<u128> for Pointer {
-    fn from(from: u128) -> Pointer {
-        Pointer {
-            // The 64 lowest bits are used for the cluster.
-            cluster: from as u64,
+impl little_endian::Decode for Option<Pointer> {
+    fn read_le(from: &[u8]) -> Option<Pointer> {
+        // The 64 lowest bits are used for the cluster.
+        little_endian::read(from).map(|cluster| Pointer {
+            cluster: cluster,
             // Next the page offset is stored.
-            offset: match (from >> 64) as u32 {
+            offset: match little_endian::read(&from[cluster::POINTER_SIZE..]) {
                 // Again, the trap value !0 represents an uncompressed cluster.
                 0xFFFFFFFF => None,
                 // This cluster was compressed and the offset is `n`.
                 n => Some(n),
             },
             // The highest 32 bit then store the checksum.
-            checksum: (from >> 64 >> 32) as u32,
+            checksum: little_endian::read(&from[cluster::POINTER_SIZE..][32..]),
+        })
+    }
+}
+
+impl little_endian::Encode for Option<Pointer> {
+    fn write_le(self, into: &mut [u8]) {
+        if let Some(ptr) = self {
+            // Simply write the inner pointer into the buffer.
+            little_endian::write(into, self)
+        } else {
+            // Zero the first `POINTER_SIZE` bytes of the buffer (null pointer).
+            for i in &mut into[..POINTER_SIZE] {
+                *i = 0;
+            }
         }
     }
 }
@@ -99,7 +122,9 @@ mod tests {
     use super::*;
 
     fn assert_inverse(x: u128) {
-        assert_eq!(Pointer::from(x).into(), x);
+        let mut buf = [0; 16];
+        little_endian::write(&mut buf, x);
+        assert_eq!(little_endian::read(&buf), x);
     }
 
     #[test]
@@ -121,13 +146,15 @@ mod tests {
 
     #[test]
     fn fixed_values() {
-        let mut ptr = Pointer::from(0x0101010101010101FEFFFFFFCCCCCCCC);
+        let mut ptr = Pointer::from(&[0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0xFE, 0xFF,
+                                      0xFF, 0xFF, 0xCC, 0xCC, 0xCC, 0xCC]);
 
         assert_eq!(ptr.cluster, 0x0101010101010101);
         assert_eq!(ptr.offset, Some(!0 - 1));
         assert_eq!(ptr.checksum, 0xCCCCCCCC);
 
-        ptr = Pointer::from(0x0101010101010101FFFFFFFFCCCCCCCC);
+        ptr = Pointer::from(&[0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0xFF, 0xFF, 0xFF,
+                              0xFF, 0xCC, 0xCC, 0xCC, 0xCC]);
 
         assert_eq!(ptr.cluster, 0x0101010101010101);
         assert_eq!(ptr.offset, None);

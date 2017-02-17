@@ -477,14 +477,14 @@ impl Manager {
                 // We'll initialize a window iterating over the pointers in this metacluster.
                 let mut window = &buf[8..];
                 // The first pointer points to the chained metacluster.
-                let old_head = mem::replace(&mut head.cluster, cluster::Pointer::from(little_endian::read(window)));
+                let old_head = mem::replace(&mut head.cluster, little_endian::read(window));
 
                 // The rest are free.
                 while window.len() >= 8 {
                     // Slide the window to the right.
                     window = &window[8..];
                     // Read the pointer.
-                    if let Some(cluster) = cluster::Pointer::from(little_endian::read(window)) {
+                    if let Some(cluster) = little_endian::read(window) {
                         // There was anohter pointer in the metacluster, push it to the free-cache.
                         self.free.push(cluster)
                     } else {

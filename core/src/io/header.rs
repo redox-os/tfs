@@ -171,12 +171,6 @@ enum Vdev {
 
 struct Uid(u128);
 
-impl Into<u128> for Uid {
-    fn into(self) -> u128 {
-        self.0
-    }
-}
-
 impl little_endian::Encode for Uid {
     fn read_le(from: &[u8]) -> Uid {
         Uid(little_endian::read(from))
@@ -255,7 +249,7 @@ impl DiskHeader {
         //
         // This section stores a single number, namely the UID. The UID is supposed to be a secret
         // ID used throughout the code, such as seed for hashing and salt for key stretching.
-        let uid = Uid(little_endian::read(&buf[16..]))
+        let uid = little_endian::read(&buf[16..])
 
         // # Configuration
         //

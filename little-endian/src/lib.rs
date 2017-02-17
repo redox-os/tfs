@@ -5,18 +5,18 @@
 
 #![feature(i128_type)]
 
-/// Write some integer into a buffer.
-///
-/// This writes `from` into `buf` through the methods in `T`'s implementation of `Encode`.
-pub fn write<T: Encode>(buf: &mut [u8], from: T) {
-    from.write_le(buf)
-}
-
 /// Read an integer from a buffer.
 ///
 /// This writes `buf` through the methods in `T`'s implementation of `Decode`.
 pub fn read<T: Decode>(buf: &[u8]) -> T {
     T::read_le(buf)
+}
+
+/// Write some integer into a buffer.
+///
+/// This writes `from` into `buf` through the methods in `T`'s implementation of `Encode`.
+pub fn write<T: Encode>(buf: &mut [u8], from: T) {
+    from.write_le(buf)
 }
 
 /// An encodable type.
