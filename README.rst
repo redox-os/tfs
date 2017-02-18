@@ -32,11 +32,11 @@ Design goals
 
 TFS is designed with the following goals in mind:
 
-Modular
-    TFS is highly modular, and is divided into various independent components.
-    A significant amount of TFS's components are simply disk drivers without
-    any semantic information. This makes TFS relatively straight-forward to
-    implement.
+Concurrent
+    TFS contains very few locks and aims to be as suitable for multithreaded
+    systems as possible. It makes use of multiple truly concurrent structures
+    to manage the data, and scales linearly by the number of cores. **This is
+    perhaps the most important feature of TFS.**
 Full-disk compression
     TFS is the first file system to incorporate complete full-disk compression
     through a scheme we call RACC (random-access cluster compression). This
@@ -64,10 +64,6 @@ Improved caching
     It uses machine learning to learn patterns and predict future uses to
     reduce the number of cache misses. TFS also compresses the in-memory cache,
     reducing the amount of memory needed.
-Concurrent
-    TFS contains very few locks and aims to be as suitable for multithreaded
-    systems as possible. It makes use of multiple truly concurrent structures
-    to manage the data, and scales linearly by the number of cores.
 Better file monitoring
     CoW is very suitable for high-performance, scalable file monitoring, but
     unfortunately only few file systems incorporate that. TFS is one of those.
@@ -80,6 +76,10 @@ Full coverage testing
     bugs.
 SSD friendly
     TFS tries to avoid the write limitation in SSD by repositioning dead sectors.
+Improved garbage collection
+    TFS uses Bloom filters for space-efficient and fast garbage collection. TFS
+    allows the FS garbage collector to run in the background without blocking
+    the rest of the file system.
 
 FAQ
 ---
@@ -91,10 +91,12 @@ Why do you use SPECK as the default cipher?
     part of the TFS design, and truely portable AES implementations without
     side-channel attacks is harder than many think (particularly, there are
     issues with `SubBytes` in most portable implementations). SPECK does not
-    have this issue, and can be implemented portably with minimal effort.
+    have this issue, and can thus be securely implemented portably with minimal
+    effort.
 How similar is TFS and ZFS?
     Not that similar, actually. The share many of the basic ideas, but
-    otherwise they are essentially unconnected.
+    otherwise they are essentially unconnected. But ZFS' design has shaped TFS'
+    a lot.
 Is TFS Redox-only?
     No, and it was never planned to be Redox-only.
 How does whole-disk compression work?
@@ -111,6 +113,10 @@ Why is ZMicro so slow? Will it affect the performance of TFS?
     anywhere near the performance of ZMicro, because disk operations are
     inheritly slow, and when put in perspective, the performance of the
     compression is really unimportant.
+Extendible hashing or B+ trees?
+    Neither. TFS uses a combination of trees and hash tables: Nested hash
+    tables. The idea is that instead of reallocating, a new subtable is
+    created in the bucket.
 
 Resources on design
 -------------------
