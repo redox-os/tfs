@@ -1,0 +1,10 @@
+[package]
+name = "type-name"
+version = "0.1.0"
+authors = ["ticki <Ticki@users.noreply.github.com>"]
+description = "A safe wrapper around the type_name API."
+repository = "https://github.com/ticki/tfs"
+documentation = "https://docs.rs/type-name"
+license = "MIT"
+keywords = ["type", "types", "type-name", "dynamic", "debug"]
+exclude = ["target", "Cargo.lock"]
