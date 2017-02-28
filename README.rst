@@ -123,14 +123,14 @@ Resources on design
 
 I've written a number of pieces on the design of TFS:
 
-- [SeaHash: Explained](http://ticki.github.io/blog/seahash-explained/). This
+- `SeaHash: Explained <http://ticki.github.io/blog/seahash-explained/>`_. This
   describes the default checksum algorithm designed for TFS.
-- [On Random-Access Compression](http://ticki.github.io/blog/ternary-as-a-prediction-residue-code/).
+- `On Random-Access Compression <http://ticki.github.io/blog/ternary-as-a-prediction-residue-code/>`_.
   This post describes the algorithm used for random-access compression.
-- [Ternary as a prediction residue code](http://ticki.github.io/blog/ternary-as-a-prediction-residue-code/). The
+- `Ternary as a prediction residue code <http://ticki.github.io/blog/ternary-as-a-prediction-residue-code/>`_. The
   use of this is related to creating a good adaptive (headerless) entropy
   compressor.
-- [How LZ4 works](http://ticki.github.io/blog/how-lz4-works/). This describes
+- `How LZ4 works <http://ticki.github.io/blog/how-lz4-works/>`_. This describes
   how the LZ4 compression algorithm works.
 
 Specification
@@ -139,6 +139,7 @@ Specification
 The full specification can be found in `specification.tex`. To render it, install `pdflatex`, and run
 
 .. code:: bash
+
     pdflatex --shell-escape specification.tex
 
 Then open the file named `specification.pdf`.
