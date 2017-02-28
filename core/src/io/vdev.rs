@@ -119,13 +119,9 @@ quick_error! {
 /// It reads the vdev setup from the disk header, which it fetches from the disk. Then it builds
 /// the vdev stack, which it stores.
 ///
-/// Note that it doesn't subtract the disk header sector, since the null sector can still be used
-/// as a trap value, but reading or writing from it results in panic.
-struct Driver {
-    /// The log exitpoint.
-    ///
-    /// This is boxed to allow dynamic reconfiguration.
-    pub log: Box<slog::Drain>,
+/// Importantly, this subtracts the disk header, so sector `0` is really sector `1` of the inner
+/// disk.
+struct Driver<D> {
     /// The cached disk header.
     ///
     /// The disk header contains various very basic information about the disk and how to interact
@@ -136,79 +132,61 @@ struct Driver {
     pub header: header::DiskHeader,
     /// The inner disk.
     // TODO: Remove this vtable?
-    disk: Box<Disk>,
+    disk: D,
 }
 
-
-impl Driver {
+impl<D: Disk> Driver<D> {
     /// Set up the driver from some disk.
     ///
     /// This will load the disk header from `disk` and construct the driver. It will also set the
     /// disk to be in open state. If any encryption is enabled, `password` will be used as the
     /// password.
-    fn open<T: Disk>(log: L, disk: T, password: &[u8]) -> Result<Driver, Error> {
-        info!(log, "initializing the driver");
+    ///
+    /// The result is wrapped in a future, which represents the operation, such that it can be
+    /// executed asynchronously.
+    fn open<D: Disk>(disk: D, password: &[u8]) -> impl Future<Driver, Error> {
+        info!(disk, "initializing the driver");
 
         // Read the disk header.
-        debug!(log, "read the disk header");
-        let mut header = DiskHeader::decode(disk.read(0)?)?;
-
-        match header.state_flag {
-            // Throw a warning if it wasn't properly shut down.
-            StateFlag::Open => {
-                warn!(log, "the disk's state flag is still open, likely wasn't properly shut down \
-                            last time; beware of data loss");
-            },
-            // The state inconsistent; throw an error.
-            StateFlag::Inconsistent => return Err(OpenError::InconsistentState),
-        }
-
-        // Set the state flag to open.
-        debug!(log, "setting the state flag to 'open'");
-        header.state_flag = StateFlag::Open;
-
-        // Update the version.
-        debug!(log, "updating the version number";
-               "old version" => header.version_number,
-               "new version" => VERSION_NUMBER);
-        header.version_number = VERSION_NUMBER;
-
-        // Construct the vdev stack.
-        let mut disk = Box::new(disk);
-        for i in header.vdev_stack {
-            disk = match i {
-                Vdev::Mirror => {
-                    debug!(log, "appending a mirror vdev");
-
-                    Box::new(Mirror {
-                        inner: disk,
-                    })
-                },
-                Vdev::Speck { salt } => {
-                    debug!(log, "appending a SPECK encryption vdev"; "salt" => salt);
-
-                    Box::new(Speck {
-                        inner: disk,
-                        // Derive the key.
-                        key: crypto::derive(salt, password),
-                    })
-                },
+        debug!(disk, "read the disk header");
+        disk.read(0).and_then(|header| {
+            let driver = Driver {
+                header: DiskHeader::decode(header)?,
+                disk: disk,
             };
-        }
 
-        let driver = Driver {
-            header: header,
-            disk: disk,
-        };
+            match driver.header.state_flag {
+                // Throw a warning if it wasn't properly shut down.
+                StateFlag::Open => {
+                    warn!(driver, "the disk's state flag is still open, likely wasn't properly shut down \
+                                   last time; beware of data loss");
+                },
+                // The state inconsistent; throw an error.
+                StateFlag::Inconsistent => return Err(OpenError::InconsistentState),
+            }
 
-        // Flush the updated header.
-        driver.flush_header()?;
+            // Set the state flag to open.
+            debug!(driver, "setting the state flag to 'open'");
+            driver.header.state_flag = StateFlag::Open;
 
-        Ok(driver)
+            // Update the version.
+            debug!(driver, "updating the version number";
+                   "old version" => header.version_number,
+                   "new version" => VERSION_NUMBER);
+            driver.header.version_number = VERSION_NUMBER;
+
+            Ok(driver)
+        }).and_then(|driver| {
+            // Flush the updated header.
+            driver.flush_header().map(|_| driver)
+        })
     }
 
     /// Flush the stored disk header.
-    fn flush_header(&mut self) -> Result<(), disk::Error> {
+    ///
+    /// This returns a future, which carries this operation. First when the future has completed,
+    /// the operations has been executed.
+    fn flush_header(&self) -> impl Future<(), Error> {
         debug!(self, "flushing the disk header");
 
         // Encode and write it to the disk.
@@ -224,40 +202,72 @@ impl Drop for Driver {
         debug!(self, "setting state flag to 'closed'");
         self.header.state_flag = StateFlag::Closed;
         // Flush the header.
-        self.flush_header();
+        self.flush_header().wait().unwrap();
     }
 }
 
-delegate_log!(Driver.log);
+delegate_log!(Driver.disk);
 
-impl Disk for Driver {
+impl<D: Disk> Disk for Driver<D> {
+    type ReadFuture  = D::ReadFuture;
+    type WriteFuture = D::WriteFuture;
+
     fn number_of_sectors(&self) -> Sector {
-        self.disk.number_of_sectors()
+        // Start out with the raw number of sectors. We subtract one to cut of the disk header.
+        let mut sectors = self.disk.number_of_sectors() - 1;
+
+        // Go over the vdev stack.
+        for vdev in self.header.vdev_stack {
+            match vdev {
+                // Mirrors divide the disk in half, as the higher half must mirror the lower.
+                header::Vdev::Mirror => sectors /= 2,
+                header::Vdev::Speck => (),
+            }
+        }
     }
 
-    fn write(&mut self, sector: Sector, buf: &[u8]) -> Result<(), Error> {
-        trace!(self, "writing data"; "sector" => sector);
+    fn read(&self, sector: Sector) -> D::ReadFuture {
+        // We start out by reading the inner buffer. We subtract one to cut of the disk header.
+        let mut buf = self.disk.read(sector + 1);
 
-        // Make sure it doesn't write to the null sector reserved for the disk header.
-        assert_ne!(sector, 0, "Trying to write to the null sector.");
+        // Go over the vdev stack.
+        for vdev in self.header.vdev_stack {
+            // Note that it is very important that `sector` gets updated to account for changed
+            // address space.
 
-        // Forward the call to the inner disk. We subtract 1 to account for the disk header.
-        self.disk.write(sector, buf)
-    }
-    fn read_to(&mut self, sector: Sector, buf: &mut [u8]) -> Result<(), Error> {
-        trace!(self, "reading data"; "sector" => sector);
-
-        // Make sure it doesn't write to the null sector reserved for the disk header.
-        assert_ne!(sector, 0, "Trying to read from the null sector.");
-
-        // Forward the call to the inner disk. We subtract 1 to account for the disk header.
-        self.disk.read_to(sector - 1, buf)
+            match vdev {
+                // TODO
+                header::Vdev::Speck => unimplemented!(),
+                _ => (),
+            }
+        }
     }
 
-    fn heal(&mut self, sector: disk::Sector) -> Result<(), disk::Error> {
-        debug!(self, "healing possibly corrupt sector"; "sector" => sector);
+    fn write(&self, sector: Sector, buf: &SectorBuf) -> D::WriteFuture {
+        // Start a vector to hold the writes. This allows us to rewrite the write operations for
+        // every vdev transformation.
+        let mut writes = vec![(sector, buf)];
 
-        // Forward the call to the inner disk. We subtract 1 to account for the disk header.
-        self.disk.heal(sector - 1)
+        // Go over the vdev stack.
+        for vdev in self.header.vdev_stack {
+            match vdev {
+                header::Vdev::Mirror => {
+                    let prev_writes = mem::replace(writes, Vec::with_capacity(writes.len() * 2));
+                    for (sector, buf) in prev_writes {
+                        // Write the lower half.
+                        writes.push((sector, buf));
+                        // Write the upper half.
+                        writes.push((2 * sector, buf));
+                    }
+                },
+                // TODO
+                header::Vdev::Speck => unimplemented!(),
+            }
+        }
+
+        // Execute all the writes, we've buffered.
+        future::join_all(writes.into_iter().map(|(sector, buf)| {
+            self.disk.write(sector, buf)
+        }))
     }
 }

@@ -34,13 +34,13 @@ impl Cache {
     /// Write a sector.
     ///
     /// This writes `buf` into sector `sector`. If it fails, the error is returned.
-    fn write(&self, sector: disk::Sector, buf: disk::SectorBuf) -> Result<(), disk::Error> {
+    fn write(&self, sector: disk::Sector, buf: disk::SectorBuf) -> impl Future<(), disk::Error> {
         debug!(self, "writing sector"; "sector" => sector);
 
-        // Write the data to the disk.
-        self.driver.write(sector, &buf)?;
         // Then insert it into the cache.
         self.sectors.insert(sector, buf);
+        // Write the data to the disk.
+        self.driver.write(sector, &buf)
     }
 
     /// Drop a sector from the cache.
@@ -60,50 +60,32 @@ impl Cache {
     ///
     /// If an I/O operation fails, the error is returned. Otherwise, the return value of `map` is
     /// returned.
-    fn read_then<F, T, E>(&self, sector: disk::Sector, map: F) -> Result<T, E>
+    fn read_then<F, T, E>(&self, sector: disk::Sector, map: F) -> impl Future<T, E>
         where F: Fn(&disk::SectorBuf) -> Result<T, E>,
               E: From<disk::Error> {
         debug!(self, "reading sector"; "sector" => sector);
 
         // Check if the sector is already available in the cache.
-        if let Some(accessor) = self.sectors.find(sector) {
+        if let Some(accessor) = self.sectors.get(sector) {
             // Yup, we found the sector in the cache.
             trace!(self, "cache hit; reading from cache"; "sector" => sector);
 
             // Touch the sector.
             self.tracker.touch(sector);
 
-            handler(accessor)
+            map(accessor)
         } else {
             trace!(self, "cache miss; reading from disk"; "sector" => sector);
 
-            // Occupy the block in the map, so that we can later on insert it.
-            let block = self.sectors.get_mut_or(sector, Block::default());
             // Insert the sector into the cache tracker.
-            self.tracker.touch(sector);
+            self.tracker.touch(sector):
 
             // Fetch the data from the disk.
-            self.disk.read_to(sector, &mut block.data)?;
-
-            // Handle the block through the closure, and resolve respective verification issues.
-            match map(&block.data) {
-                Err(err) => {
-                    // The verifier failed, so the data is likely corrupt. We'll try to recover the
-                    // data through the vdev's redundancy, then we read it again and see if it passes
-                    // verification this time. If not, healing failed, and we cannot do anything about
-                    // it.
-                    warn!(self, "data verification failed"; "sector" => sector, "error" => err);
-
-                    // Attempt to heal the sector.
-                    self.disk.heal(sector)?;
-                    // Read it again.
-                    self.disk.read_to(sector, &mut block.data)?;
-
-                    // Try to verify it once again.
-                    map(&block.data)
-                },
-                x => x,
-            }
+            self.disk.read(sector).map(|buf| {
+                // Insert the read data into the hash table.
+                self.sectors.get_mut_or(sector, buf)
+            }).and_then(map)
+            // TODO: If the above failed, try to recover the data through the vdev redundancy.
         }
     }
 

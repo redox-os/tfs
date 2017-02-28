@@ -4,14 +4,13 @@ struct State {
 }
 
 impl Fs {
-    pub fn alloc(&self, buf: disk::SectorBuf, description: &'static str) -> Result<page::Pointer, Error> {
+    pub fn alloc(&self, buf: disk::SectorBuf, description: &'static str) -> impl Future<page::Pointer, Error> {
         debug!(self, "allocating buffer", "description" => description);
 
         // Allocate the buffer.
-        let ptr = self.alloc.alloc(buf)?;
+        let ptr = self.alloc.alloc(buf).map(|ptr| self.visit(ptr))
         // Insert it into the set of currently reachable pages in case that it is reachable right
         // now.
-        self.visit(ptr);
 
         Ok(ptr)
     }

@@ -218,6 +218,10 @@ struct DiskHeader {
     ///
     /// What it means is that there are two mirrors, yielding 1:4 redundancy, and then encryption,
     /// which means that the data will be encrypted after mirrored.
+    ///
+    /// (Note that it is bad practice to encrypt after mirroring, this is just for the purpose of
+    /// an example. You ought to place the `Encryption` before adding redundancy, as redundancy can
+    /// expose certain properties of the data, which is supposed to be hidden.)
     vdev_stack: Vec<Vdev>,
 }
 

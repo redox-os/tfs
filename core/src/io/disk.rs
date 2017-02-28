@@ -6,8 +6,7 @@
 
 /// A disk sector number.
 type Sector = usize;
-
-#[derive(Default)]
+/// A buffer of sector size.
 type SectorBuf = [u8; disk::SECTOR_SIZE];
 
 /// The logical sector size.
@@ -45,35 +44,22 @@ quick_error! {
 /// A storage device.
 ///
 /// This trait acts similarly to `std::io::{Read, Write}`, but is designed specifically for disks.
-trait Disk {
+trait Disk: slog::Drain {
+    /// The future returned from read operations.
+    type ReadFuture: Future<Item = SectorBuf, Error = Error>;
+    /// The future returned from write operations.
+    type WriteFuture: Future<Item = (), Error = Error>;
+
     /// The number of sectors on this disk.
     fn number_of_sectors(&self) -> Sector;
-
+    /// Read data from the disk directly into the return value.
+    ///
+    /// The result is wrapped in a future, which represents the operation, such that it can be
+    /// done asynchronously.
+    fn read(&self, sector: Sector) -> Self::ReadFuture;
     /// Write data to the disk.
     ///
-    /// This writes buffer `buf` into sector `sector`.
-    fn write(&mut self, sector: Sector, buf: &SectorBuf) -> Result<(), Error>;
-
-    /// Read data from the disk into some buffer.
-    ///
-    /// This reads sector `sector` into buffer `buf`.
-    fn read_to(&self, sector: Sector, buf: &mut SectorBuf) -> Result<(), Error>;
-    /// Read data from the disk directly into the return value.
-    #[inline]
-    fn read(&self, sector: Sector) -> Result<SectorBuf, Error> {
-        // Make a temporary buffer.
-        let mut buf = SectorBuf::default();
-        // Read the data into the buffer.
-        self.read_to(sector, &mut buf)?;
-
-        Ok(buf)
-    }
-
-    /// Heal a sector.
-    ///
-    /// This heals sector `sector`, through the provided redundancy, if possible.
-    ///
-    /// Note that after it is called, it is still necessary to check if the healed sector is valid,
-    /// as there is a certain probability that the recovery will fail.
-    fn heal(&mut self, sector: disk::Sector) -> Result<(), disk::Error>;
+    /// This returns a future, which carries the operation writing `buf` into sector `sector`.
+    /// First when the future has completed, the operation has been executed.
+    fn write(&self, sector: Sector, buf: &SectorBuf) -> Self::WriteFuture;
 }

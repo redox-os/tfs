@@ -37,6 +37,9 @@ Concurrent
     systems as possible. It makes use of multiple truly concurrent structures
     to manage the data, and scales linearly by the number of cores. **This is
     perhaps the most important feature of TFS.**
+Asynchronous
+    TFS is asynchronous: operations can happen independently, and writes and
+    reads from the disk need not to block.
 Full-disk compression
     TFS is the first file system to incorporate complete full-disk compression
     through a scheme we call RACC (random-access cluster compression). This
