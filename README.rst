@@ -55,7 +55,7 @@ O(1) recursive copies
     Like some other file systems, TFS can do recursive copies in constant time,
     but there is an unique addition: TFS doesn't copy even after it is mutated.
     How? It maintains segments of the file individually, such that only the
-    updated segment needs copy.
+    updated segment needs copying.
 Guaranteed atomicity
     The system will never enter an inconsistent state (unless there is hardware
     failure), meaning that unexpected power-off won't ever damage the system.
@@ -111,7 +111,7 @@ Why is ZMicro so slow? Will it affect the performance of TFS?
     than 50% of the allocations with ZMicro will only write one sector, as
     opposed to 3. Secondly, no matter how fast your disk is, it will not get
     anywhere near the performance of ZMicro, because disk operations are
-    inheritly slow, and when put in perspective, the performance of the
+    inherently slow, and when put in perspective, the performance of the
     compression is really unimportant.
 Extendible hashing or B+ trees?
     Neither. TFS uses a combination of trees and hash tables: Nested hash
@@ -125,7 +125,7 @@ I've written a number of pieces on the design of TFS:
 
 - `SeaHash: Explained <http://ticki.github.io/blog/seahash-explained/>`_. This
   describes the default checksum algorithm designed for TFS.
-- `On Random-Access Compression <http://ticki.github.io/blog/ternary-as-a-prediction-residue-code/>`_.
+- `On Random-Access Compression <http://ticki.github.io/blog/on-random-access-compression/>`_.
   This post describes the algorithm used for random-access compression.
 - `Ternary as a prediction residue code <http://ticki.github.io/blog/ternary-as-a-prediction-residue-code/>`_. The
   use of this is related to creating a good adaptive (headerless) entropy
