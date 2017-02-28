@@ -139,6 +139,7 @@ Specification
 The full specification can be found in `specification.tex`. To render it, install `pdflatex`, and run
 
 .. code:: bash
+
     pdflatex --shell-escape specification.tex
 
 Then open the file named `specification.pdf`.
