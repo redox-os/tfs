@@ -135,6 +135,9 @@ I've written a number of pieces on the design of TFS:
   compressor.
 - `How LZ4 works <http://ticki.github.io/blog/how-lz4-works/>`_. This describes
   how the LZ4 compression algorithm works.
+- `Collision Resolution with Nested Hash Tables <https://ticki.github.io/blog/collision-resolution-with-nested-hash-tables/>`_.
+  This describes the method of nested hash tables we use for the directory
+  structure.
 
 Specification
 -------------
