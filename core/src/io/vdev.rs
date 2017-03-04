@@ -7,90 +7,10 @@
 //! sector enumeration or provide some redundancy, encryption, or similar features working on disk
 //! level.
 //!
-//! The term vdev has a equivalent meaning in the context of ZFS.
+//! The term vdev has equivalent meaning in the context of ZFS.
 //!
 //! It is important that vdevs keep the invariants of the inner vdev. In particular, it may not
-//! leave to an inconsistent state, unless the inner vdev does. Futhermore, the disk header must be
-//! in sector 0, unmodified.
-
-/// A mirror vdev.
-///
-/// This takes the inner disk, divides it into two equally sized parts, and makes the higher half a
-/// mirror (exact copy) of the higher part.
-///
-/// It allows you to potentially heal a sector, by fetching its copy in the higher part.
-struct Mirror {
-    /// The inner disk.
-    inner: Box<Disk>,
-}
-
-impl Disk for Mirror {
-    fn number_of_sectors(&self) -> disk::Sector {
-        // Simply half the number of sectors of the inner disk.
-        self.inner.number_of_sectors() >> 1
-    }
-
-    fn write(sector: Sector, buf: &SectorBuf) -> Result<(), disk::Error> {
-        // Write to the main sector.
-        self.inner.write(sector, buf)?;
-        // Write the mirror sector. If the disk was somehow suspended before the mirror sector was
-        // written, both halfs of the inner disk are still consistent, so it won't leave to an
-        // inconsistent state, despite being out of sync.
-        self.inner.write(sector + self.number_of_sectors(), buf)
-    }
-    fn read_to(sector: Sector, buf: &mut SectorBuf) -> Result<(), disk::Error> {
-        // Forward the call to the inner.
-        self.inner.read_to(sector, buf)
-    }
-
-    fn heal(&mut self, sector: disk::Sector) -> Result<(), disk::Error> {
-        // Get the size of half of the inner disk.
-        let half = self.number_of_sectors();
-        // Check if in bound.
-        if sector < half {
-            // Read the mirrored sector from the higher half, in the hope that it isn't corrupt as
-            // well, then write the mirror sector the healing sector.
-            self.write(sector, self.read(sector + half)?)
-        } else {
-            // Out of bounds sector; throw an error.
-            Err(disk::Error::OutOfBounds {
-                sector: sector,
-            })
-        }
-    }
-}
-
-/// A SPECK encryption vdev.
-///
-/// This encrypts the inner disk with the SPECK cipher in XEX mode and Scrypt key stretching.
-struct Speck {
-    /// The inner disk.
-    inner: Box<Disk>,
-    /// The key to encrypt with.
-    ///
-    /// This is derived through Scrypt.
-    key: u128,
-}
-
-impl Disk for Speck {
-    fn number_of_sectors(&self) -> disk::Sector {
-        // Simply forward the call to the inner disk.
-        self.inner.number_of_sectors()
-    }
-
-    fn write(sector: Sector, buf: &SectorBuf) -> Result<(), disk::Error> {
-        // TODO: implement. NB: Dont' encrypt it if it is the header!
-        unimplemented!()
-    }
-    fn read_to(sector: Sector, buf: &mut SectorBuf) -> Result<(), disk::Error> {
-        unimplemented!()
-    }
-
-    fn heal(&mut self, sector: disk::Sector) -> Result<(), disk::Error> {
-        // Simply forward the call to the inner disk.
-        self.inner.heal(sector)
-    }
-}
+//! leave to an inconsistent state, unless the inner vdev does.
 
 quick_error! {
     /// A driver loading error.

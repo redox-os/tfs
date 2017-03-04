@@ -46,7 +46,10 @@ quick_error! {
 /// This trait acts similarly to `std::io::{Read, Write}`, but is designed specifically for disks.
 trait Disk: slog::Drain {
     /// The future returned from read operations.
-    type ReadFuture: Future<Item = SectorBuf, Error = Error>;
+    ///
+    /// In order to avoid performance hit of copying a whole sector around, we allocate the data on
+    /// the heap through `Box<T>`.
+    type ReadFuture: Future<Item = Box<SectorBuf>, Error = Error>;
     /// The future returned from write operations.
     type WriteFuture: Future<Item = (), Error = Error>;
 

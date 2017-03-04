@@ -15,7 +15,7 @@ struct Cache {
     /// used in the near future.
     tracker: mlcr::ConcurrentCache,
     /// The sector-number-to-data block map.
-    sectors: CHashMap<disk::Sector, disk::SectorBuf>,
+    sectors: AtomicHashMap<disk::Sector, disk::SectorBuf>,
 }
 
 impl From<vdev::Driver> for Cache {
@@ -34,7 +34,7 @@ impl Cache {
     /// Write a sector.
     ///
     /// This writes `buf` into sector `sector`. If it fails, the error is returned.
-    fn write(&self, sector: disk::Sector, buf: disk::SectorBuf) -> impl Future<(), disk::Error> {
+    fn write(&self, sector: disk::Sector, buf: Box<disk::SectorBuf>) -> impl Future<(), disk::Error> {
         debug!(self, "writing sector"; "sector" => sector);
 
         // Then insert it into the cache.
@@ -61,7 +61,7 @@ impl Cache {
     /// If an I/O operation fails, the error is returned. Otherwise, the return value of `map` is
     /// returned.
     fn read_then<F, T, E>(&self, sector: disk::Sector, map: F) -> impl Future<T, E>
-        where F: Fn(&disk::SectorBuf) -> Result<T, E>,
+        where F: Fn(atomic_hash_map::Value<disk::SectorBuf>) -> Result<T, E>,
               E: From<disk::Error> {
         debug!(self, "reading sector"; "sector" => sector);
 

@@ -161,7 +161,7 @@ impl Manager {
     /// # Panics
     ///
     /// This will panic if compression is disabled.
-    fn alloc_in_new_cluster(&self, buf: disk::SectorBuf, last_cluster: &mut Option<ClusterState>, cksum: u32)
+    fn alloc_in_new_cluster(&self, buf: Box<disk::SectorBuf>, last_cluster: &mut Option<ClusterState>, cksum: u32)
         -> impl Future<page::Pointer, Error> {
         // Pop the cluster from the freelist, then attempt to compress the data.
         self.freelist_pop().and_then(|cluster| if let Some(compressed) = self.compress(buf) {
@@ -218,7 +218,7 @@ impl Manager {
     /// This **does not** update the deduplication table, nor does it try to look for duplicates.
     /// Futhermore, some of the logic acts eagerly, and thus it ought to be wrapped in
     /// `future::lazy()` to avoid it being out of sequence.
-    fn alloc_eager(&self, buf: disk::SectorBuf, cksum: u32)
+    fn alloc_eager(&self, buf: Box<disk::SectorBuf>, cksum: u32)
         -> impl Future<page::Pointer, Error> {
         // Handle the case where compression is disabled.
         if self.config.compression_algorithm == CompressionAlgorithm::Identity {
@@ -273,7 +273,7 @@ impl Manager {
     ///
     /// The algorithm works greedily by fitting as many pages as possible into the most recently
     /// used cluster.
-    pub fn alloc(&mut self, buf: disk::SectorBuf) -> impl Future<page::Pointer, Error> {
+    pub fn alloc(&mut self, buf: Box<disk::SectorBuf>) -> impl Future<page::Pointer, Error> {
         // TODO: The variables are named things like `ptr`, which kinda contradicts the style of
         //       the rest of the code.
 
@@ -307,7 +307,8 @@ impl Manager {
     /// Read/dereference a page.
     ///
     /// This reads page `page` and returns the content, wrapped in a future.
-    pub fn read(&self, page: page::Pointer) -> impl Future<disk::SectorBuf, Error> {
+    pub fn read(&self, page: page::Pointer)
+        -> impl Future<atomic_hash_map::Value<disk::SectorBuf>, Error> {
         trace!(self, "reading page"; "page" => page);
 
         // Read the cluster in which the page is stored.
@@ -363,7 +364,7 @@ impl Manager {
     /// # Panics
     ///
     /// This will panic if compression is disabled.
-    fn compress(&self, input: &[u8]) -> Option<disk::SectorBuf> {
+    fn compress(&self, input: &[u8]) -> Option<Box<disk::SectorBuf>> {
         trace!(self, "compressing data");
 
         // Compress the input.
@@ -398,7 +399,7 @@ impl Manager {
     /// # Panics
     ///
     /// This will panic if compression is disabled.
-    fn decompress(&self, cluster: disk::SectorBuf) -> Result<Box<[u8]>, Error> {
+    fn decompress(&self, cluster: Box<disk::SectorBuf>) -> Result<Box<[u8]>, Error> {
         trace!(self, "decompressing data");
 
         // Find the padding delimited (i.e. the last non-zero byte).
