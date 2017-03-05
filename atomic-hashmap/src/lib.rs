@@ -1,164 +1,120 @@
-trait Atomic {
-    fn load(&self) -> Self;
-    fn store(&self, new: Self);
-    fn swap(&self, new: Self) -> Self;
-    fn cas(&self, old: Self, new: Self) -> Result<(), Self>;
-}
+mod sponge;
 
-trait Key: Atomic {
-    const EMPTY: Self;
-    const HEADSTONE: Self;
-    const BLOCKED: Self;
-
-    fn store_if_free(&self, new: Self) -> Result<(), Self> {
-        // If it went changed in between here, it wouldn't be a problem, since it will never go
-        // from headstone to empty, so if it's set to blocked, its failure will never leave a gap
-        // in the cluster (empty key).
-        self.cas(EMPTY, new).or_else(|_| self.cas(HEADSTONE, new))
-    }
-}
-
-enum TableResult<T> {
-    Ok(T),
-    ReallocationWanted(T),
-    ReallocationNeeded,
-}
-
-impl Reallocation {
-    fn succeeded(self) -> bool {
-        match self {
-            Reallocation::Needed => false,
-            Reallocation::Needed => false,
-        }
-    }
-}
-
-struct Bucket<K, V> {
+struct Pair<K, V> {
     key: K,
     val: V,
 }
 
-struct RawTable<K, V> {
-    buckets: Vec<(K, V)>,
-    /// An upper-bound on the number of valid keys in the table.
-    keys: AtomicUsize,
+enum Node<K, V> {
+    Leaf(Pair<K, V>),
+    Branch(Table<K, V>),
 }
 
-impl<K: Key + Hash, V: Atomic> RawTable<K, V> {
-    fn hash(&self, key: &K) -> usize {
-        unimplemented!();
+impl Atomic<Node<K, V>> {
+    /// Insert a key-value pair into the node without squeezing the sponge.
+    fn insert(&self, pair: Pair<K, V>) -> Option<V> {
+        // If the entry was empty, we will set it to a leaf with our key-value pair. If not, we
+        // will handle the respective cases manually.
+        match self.cas(None, Some(Owned::new(Node::Leaf(pair))), ORDERING) {
+            // We successfully set an empty entry to the new key-value pair. This of course implies
+            // that the key didn't exist at the time.
+            Ok(()) => None,
+            Err(Some(node)) => node.insert(pair, sponge),
+            // It is not possible to get `Err(None)` as that was the value we are CAS-ing against.
+            Err(None) => unreachable!(),
+        }
     }
+}
 
-    fn remove(&self, key: K) -> bool {
-        let hash = self.hash(&key);
+impl Shared<Node<K, V>> {
+    fn insert(&self, pair: Pair<K, V>, sponge: Sponge) -> Option<V> {
+        match self {
+            // There is a branch table. Insert the key-value pair into it.
+            Node::Branch(table) => table.insert(pair, sponge),
+            // The key exists, so we can simply update the value.
+            Node::Leaf(Pair { key }) if key == pair.key => Some(found_val.swap(val, ORDERING)),
+            // Another key exists at the position, so we need to extend the table with a branch,
+            // containing both entries.
+            Node::Leaf(mut new_pair) => {
+                // The reason we use recursion is that the entry could be deleted and another
+                // re-inserted on its place. While this in theory acts like a spin-lock, I doubt it
+                // will EVER run more than one time in the real world, as it would require the
+                // entry to be removed in another thread at the same time, while a new one being
+                // inserted (requiring a whole lookup!) in the meantime on the same very place. It
+                // is pretty damn unlikely, but it is needed for correctness nonetheless.
 
-        for hash in hash.. {
-            let bucket = &self.buckets[hash % self.buckets.len()];
-
-            if let Err(non_matching_key) = bucket.key.cas(key, K::HEADSTONE) {
-                if non_matching_key == K::EMPTY {
-                    // The cluster is delimited by an empty bucket, so we know there is no matching
-                    // key.
-                    return false;
+                // Create a table that contains both the key-value pair we're inserting and the one
+                // on the place, where we want to insert.
+                let new_table = Table::two_entries(pair, new_pair);
+                // We try to update the current entry to our table. The reason we use CAS is that
+                // we want to ensure that the entry was not changed in the meantime, so we compare
+                // to `new_pair`, which must be a leaf with the old key-value pair, as the epoch
+                // system ensures that it doesn't change while we have the reference (therefore
+                // there is no ABA problem here). So in essence, we check that our value is still
+                // the same as the original, and if it is we update it. If not, we must handle the
+                // new value, which could be anything else (e.g. another thread could have extended
+                // the leaf too because it is inserting the same pair).
+                match entry.cas(new_pair, Some(Owned::new(Node::Branch(new_table))), ORDERING) {
+                    // Our update went smooth, and we have extended the leaf to a branch,
+                    // meaning that there now is a subtable containing the two key-value pairs.
+                    Ok(()) => None,
+                    // Something else was inserted in the meantime, so we must re-do the
+                    // insertions.
+                    Err(Some(node)) => node.insert(pair, sponge),
+                    // The entry was removed, so we will again recurse to re-do.
+                    Err(None) => entry.insert(pair, sponge),
                 }
-            } else {
-                self.decrement_keys();
-
-                return true;
-            }
+            },
         }
     }
 
-    fn take(&self, key: K) -> Option<V> {
-        let hash = self.hash(&key);
-
-        for hash in hash.. {
-            let bucket = &self.buckets[hash % self.buckets.len()];
-
-            if let Err(non_matching_key) = bucket.key.cas(key, K::BLOCKED) {
-                if non_matching_key == K::EMPTY {
-                    // The cluster is delimited by an empty bucket, so we know there is no matching
-                    // key.
-                    return None;
-                }
-            } else {
-                let ret = bucket.val.load();
-                self.decrement_keys();
-                bucket.key.store(K::HEADSTONE);
-                return Some(ret);
-            }
-        }
-    }
-
-    /// Insert a **new** entry into the table.
-    ///
-    /// This inserts value `val` at key `key`. If an entry with key `key` already exists, the entry
-    /// will retain its value and not be updated.
-    fn insert_new(&self, key: K, val: V) -> TableResult<()> {
-        let hash = self.hash(&key);
-
-        let new_keys = self.increment_keys();
-        if new_keys > self.buckets.len() {
-            return TableResult::ReallocationNeeded;
-        }
-
-        for hash in hash.. {
-            let bucket = &self.buckets[hash % self.buckets.len()];
-
-            if bucket.key.load() == key {
-                self.decrement_keys();
-                break;
-            }
-
-            // TODO: Remember deduplicating when reallocating, since duplicates can happen if a key
-            //       which later becomes A is set to blocked, while another insertion of key A
-            //       happens.
-            if bucket.key.store_if_free(K::BLOCKED).is_ok() {
-                bucket.val.store(val);
-                bucket.key.store(key);
-                break;
-            }
-        }
-
-        if self.should_realloc(new_keys) {
-            TableResult::ReallocationWanted(())
-        } else {
-            TableResult::Ok(())
-        }
-    }
-
-    fn replace(&self, key: K, val: V) -> TableResult<Option<V>> {
-        let hash = self.hash(&key);
-
-        let new_keys = self.increment_keys();
-        if new_keys > self.buckets.len() {
-            return TableResult::ReallocationNeeded;
-        }
-
-        for hash in hash.. {
-            let bucket = &self.buckets[hash % self.buckets.len()];
-
-            if bucket.key.load() == key {
-                self.decrement_keys();
-                break;
-            }
-
-            if bucket.key.store_if_free(K::BLOCKED).is_ok() {
-                bucket.val.store(val);
-                bucket.key.store(key);
-                break;
-            }
-        }
-
-        if self.should_realloc(new_keys) {
-            TableResult::ReallocationWanted(())
-        } else {
-            TableResult::Ok(())
+    fn remove(&self, sponge: Sponge) -> Option<V> {
+        match self {
+            Some(Node::Branch(table)) => table.remove(key, sponge),
+            Some(node @ Node::Leaf(Pair { found_key, val })) if found_key == key
+                => match entry.cas(Some(node), None, ORDERING) {
+                Ok(()) => Some(val),
+                Err(None) => None,
+                // To solve the ABA problem, we're unfortunately forced to recurse/loop. As in
+                // `insert()`, this is theoretically a spin-lock, however it is very rare to run
+                // more than once, as it requires another thread to have removed the leaf and then
+                // inserted a new one in the short meantime spanning only a few CPU cycles.
+                Err(Some(node)) => node.remove(),
+            },
+            None | Some(Node::Leaf(..)) => None,
         }
     }
 }
 
-struct RawMap<K, V> {
-    new: epoch::Atomic<RawTable<K, V>>,
-    old: epoch::Atomic<RawTable<K, V>>,
+struct Table<K, V>  {
+    table: [Atomic<Node<K, V>>; 256],
 }
+
+impl Table<K, V> {
+    fn get(&self, key: K, sponge: Sponge) -> Option<Shared<V>> {
+        // Load the entry and handle the respective cases.
+        match self.table[sponge.squeeze()].load(ORDERING) {
+            // The entry was a leaf and the keys match, so we can return the entry's value.
+            Some(Node::Leaf(Pair { found_key, found_val })) if key == found_key => Some(found_val),
+            // The entry is a branch with another table, so we recurse and look up in said
+            // subtable.
+            Some(Node::Branch(table)) => table.get(pair, sponge),
+            // The entry is either a leaf but doesn't match, or is a null pointer, meaning there is
+            // no entry with the key.
+            Some(Node::Leaf(_)) | None => None,
+        }
+    }
+
+    fn remove(&self, key: K, sponge: Sponge) -> Option<V> {
+        // We squeeze the sponge to get the right entry of our table, in which we will potentially
+        // remove the key.
+        self.table[sponge.squeeze()].remove(key, sponge);
+    }
+
+    fn insert(&self, pair: Pair<K, V>, sponge: Sponge) -> Option<V> {
+        // We squeeze the sponge to get the right entry of our table, in which we will insert our
+        // key-value pair.
+        self.table[sponge.squeeze()].load(ORDERING).insert(pair, sponge)
+    }
+}
+
