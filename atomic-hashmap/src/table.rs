@@ -17,13 +17,14 @@ impl Atomic<Node<K, V>> {
             // We successfully set an empty entry to the new key-value pair. This of course implies
             // that the key didn't exist at the time.
             Ok(()) => None,
+            // A node was found, so we call `insert` on it.
             Err(Some(node)) => node.insert(pair, sponge),
             // It is not possible to get `Err(None)` as that was the value we are CAS-ing against.
             Err(None) => unreachable!(),
         }
     }
 
-    fn remove(&self, key: K, sponge: Sponge) -> Option<V> {
+    fn remove(&self, key: &K, sponge: Sponge) -> Option<V> {
         // Load the node and handle its cases.
         if let Some(node) = self.load(ORDERING) {
             // A node was found.
@@ -34,9 +35,15 @@ impl Atomic<Node<K, V>> {
         }
     }
 
-    fn take<F: Fn(K, V)>(&self, f: F) {
+    fn for_each<F: Fn(K, V)>(&self, f: F) {
+        if let Some(node) = i.load(ORDERING) {
+            node.for_each(f);
+        }
+    }
+
+    fn take_each<F: Fn(K, V)>(&self, f: F) {
         if let Some(node) = i.swap(Owned::new(None)) {
-            node.take(f);
+            node.take_each(f);
         }
     }
 }
@@ -83,7 +90,7 @@ impl Shared<Node<K, V>> {
         }
     }
 
-    fn remove(&self, key: K, sponge: Sponge) -> Option<V> {
+    fn remove(&self, key: &K, sponge: Sponge) -> Option<V> {
         match self {
             // There is a branch, so we must remove the key in the sub-table.
             Node::Branch(table) => table.remove(key, sponge),
@@ -108,10 +115,17 @@ impl Shared<Node<K, V>> {
         }
     }
 
-    fn take<F: Fn(K, V)>(&self, f: F) {
+    fn for_each<F: Fn(K, V)>(&self, f: F) {
         match self {
             Node::Leaf(Pair { key, val }) => f(key, val),
-            Node::Branch(table) => table.take(f),
+            Node::Branch(table) => table.for_each(f),
+        }
+    }
+
+    fn take_each<F: Fn(K, V)>(&self, f: F) {
+        match self {
+            Node::Leaf(Pair { key, val }) => f(key, val),
+            Node::Branch(table) => table.take_each(f),
         }
     }
 }
@@ -121,7 +135,7 @@ struct Table<K, V>  {
 }
 
 impl Table<K, V> {
-    fn get(&self, key: K, sponge: Sponge) -> Option<Shared<V>> {
+    fn get(&self, key: &K, sponge: Sponge) -> Option<Shared<V>> {
         // Load the entry and handle the respective cases.
         match self.table[sponge.squeeze()].load(ORDERING) {
             // The entry was a leaf and the keys match, so we can return the entry's value.
@@ -135,7 +149,7 @@ impl Table<K, V> {
         }
     }
 
-    fn remove(&self, key: K, sponge: Sponge) -> Option<V> {
+    fn remove(&self, key: &K, sponge: Sponge) -> Option<V> {
         // We squeeze the sponge to get the right entry of our table, in which we will potentially
         // remove the key.
         self.table[sponge.squeeze()].remove(key, sponge);
@@ -147,9 +161,9 @@ impl Table<K, V> {
         self.table[sponge.squeeze()].load(ORDERING).insert(pair, sponge)
     }
 
-    fn take<F: Fn(K, V)>(&self, f: F) {
+    fn take_each<F: Fn(K, V)>(&self, f: F) {
         for i in self.table {
-            i.take(f);
+            i.take_each(f);
         }
     }
 }

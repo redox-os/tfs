@@ -97,6 +97,16 @@ struct Sponge {
 }
 
 impl Sponge {
+    fn new<T: Hash>(key: &T) -> Sponge {
+        let mut sponge = Sponge {
+            state: 0,
+            buffer: Vec::new(),
+        };
+
+        key.hash(&mut sponge);
+        sponge
+    }
+
     fn finalize(&mut self) {
         self.write_usize(self.buffer.len());
         self.state = 0;
