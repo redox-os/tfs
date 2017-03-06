@@ -1,5 +1,7 @@
-use sponge::Sponge;
 use std::sync::atomic;
+use std::hash::Hash;
+use crossbeam::mem::epoch::{Atomic, Owned, Shared};
+use sponge::Sponge;
 
 const ORDERING: atomic::Ordering = atomic::Ordering::Relaxed;
 
@@ -41,25 +43,25 @@ impl<K, V> Atomic<Node<K, V>> {
     }
 
     fn for_each<F: Fn(K, V)>(&self, f: F) {
-        if let Some(node) = i.load(ORDERING) {
+        if let Some(node) = self.load(ORDERING) {
             node.for_each(f);
         }
     }
 
     fn take_each<F: Fn(K, V)>(&self, f: F) {
-        if let Some(node) = i.swap(Owned::new(None)) {
+        if let Some(node) = self.swap(Owned::new(None)) {
             node.take_each(f);
         }
     }
 }
 
-impl<K, V> Shared<Node<K, V>> {
+impl<'a, K, V> Shared<'a, Node<K, V>> {
     fn insert(&self, pair: Pair<K, V>, sponge: Sponge) -> Option<V> {
         match self {
             // There is a branch table. Insert the key-value pair into it.
             Node::Branch(table) => table.insert(pair, sponge),
             // The key exists, so we can simply update the value.
-            Node::Leaf(Pair { key }) if key == pair.key => Some(found_val.swap(val, ORDERING)),
+            Node::Leaf(Pair { key }) if key == pair.key => Some(found_val.swap(pair.val, ORDERING)),
             // Another key exists at the position, so we need to extend the table with a branch,
             // containing both entries.
             Node::Leaf(mut old_pair) => {
@@ -77,7 +79,7 @@ impl<K, V> Shared<Node<K, V>> {
                     let mut old_sponge = Sponge::new(&old_pair.key);
                     // Truncate the sponge, so it is at the point, where we are right now, and the
                     // collision is happening.
-                    old_sponge.matching(&sponge_a);
+                    old_sponge.matching(&sponge);
 
                     old_sponge
                 });
@@ -89,7 +91,7 @@ impl<K, V> Shared<Node<K, V>> {
                 // the same as the original, and if it is we update it. If not, we must handle the
                 // new value, which could be anything else (e.g. another thread could have extended
                 // the leaf too because it is inserting the same pair).
-                match entry.cas(old_pair, Some(Owned::new(Node::Branch(new_table))), ORDERING) {
+                match self.cas(old_pair, Some(Owned::new(Node::Branch(new_table))), ORDERING) {
                     // Our update went smooth, and we have extended the leaf to a branch,
                     // meaning that there now is a subtable containing the two key-value pairs.
                     Ok(()) => None,
@@ -97,7 +99,7 @@ impl<K, V> Shared<Node<K, V>> {
                     // insertions.
                     Err(Some(node)) => node.insert(pair, sponge),
                     // The entry was removed, so we will again recurse to re-do.
-                    Err(None) => entry.insert(pair, sponge),
+                    Err(None) => self.insert(pair, sponge),
                 }
             },
         }
@@ -111,7 +113,7 @@ impl<K, V> Shared<Node<K, V>> {
             // make sure that it is the same node as the one we read (`self`), otherwise we might
             // remove a wrong node.
             Node::Leaf(Pair { key: found_key, val }) if found_key == key
-                => match entry.cas(Some(self), None, ORDERING) {
+                => match self.cas(Some(self), None, ORDERING) {
                 // Removing the node succeeded: It wasn't changed in the meantime.
                 Ok(()) => Some(val),
                 // The node was removed by another thread, so our job is done. We don't need to do
@@ -151,6 +153,7 @@ pub struct Table<K, V>  {
 impl<K, V> Table<K, V> {
     fn two_entries(pair_a: Pair<K, V>, sponge_a: Sponge, pair_b: Pair<K, V>, sponge_b: Sponge)
         -> Table<K, V> {
+        // Start with an empty table.
         let mut table = Table::default();
 
         // Squeeze the two sponges.
@@ -177,7 +180,7 @@ impl<K, V> Table<K, V> {
             Some(Node::Leaf(Pair { found_key, found_val })) if key == found_key => Some(found_val),
             // The entry is a branch with another table, so we recurse and look up in said
             // subtable.
-            Some(Node::Branch(table)) => table.get(pair, sponge),
+            Some(Node::Branch(table)) => table.get(key, sponge),
             // The entry is either a leaf but doesn't match, or is a null pointer, meaning there is
             // no entry with the key.
             Some(Node::Leaf(_)) | None => None,

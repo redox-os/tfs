@@ -4,3 +4,4 @@ version = "0.1.0"
 authors = ["ticki <ticki@users.noreply.github.com>"]
 
 [dependencies]
+crossbeam = "0.2"

@@ -1,3 +1,5 @@
+use std::hash::{Hash, Hasher};
+
 /// Permute an integer pseudorandomly.
 ///
 /// This is a bijective function emitting chaotic behavior. Such functions are used as building

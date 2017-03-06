@@ -1,6 +1,9 @@
+extern crate crossbeam;
+
 mod sponge;
 mod table;
 
+use std::hash::Hash;
 use sponge::Sponge;
 
 pub struct HashMap<K, V> {
