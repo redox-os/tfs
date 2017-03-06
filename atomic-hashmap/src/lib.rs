@@ -1,13 +1,15 @@
 mod sponge;
 mod table;
 
+use sponge::Sponge;
+
 pub struct HashMap<K, V> {
     table: table::Table<K, V>,
 }
 
 impl<K: Hash, V> HashMap<K, V> {
     pub fn insert(&self, key: K, val: V) -> Option<V> {
-        self.table.insert(Pair {
+        self.table.insert(table::Pair {
             key: key,
             val: val,
         }, Sponge::new(&key))
