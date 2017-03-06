@@ -12,7 +12,7 @@ enum Node<K, V> {
 
 impl Atomic<Node<K, V>> {
     /// Insert a key-value pair into the node without squeezing the sponge.
-    fn insert(&self, pair: Pair<K, V>) -> Option<V> {
+    fn insert(&self, pair: Pair<K, V>, sponge: Sponge) -> Option<V> {
         // If the entry was empty, we will set it to a leaf with our key-value pair. If not, we
         // will handle the respective cases manually.
         match self.cas(None, Some(Owned::new(Node::Leaf(pair))), ORDERING) {
@@ -22,6 +22,23 @@ impl Atomic<Node<K, V>> {
             Err(Some(node)) => node.insert(pair, sponge),
             // It is not possible to get `Err(None)` as that was the value we are CAS-ing against.
             Err(None) => unreachable!(),
+        }
+    }
+
+    fn remove(&self, key: K, sponge: Sponge) -> Option<V> {
+        // Load the node and handle its cases.
+        if let Some(node) = self.load(ORDERING) {
+            // A node was found.
+            node.remove(key, sponge);
+        } else {
+            // No node was found; nothing to remove.
+            None
+        }
+    }
+
+    fn take<F: Fn(K, V)>(&self, f: F) {
+        if let Some(node) = i.swap(Owned::new(None)) {
+            node.take(f);
         }
     }
 }
@@ -68,12 +85,19 @@ impl Shared<Node<K, V>> {
         }
     }
 
-    fn remove(&self, sponge: Sponge) -> Option<V> {
+    fn remove(&self, key: K, sponge: Sponge) -> Option<V> {
         match self {
-            Some(Node::Branch(table)) => table.remove(key, sponge),
-            Some(node @ Node::Leaf(Pair { found_key, val })) if found_key == key
-                => match entry.cas(Some(node), None, ORDERING) {
+            // There is a branch, so we must remove the key in the sub-table.
+            Node::Branch(table) => table.remove(key, sponge),
+            // There was a node with the key, which we will try to remove. We use CAS in order to
+            // make sure that it is the same node as the one we read (`self`), otherwise we might
+            // remove a wrong node.
+            Node::Leaf(Pair { found_key, val }) if found_key == key
+                => match entry.cas(Some(self), None, ORDERING) {
+                // Removing the node succeeded: It wasn't changed in the meantime.
                 Ok(()) => Some(val),
+                // The node was removed by another thread, so our job is done. We don't need to do
+                // anything.
                 Err(None) => None,
                 // To solve the ABA problem, we're unfortunately forced to recurse/loop. As in
                 // `insert()`, this is theoretically a spin-lock, however it is very rare to run
@@ -81,7 +105,15 @@ impl Shared<Node<K, V>> {
                 // inserted a new one in the short meantime spanning only a few CPU cycles.
                 Err(Some(node)) => node.remove(),
             },
-            None | Some(Node::Leaf(..)) => None,
+            // A node with a non-matching key was found. Hence, we have nothing to remove.
+            Node::Leaf(..) => None,
+        }
+    }
+
+    fn take<F: Fn(K, V)>(&self, f: F) {
+        match self {
+            Node::Leaf(Pair { key, val }) => f(key, val),
+            Node::Branch(table) => table.take(f),
         }
     }
 }
@@ -116,5 +148,10 @@ impl Table<K, V> {
         // key-value pair.
         self.table[sponge.squeeze()].load(ORDERING).insert(pair, sponge)
     }
-}
 
+    fn take<F: Fn(K, V)>(&self, f: F) {
+        for i in self.table {
+            i.take(f);
+        }
+    }
+}
