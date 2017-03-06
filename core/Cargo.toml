@@ -4,13 +4,13 @@ version = "0.1.0"
 authors = ["ticki <ticki@users.noreply.github.com>"]
 
 [dependencies]
-little-endian = "0"
-lz4-compress = "0"
-quick-error = "1"
-ring = "0"
-seahash = "3"
-slog = "1"
-speck = "0"
+little-endian = "1.0"
+lz4-compress = "0.1"
+quick-error = "1.1"
+ring = "0.7"
+seahash = "3.0"
+slog = "2.0"
+speck = "1.0"
 
 [features]
 security = []

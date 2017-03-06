@@ -26,7 +26,7 @@ impl<K: Hash, V> HashMap<K, V> {
     }
 
     pub fn clear(&self) {
-        self.take(|| ());
+        self.take_each(|| ());
     }
 }
 

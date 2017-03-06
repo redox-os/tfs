@@ -1,6 +1,6 @@
 [package]
 name = "chashmap"
-version = "2.1.0"
+version = "2.1.1"
 authors = ["ticki <Ticki@users.noreply.github.com>"]
 description = "Fast, concurrent hash maps with extensive API."
 repository = "https://github.com/ticki/tfs"
@@ -10,5 +10,5 @@ keywords = ["hashmap", "concurrent", "parking_lot", "lock", "map"]
 exclude = ["target", "Cargo.lock"]
 
 [dependencies]
-parking_lot = "0"
-owning_ref = "0"
+parking_lot = "0.3"
+owning_ref = "0.2"
