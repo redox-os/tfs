@@ -278,13 +278,13 @@ fn clear() {
 }
 
 #[test]
-fn clear_with_filter() {
+fn clear_with_retain() {
     let m = CHashMap::new();
     assert!(m.insert(1, 2).is_none());
     assert!(m.insert(2, 4).is_none());
     assert_eq!(m.len(), 2);
 
-    m.filter(|_, _| false);
+    m.retain(|_, _| false);
 
     assert!(m.is_empty());
     assert_eq!(m.len(), 0);
@@ -294,7 +294,7 @@ fn clear_with_filter() {
 }
 
 #[test]
-fn filter() {
+fn retain() {
     let m = CHashMap::new();
     m.insert(1, 8);
     m.insert(2, 9);
@@ -305,7 +305,7 @@ fn filter() {
     m.insert(7, 2);
     m.insert(8, 3);
 
-    m.filter(|key, val| key & 1 == 0 && val & 1 == 1);
+    m.retain(|key, val| key & 1 == 0 && val & 1 == 1);
 
     assert_eq!(m.len(), 4);
 

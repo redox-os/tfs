@@ -633,7 +633,15 @@ impl<K, V> CHashMap<K, V> {
         }
     }
 
-    /// Filter the map based on some predicate
+    /// Deprecated. Do not use.
+    #[deprecated]
+    pub fn filter<F>(&self, predicate: F)
+        where F: Fn(&K, &V) -> bool {
+        // Following the naming conventions of the standard library...
+        self.retain(predicate)
+    }
+
+    /// Filter the map based on some predicate.
     ///
     /// This tests every entry in the hash map by closure `predicate`. If it returns `true`, the
     /// map will retain the entry. If not, the entry will be removed.
@@ -641,7 +649,7 @@ impl<K, V> CHashMap<K, V> {
     /// This won't lock the table. This can be a major performance trade-off, as it means that it
     /// must lock on every table entry. However, it won't block other operations of the table,
     /// while filtering.
-    pub fn filter<F>(&self, predicate: F)
+    pub fn retain<F>(&self, predicate: F)
         where F: Fn(&K, &V) -> bool {
         // Acquire the read lock to the table.
         let table = self.table.read();
