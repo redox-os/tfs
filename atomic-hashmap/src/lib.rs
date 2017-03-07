@@ -10,7 +10,7 @@ pub struct HashMap<K, V> {
     table: table::Table<K, V>,
 }
 
-impl<K: Hash, V> HashMap<K, V> {
+impl<K: Hash + Eq, V> HashMap<K, V> {
     pub fn insert(&self, key: K, val: V) -> Option<V> {
         self.table.insert(table::Pair {
             key: key,
@@ -31,14 +31,16 @@ impl<K: Hash, V> HashMap<K, V> {
     }
 
     pub fn clear(&self) {
-        self.take_each(|| ());
+        self.take_each(|_| ());
     }
 }
 
-impl<'a, K, V> Into<std::collections::HashMap<K, V>> for &'a HashMap<K, V> {
+impl<'a, K: Hash + Eq, V> Into<std::collections::HashMap<K, V>> for &'a HashMap<K, V> {
     fn into(self) -> std::collections::HashMap<K, V> {
         let mut hm = std::collections::HashMap::new();
-        self.for_each(|key, val| hm.insert(key, val));
+        self.for_each(|key, val| {
+            hm.insert(key, val);
+        });
 
         hm
     }

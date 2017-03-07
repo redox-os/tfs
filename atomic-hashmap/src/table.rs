@@ -1,6 +1,6 @@
 use std::sync::atomic;
 use std::hash::Hash;
-use crossbeam::mem::epoch::{Atomic, Owned, Shared};
+use crossbeam::mem::epoch::{self, Atomic};
 use sponge::Sponge;
 
 const ORDERING: atomic::Ordering = atomic::Ordering::Relaxed;
@@ -20,7 +20,7 @@ pub struct Table<K, V>  {
     table: [Atomic<Node<K, V>>; 256],
 }
 
-impl<K, V> Table<K, V> {
+impl<K: Hash + Eq, V> Table<K, V> {
     fn two_entries(pair_a: Pair<K, V>, sponge_a: Sponge, pair_b: Pair<K, V>, sponge_b: Sponge)
         -> Table<K, V> {
         // Start with an empty table.
@@ -33,38 +33,38 @@ impl<K, V> Table<K, V> {
         if pos_a != pos_b {
             // The two position did not collide, so we can insert the two pairs at the respective
             // positions
-            table[pos_a as usize] = Atomic::new(Some(Owned::new(Node::Leaf(pair_a))));
-            table[pos_b as usize] = Atomic::new(Some(Owned::new(Node::Leaf(pair_b))));
+            table[pos_a as usize] = Atomic::new(Some(epoch::Owned::new(Node::Leaf(pair_a))));
+            table[pos_b as usize] = Atomic::new(Some(epoch::Owned::new(Node::Leaf(pair_b))));
         } else {
             // The two positions from the sponge matched, so we must place another branch.
-            table[pos_a as usize] = Atomic::new(Some(Owned::new(Node::Branch(
+            table[pos_a as usize] = Atomic::new(Some(epoch::Owned::new(Node::Branch(
                 Table::two_entries(pair_a, sponge_a, pair_b, sponge_b)
             ))));
         }
     }
 
-    pub fn get(&self, key: &K, sponge: Sponge) -> Option<Shared<V>> {
+    pub fn get(&self, key: &K, sponge: Sponge, guard: &epoch::Guard) -> Option<epoch::Shared<V>> {
         // Load the entry and handle the respective cases.
-        match self.table[sponge.squeeze()].load(ORDERING) {
-            // The entry was a leaf and the keys match, so we can return the entry's value.
-            Some(Node::Leaf(Pair { found_key, found_val })) if key == found_key => Some(found_val),
-            // The entry is a branch with another table, so we recurse and look up in said
-            // subtable.
-            Some(Node::Branch(table)) => table.get(key, sponge),
-            // The entry is either a leaf but doesn't match, or is a null pointer, meaning there is
-            // no entry with the key.
-            Some(Node::Leaf(_)) | None => None,
-        }
+        match self.table[sponge.squeeze() as usize].load(guard, ORDERING).and_then(|node| node.map(|node| {
+            match node {
+                // The entry was a leaf and the keys match, so we can return the entry's value.
+                Node::Leaf(Pair { found_key, found_val }) if key == found_key => Some(found_val),
+                // The entry is a branch with another table, so we recurse and look up in said
+                // sub-table.
+                Node::Branch(table) => table.get(key, sponge),
+                // The entry is either a leaf but doesn't match, or is a null pointer, meaning there is
+                // no entry with the key.
+                Node::Leaf(_) => None,
+            }
+        }))
     }
 
     pub fn insert(&self, pair: Pair<K, V>, sponge: Sponge) -> Option<V> {
         // We squeeze the sponge to get the right entry of our table, in which we will insert our
         // key-value pair.
-        let entry = self.table[sponge.squeeze()];
+        let entry = self.table[sponge.squeeze() as usize];
 
-        // If the entry was empty, we will set it to a leaf with our key-value pair. If not, we
-        // will handle the respective cases manually.
-        match entry.cas(None, Some(Owned::new(Node::Leaf(pair))), ORDERING) {
+        match entry.cas(None, Some(epoch::Owned::new(Node::Leaf(pair))), ORDERING) {
             // We successfully set an empty entry to the new key-value pair. This of course implies
             // that the key didn't exist at the time.
             Ok(()) => None,
@@ -112,9 +112,9 @@ impl<K, V> Table<K, V> {
                 // the same as the original, and if it is we update it. If not, we must handle the
                 // new value, which could be anything else (e.g. another thread could have extended
                 // the leaf too because it is inserting the same pair).
-                match entry.cas(old_pair, Some(Owned::new(Node::Branch(new_table))), ORDERING) {
-                    // Our update went smooth, and we have extended the leaf to a branch,
-                    // meaning that there now is a subtable containing the two key-value pairs.
+                match entry.cas(old_pair, Some(epoch::Owned::new(Node::Branch(new_table))), ORDERING) {
+                    // Our update went smooth, and we have extended the leaf to a branch, meaning
+                    // that there now is a sub-table containing the two key-value pairs.
                     Ok(()) => None,
                     // The update failed. Another thread extended the table, so we will simply use
                     // the table from the new leaf that the other thread created.
@@ -132,22 +132,24 @@ impl<K, V> Table<K, V> {
         }
     }
 
-    pub fn remove(&self, key: &K, sponge: Sponge) -> Option<V> {
+    pub fn remove(&self, key: &K, sponge: Sponge, guard: &epoch::Guard) -> Option<Value<K, V>> {
         // We squeeze the sponge to get the right entry of our table, in which we will potentially
         // remove the key.
-        let entry = self.table[sponge.squeeze()];
+        let entry = self.table[sponge.squeeze() as usize];
 
-        // Load the node and handle its cases.
-        match entry.load(ORDERING) {
+        // Load the node (if any) and handle its cases.
+        entry.load(ORDERING, guard).and_then(|node| node.map(|node| {
             // There is a branch, so we must remove the key in the sub-table.
-            Some(Node::Branch(table)) => table.remove(key, sponge),
+            Node::Branch(table) => table.remove(key, sponge),
             // There was a node with the key, which we will try to remove. We use CAS in order to
             // make sure that it is the same node as the one we read (`entry`), otherwise we might
             // remove a wrong node.
-            Some(Node::Leaf(Pair { key: found_key, val })) if found_key == key
+            Node::Leaf(Pair { key: found_key, val }) if found_key == key
                 => match entry.cas(Some(entry), None, ORDERING) {
                 // Removing the node succeeded: It wasn't changed in the meantime.
                 Ok(()) => Some(val),
+                // The table was extended with a new branch in the meantime, so we will forward the
+                // remove call to the respective sub-table.
                 Err(Some(Node::Branch(table))) => table.remove(key, sponge),
                 // The node was removed or updated by another thread, so our removal is "logically"
                 // done, as it was overruled by another thread in the meantime, either by insertion
@@ -157,10 +159,8 @@ impl<K, V> Table<K, V> {
                 _ => Some(val),
             },
             // A node with a non-matching key was found. Hence, we have nothing to remove.
-            Some(Node::Leaf(..)) => None,
-            // No node was found; nothing to remove.
-            None => None,
-        }
+            Node::Leaf(..) => None,
+        }))
     }
 
     pub fn for_each<F: Fn(K, V)>(&self, f: F) {
