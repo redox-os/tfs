@@ -10,6 +10,11 @@ pub struct Pair<K, V> {
     val: V,
 }
 
+enum Node<K, V> {
+    Leaf(Pair<K, V>),
+    Branch(Table<K, V>),
+}
+
 #[derive(Default)]
 pub struct Table<K, V>  {
     table: [Atomic<Node<K, V>>; 256],
@@ -52,42 +57,14 @@ impl<K, V> Table<K, V> {
         }
     }
 
-    pub fn remove(&self, key: &K, sponge: Sponge) -> Option<V> {
-        // We squeeze the sponge to get the right entry of our table, in which we will potentially
-        // remove the key.
-        self.table[sponge.squeeze()].remove(key, sponge);
-    }
-
     pub fn insert(&self, pair: Pair<K, V>, sponge: Sponge) -> Option<V> {
         // We squeeze the sponge to get the right entry of our table, in which we will insert our
         // key-value pair.
-        self.table[sponge.squeeze()].load(ORDERING).insert(pair, sponge)
-    }
+        let entry = self.table[sponge.squeeze()];
 
-    pub fn for_each<F: Fn(K, V)>(&self, f: F) {
-        for i in self.table {
-            i.for_each(f);
-        }
-    }
-
-    pub fn take_each<F: Fn(K, V)>(&self, f: F) {
-        for i in self.table {
-            i.take_each(f);
-        }
-    }
-}
-
-enum Node<K, V> {
-    Leaf(Pair<K, V>),
-    Branch(Table<K, V>),
-}
-
-impl<K, V> Atomic<Node<K, V>> {
-    /// Insert a key-value pair into the node without squeezing the sponge.
-    fn insert(&self, pair: Pair<K, V>, sponge: Sponge) -> Option<V> {
         // If the entry was empty, we will set it to a leaf with our key-value pair. If not, we
         // will handle the respective cases manually.
-        match self.cas(None, Some(Owned::new(Node::Leaf(pair))), ORDERING) {
+        match entry.cas(None, Some(Owned::new(Node::Leaf(pair))), ORDERING) {
             // We successfully set an empty entry to the new key-value pair. This of course implies
             // that the key didn't exist at the time.
             Ok(()) => None,
@@ -99,7 +76,7 @@ impl<K, V> Atomic<Node<K, V>> {
                 // after we read it initially. If so, we won't update it for the reason that it was
                 // logically inserted (`insert` was called) before it being removed or updated.
                 // Hence the other version is used, and we don't touch it.
-                => match self.cas(Some(Node::Leaf(found_pair)), Some(Node::Leaf(pair)), ORDERING) {
+                => match entry.cas(Some(Node::Leaf(found_pair)), Some(Node::Leaf(pair)), ORDERING) {
                     // Everything went well and the leaf was updated.
                     Ok(()) => Some(found_pair.val),
                     // Another node was inserted here, meaning that the table is simply extended,
@@ -135,7 +112,7 @@ impl<K, V> Atomic<Node<K, V>> {
                 // the same as the original, and if it is we update it. If not, we must handle the
                 // new value, which could be anything else (e.g. another thread could have extended
                 // the leaf too because it is inserting the same pair).
-                match self.cas(old_pair, Some(Owned::new(Node::Branch(new_table))), ORDERING) {
+                match entry.cas(old_pair, Some(Owned::new(Node::Branch(new_table))), ORDERING) {
                     // Our update went smooth, and we have extended the leaf to a branch,
                     // meaning that there now is a subtable containing the two key-value pairs.
                     Ok(()) => None,
@@ -155,16 +132,20 @@ impl<K, V> Atomic<Node<K, V>> {
         }
     }
 
-    fn remove(&self, key: &K, sponge: Sponge) -> Option<V> {
+    pub fn remove(&self, key: &K, sponge: Sponge) -> Option<V> {
+        // We squeeze the sponge to get the right entry of our table, in which we will potentially
+        // remove the key.
+        let entry = self.table[sponge.squeeze()];
+
         // Load the node and handle its cases.
-        match self.load(ORDERING) {
+        match entry.load(ORDERING) {
             // There is a branch, so we must remove the key in the sub-table.
             Some(Node::Branch(table)) => table.remove(key, sponge),
             // There was a node with the key, which we will try to remove. We use CAS in order to
-            // make sure that it is the same node as the one we read (`self`), otherwise we might
+            // make sure that it is the same node as the one we read (`entry`), otherwise we might
             // remove a wrong node.
             Some(Node::Leaf(Pair { key: found_key, val })) if found_key == key
-                => match self.cas(Some(self), None, ORDERING) {
+                => match entry.cas(Some(entry), None, ORDERING) {
                 // Removing the node succeeded: It wasn't changed in the meantime.
                 Ok(()) => Some(val),
                 Err(Some(Node::Branch(table))) => table.remove(key, sponge),
@@ -182,17 +163,21 @@ impl<K, V> Atomic<Node<K, V>> {
         }
     }
 
-    fn for_each<F: Fn(K, V)>(&self, f: F) {
-        match self.load(ORDERING) {
-            Some(Node::Leaf(Pair { key, val })) => f(key, val),
-            Some(Node::Branch(table)) => table.for_each(f),
+    pub fn for_each<F: Fn(K, V)>(&self, f: F) {
+        for i in self.table {
+            match i.load(ORDERING) {
+                Some(Node::Leaf(Pair { key, val })) => f(key, val),
+                Some(Node::Branch(table)) => table.for_each(f),
+            }
         }
     }
 
-    fn take_each<F: Fn(K, V)>(&self, f: F) {
-        match self.load(ORDERING) {
-            Some(Node::Leaf(Pair { key, val })) => f(key, val),
-            Some(Node::Branch(table)) => table.take_each(f),
+    pub fn take_each<F: Fn(K, V)>(&self, f: F) {
+        for i in self.table {
+            match i.load(ORDERING) {
+                Some(Node::Leaf(Pair { key, val })) => f(key, val),
+                Some(Node::Branch(table)) => table.take_each(f),
+            }
         }
     }
 }

@@ -143,6 +143,13 @@ impl Hasher for Sponge {
         unreachable!();
     }
 
+    fn write(&mut self, bytes: &[u8]) {
+        // TODO: This could be faster.
+        for &i in bytes {
+            self.write_u8(i);
+        }
+    }
+
     fn write_u8(&mut self, mut i: u8) {
         self.last = sigma(self.last ^ i);
 
