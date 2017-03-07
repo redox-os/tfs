@@ -53,7 +53,7 @@ use std::sync::atomic::{self, AtomicUsize};
 use std::{mem, ops, cmp, fmt, iter};
 
 /// The atomic ordering used throughout the code.
-const ORDERING: atomic::Ordering = atomic::Ordering::SeqCst;
+const ORDERING: atomic::Ordering = atomic::Ordering::Relaxed;
 /// The length-to-capacity factor.
 const LENGTH_MULTIPLIER: usize = 4;
 /// The maximal load factor's numerator.
