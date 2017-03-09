@@ -11,23 +11,29 @@ pub struct HashMap<K, V> {
 }
 
 impl<K: Hash + Eq, V> HashMap<K, V> {
-    pub fn insert(&self, key: K, val: V) -> Option<V> {
+    pub fn insert(&self, key: K, val: V) -> Option<epoch::Pinned<V>> {
+        let guard = epoch::pin();
+
         self.table.insert(table::Pair {
             key: key,
             val: val,
-        }, Sponge::new(&key))
+        }, Sponge::new(&key), guard).into_pinned(guard)
     }
 
-    pub fn remove(&self, key: K, sponge: Sponge) -> Option<V> {
-        self.table.remove(key, Sponge::new(&key))
+    pub fn remove(&self, key: K, sponge: Sponge) -> Option<epoch::Pinned<V>> {
+        let guard = epoch::pin();
+
+        self.table.remove(key, Sponge::new(&key), guard).into_pinned(guard)
     }
 
     pub fn for_each<F: Fn(K, V)>(&self, f: F) {
-        self.table.for_each(f);
+        let guard = epoch::pin();
+        self.table.for_each(f, guard);
     }
 
     pub fn take_each<F: Fn(K, V)>(&self, f: F) {
-        self.table.take_each(f);
+        let guard = epoch::pin();
+        self.table.take_each(f, guard);
     }
 
     pub fn clear(&self) {

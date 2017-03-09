@@ -111,7 +111,6 @@ impl Sponge {
         sponge
     }
 
-
     pub fn squeeze(&mut self) -> u8 {
         self.last = sigma(self.last ^ self.buffer.pop().unwrap_or(0));
 
