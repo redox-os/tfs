@@ -90,6 +90,7 @@ impl<K: Hash + Eq, V> Table<K, V> {
                     // replaced the leaf we read earlier (even though that was another thread's
                     // work), which we did "logically" (at the point the leaf was read, it had
                     // matching keys).
+                    // FIXME: This could be a duplicate.
                     _ => Some(found_pair.val),
                 },
             // Another key exists at the position, so we need to extend the table with a branch,
@@ -126,7 +127,8 @@ impl<K: Hash + Eq, V> Table<K, V> {
                     // the logical insertion, which therefore means that it shouldn't be written as
                     // it was overwritten. As a result, we simply return `None`, marking that no
                     // value was replaced.
-                    _ => None,
+                    // FIXME: This is wrong. The leaf isn't even of matching key.
+                    Err(Some(Node::Leaf(new_pair))) if new_pair.key == pair.key => None,
                 }
             },
             // It is not possible to get `Err(None)` as that was the value we are CAS-ing against.
@@ -158,6 +160,7 @@ impl<K: Hash + Eq, V> Table<K, V> {
                 // or removal of the same node. We return the value it had at time of the logical
                 // removal (i.e. when `remove` was called), as the function acts as if it removed
                 // the node.
+                // FIXME: This could be a duplicate.
                 _ => Some(val),
             },
             // A node with a non-matching key was found. Hence, we have nothing to remove.

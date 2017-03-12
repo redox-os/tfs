@@ -1,3 +1,20 @@
+//! Implementation of a lock-free, atomic hash table.
+//!
+//! This crate provides a high-performance implementation of a completely lock-free (no mutexes, no
+//! spin-locks, not even an ABA loop) hash table.
+//!
+//! The only instruction we use is CAS, which allows us to atomically update the table.
+//!
+//! # Design
+//!
+//! The design is similar to Feldman's lock-free hash table, but diverge on several key points.
+//!
+//! It is structured as a 256-radix tree with a pseudorandom permutation applied to the key.
+//! Contrary to open addressing, this approach is entirely lock-free and need not reallocation.
+//!
+//! The permutation is a simple table+XOR based length-padded function, which is applied to avoid
+//! excessive depth (this is what makes it a "hash table").
+
 extern crate crossbeam;
 
 mod sponge;
