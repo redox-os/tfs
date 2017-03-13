@@ -66,14 +66,14 @@ impl Cache {
         debug!(self, "reading sector"; "sector" => sector);
 
         // Check if the sector is already available in the cache.
-        if let Some(accessor) = self.sectors.get(sector) {
+        if let Some(buf) = self.sectors.get(sector) {
             // Yup, we found the sector in the cache.
             trace!(self, "cache hit; reading from cache"; "sector" => sector);
 
             // Touch the sector.
             self.tracker.touch(sector);
 
-            map(accessor)
+            map(buf)
         } else {
             trace!(self, "cache miss; reading from disk"; "sector" => sector);
 
