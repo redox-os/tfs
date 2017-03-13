@@ -1,7 +1,7 @@
 //! Implementation of a lock-free, atomic hash table.
 //!
 //! This crate provides a high-performance implementation of a completely lock-free (no mutexes, no
-//! spin-locks, not even an ABA loop) hash table.
+//! spin-locks, or the alike) hash table.
 //!
 //! The only instruction we use is CAS, which allows us to atomically update the table.
 //!
