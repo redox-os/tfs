@@ -41,21 +41,22 @@ impl<K: Hash + Eq, V> Table<K, V> {
                 Table::two_entries(pair_a, sponge_a, pair_b, sponge_b)
             ))));
         }
+
+        table
     }
 
     pub fn get(&self, key: &K, sponge: Sponge, guard: &epoch::Guard) -> Option<epoch::Shared<V>> {
         // Load the entry and handle the respective cases.
-        match self.table[sponge.squeeze() as usize].load(guard, ORDERING).and_then(|node| node.map(|node| {
-            match node {
-                // The entry was a leaf and the keys match, so we can return the entry's value.
-                Node::Leaf(Pair { found_key, found_val }) if key == found_key => Some(found_val),
-                // The entry is a branch with another table, so we recurse and look up in said
-                // sub-table.
-                Node::Branch(table) => table.get(key, sponge),
-                // The entry is either a leaf but doesn't match, or is a null pointer, meaning there is
-                // no entry with the key.
-                Node::Leaf(_) => None,
-            }
+        self.table[sponge.squeeze() as usize].load(guard, ORDERING)
+            .and_then(|node| node.map(|node| match node {
+            // The entry was a leaf and the keys match, so we can return the entry's value.
+            Node::Leaf(Pair { found_key, found_val }) if key == found_key => Some(found_val),
+            // The entry is a branch with another table, so we recurse and look up in said
+            // sub-table.
+            Node::Branch(table) => table.get(key, sponge),
+            // The entry is either a leaf but doesn't match, or is a null pointer, meaning there is
+            // no entry with the key.
+            Node::Leaf(_) => None,
         }))
     }
 
@@ -149,13 +150,13 @@ impl<K: Hash + Eq, V> Table<K, V> {
         }
     }
 
-    pub fn remove(&self, key: &K, sponge: Sponge, guard: &epoch::Guard) -> Option<Value<K, V>> {
+    pub fn remove(&self, key: &K, sponge: Sponge, guard: &epoch::Guard) -> Option<epoch::Shared<K, V>> {
         // We squeeze the sponge to get the right entry of our table, in which we will potentially
         // remove the key.
         let entry = self.table[sponge.squeeze() as usize];
 
         // Load the node (if any) and handle its cases.
-        entry.load(ORDERING, guard).and_then(|node| node.map(|node| {
+        entry.load(ORDERING, guard).and_then(|node| node.map(|node| match node {
             // There is a branch, so we must remove the key in the sub-table.
             Node::Branch(table) => table.remove(key, sponge),
             // There was a node with the key, which we will try to remove. We use CAS in order to

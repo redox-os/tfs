@@ -21,6 +21,7 @@ mod sponge;
 mod table;
 
 use std::hash::Hash;
+use crossbeam::mem::epoch::{self, Atomic};
 use sponge::Sponge;
 
 pub struct HashMap<K, V> {
