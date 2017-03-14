@@ -98,7 +98,7 @@ struct Manager {
     /// This is the state as stored in the state block. The reason we do not store the whole state
     /// block in one is that, we want to avoid the lock when reading the static parts of the state
     /// block (e.g. configuration).
-    state: Mutex<state_block::State>,
+    state: Lutex<state_block::State>,
     /// The configuration options.
     ///
     /// This is the configuration part of the state block. We don't need a lock, since we won't
@@ -422,14 +422,12 @@ impl Manager {
     /// Flush the state block.
     ///
     /// This creates a future, which will flush the state block when executed.
-    ///
-    /// It takes a state in order to avoid re-acquiring the lock.
-    fn flush_state_block(&mut self, state: &state_block::State) -> impl Future<(), disk::Error> {
+    fn flush_state_block(&mut self) -> impl Future<(), disk::Error> {
         trace!(self, "flushing the state block");
 
         // Do it, lil' pupper. We wrap it in `future::lazy()` to make sure that we don't first read
         // and encode the state block and then much later flush it.
-        future::lazy(|| self.cache.write(self.driver.header.state_block_address, state_block::StateBlock {
+        self.state.get().and_then(|state| self.cache.write(self.driver.header.state_block_address, state_block::StateBlock {
             config: self.config,
             state: state,
         }.encode()))
@@ -453,8 +451,8 @@ impl Manager {
 
                 // Lock the state.
                 let state = self.state.lock();
-                // Just in case that another thread have filled the free-cache while we were locking
-                // the state, we will check if new clusters are in the free-cache.
+                // Just in case that another thread have filled the free-cache while we were
+                // locking the state, we will check if new clusters are in the free-cache.
                 if Some(x) = self.free.pop() {
                     // We had a cluster in the free-cache.
                     return free;
@@ -478,8 +476,8 @@ impl Manager {
                     // Now, we'll replace the old head metacluster with the chained metacluster.
                     trace!(self, "metacluster checksum matched", "checksum" => found);
 
-                    // Replace the checksum of the head metacluster with the checksum of the chained
-                    // metacluster, which will soon be the head metacluster.
+                    // Replace the checksum of the head metacluster with the checksum of the
+                    // chained metacluster, which will soon be the head metacluster.
                     head.checksum = little_endian::read(buf);
                     // We'll initialize a window iterating over the pointers in this metacluster.
                     let mut window = &buf[8..];
@@ -492,7 +490,8 @@ impl Manager {
                         window = &window[8..];
                         // Read the pointer.
                         if let Some(cluster) = little_endian::read(window) {
-                            // There was anohter pointer in the metacluster, push it to the free-cache.
+                            // There was anohter pointer in the metacluster, push it to the
+                            // free-cache.
                             self.free.push(cluster)
                         } else {
                             // The pointer was a null pointer, so the metacluster is over.
@@ -503,18 +502,16 @@ impl Manager {
                     // Drop the old metacluster from the cache.
                     self.cache.forget(old_head)?;
 
-                    // We return the old head metacluster, and will use it as the popped free cluster.
-                    // Mein gott, dis is incredibly convinient. *sniff*
+                    // We return the old head metacluster, and will use it as the popped free
+                    // cluster.  Mein gott, dis is incredibly convinient. *sniff*
                     old_head
                 });
 
                 // Release the lock.
                 drop(state)
-                // Flush the state block to account for the changes.
-                self.flush_state_block();
 
-                // Return the popped cluster.
-                Ok(free)
+                // Flush the state block to account for the changes. And return the popped cluster.
+                self.flush_state_block().map(|_| free)
             }
         })
     }
