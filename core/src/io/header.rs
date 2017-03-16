@@ -72,6 +72,33 @@ quick_error! {
     }
 }
 
+/// Configuration options in a disk header.
+///
+/// This struct collects the adjustable parameters stored in the disk header.
+struct Options {
+    /// The vdev setup.
+    ///
+    /// A vdev is a "virtual device". Each entry in this field transforms one disk to another,
+    /// effectively modifying the behavior of reads and writes. Each of the layers define another
+    /// of such masks.
+    ///
+    /// Take this example of a vdev setup:
+    ///
+    ///     Mirror
+    ///     Mirror
+    ///     Encrypt
+    ///
+    /// What it means is that there are two mirrors, yielding 1:4 redundancy, and then encryption,
+    /// which means that the data will be encrypted after mirrored.
+    ///
+    /// (Note that it is bad practice to encrypt after mirroring, this is just for the purpose of
+    /// an example. You ought to place the `Encryption` before adding redundancy, as redundancy can
+    /// expose certain properties of the data, which is supposed to be hidden.)
+    vdev_stack: Vec<Vdev>,
+    /// The chosen checksum algorithm.
+    checksum_algorithm: ChecksumAlgorithm,
+}
+
 /// TFS magic number.
 #[derive(PartialEq, Eq, Clone, Copy)]
 enum MagicNumber {
@@ -171,6 +198,17 @@ enum Vdev {
 
 struct Uid(u128);
 
+impl Uid {
+    /// Generate a random UID.
+    fn generate() -> Uid {
+        // Generate a random UID.
+        // TODO: While this is cryptographic by default, it provides no guarantee for its security.
+        //       It isn't a catastrophic if it isn't cryptographic (even if you knew the UID, the
+        //       things you can do are limited), but it's more secure if it is.
+        Uid(rand::random())
+    }
+}
+
 impl little_endian::Encode for Uid {
     fn read_le(from: &[u8]) -> Uid {
         Uid(little_endian::read(from))
@@ -178,16 +216,6 @@ impl little_endian::Encode for Uid {
 
     fn write_le(self, into: &mut [u8]) {
         little_endian::write(into, self.0);
-    }
-}
-
-impl Default for Uid {
-    fn default() -> Uid {
-        // Generate a random UID.
-        // TODO: While this is cryptographic by default, it provides no guarantee for its security.
-        //       It isn't a catastrophic if it isn't cryptographic (even if you knew the UID, the
-        //       things you can do are limited), but it's more secure if it is.
-        Uid(rand::random())
     }
 }
 
@@ -200,32 +228,35 @@ struct DiskHeader {
     version_number: u32,
     /// An secret number randomly picked when initializing.
     uid: Uid,
-    /// The chosen checksum algorithm.
-    checksum_algorithm: ChecksumAlgorithm,
     /// The state flag.
     state_flag: StateFlag,
-    /// The vdev setup.
+    /// The user-set options.
     ///
-    /// A vdev is a "virtual device". Each entry in this field transforms one disk to another,
-    /// effectively modifying the behavior of reads and writes. Each of the layers define another
-    /// of such masks.
-    ///
-    /// Take this example of a vdev setup:
-    ///
-    ///     Mirror
-    ///     Mirror
-    ///     Encrypt
-    ///
-    /// What it means is that there are two mirrors, yielding 1:4 redundancy, and then encryption,
-    /// which means that the data will be encrypted after mirrored.
-    ///
-    /// (Note that it is bad practice to encrypt after mirroring, this is just for the purpose of
-    /// an example. You ought to place the `Encryption` before adding redundancy, as redundancy can
-    /// expose certain properties of the data, which is supposed to be hidden.)
-    vdev_stack: Vec<Vdev>,
+    /// This is different from the other fields as it is generally fixed and static.
+    options: Options,
 }
 
 impl DiskHeader {
+    /// Generate a new disk header from some user options.
+    ///
+    /// The state flag is initialized to `Open` state and must be manually set, if another value is
+    /// prefered.
+    fn new(options: Options) -> DiskHeader {
+        DiskHeader {
+            // This implementation has full compatibility.
+            magic_number: MagicNumber::TOTAL_COMPATIBILITY_MAGIC_NUMBER,
+            // We simply use the current version.
+            version_number: VERSION_NUMBER,
+            // Generate the UID.
+            uid: Uid::generate(),
+            // As stated in the doc comment, this is initialized to `Open` since it is assumed that
+            // the caller will use the header to represent a disk right after its creation.
+            state_flag: StateFlag::Open,
+            // The options are pre-specified.
+            options: options,
+        }
+    }
+
     /// Parse the disk header from some sequence of bytes.
     ///
     /// This will construct it into memory while performing error checks on the header to ensure
@@ -254,13 +285,6 @@ impl DiskHeader {
         // This section stores a single number, namely the UID. The UID is supposed to be a secret
         // ID used throughout the code, such as seed for hashing and salt for key stretching.
         let uid = little_endian::read(&buf[16..])
-
-        // # Configuration
-        //
-        // This section stores certain configuration options needs to properly load the disk header.
-
-        // Load the checksum algorithm config field.
-        let checksum_algorithm = ChecksumAlgorithm::try_from(little_endian::read(buf[32..]))?;
 
         // # State section
         //
@@ -309,9 +333,16 @@ impl DiskHeader {
             }
         }
 
+        // # Configuration
+        //
+        // This section stores certain configuration options needs to properly load the disk header.
+
+        // Load the checksum algorithm config field.
+        let checksum_algorithm = ChecksumAlgorithm::try_from(little_endian::read(buf[32..]))?;
+
         // Make sure that the checksum of the disk header matches the 8 byte field in the end.
         let expected = little_endian::read(&buf[128..]);
-        let found = ret.checksum_algorithm.hash(&buf[..128]);
+        let found = checksum_algorithm.hash(&buf[..128]);
         if expected != found {
             return Err(Error::ChecksumMismatch {
                 expected: expected,
@@ -323,9 +354,11 @@ impl DiskHeader {
             magic_number: magic_number,
             version_number: version_number,
             uid: uid,
-            checksum_algorithm: checksum_algorithm,
             state_flag: state_flag,
-            vdev_stack: vdev_stack,
+            options: Options {
+                vdev_stack: vdev_stack,
+                checksum_algorithm: checksum_algorithm,
+            },
         }
     }
 

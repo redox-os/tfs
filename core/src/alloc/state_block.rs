@@ -66,16 +66,10 @@ struct FreelistHead {
 
 /// The TFS state block.
 struct StateBlock {
-    /// The static configuration section of the state block.
-    config: Config,
+    /// The static options section of the state block.
+    options: Options,
     /// The dynamic state section of the state block.
     state: State,
-}
-
-/// The configuration sub-block.
-struct Config {
-    /// The chosen compression algorithm.
-    compression_algorithm: CompressionAlgorithm,
 }
 
 /// The state sub-block.
@@ -102,7 +96,7 @@ impl StateBlock {
         }
 
         Ok(StateBlock {
-            config: Config {
+            options: Options {
                 // Load the compression algorithm config field.
                 compression_algorithm: CompressionAlgorithm::try_from(little_endian::read(buf[8..]))?,
             },
@@ -127,7 +121,7 @@ impl StateBlock {
         let mut buf = disk::SectorBuf::default();
 
         // Write the compression algorithm.
-        little_endian::write(&mut buf[8..], self.config.compression_algorithm as u16);
+        little_endian::write(&mut buf[8..], self.options.compression_algorithm as u16);
         // Write the superpage pointer. If no superpage is initialized, we simply write a null
         // pointer.
         little_endian::write(&mut buf[16..], self.state.superpage);
@@ -158,7 +152,7 @@ mod tests {
         let mut block = StateBlock::default();
         assert_eq!(StateBlock::decode(block.encode()).unwrap(), block);
 
-        block.config.compression_algorithm = CompressionAlgorithm::Identity;
+        block.options.compression_algorithm = CompressionAlgorithm::Identity;
         assert_eq!(StateBlock::decode(block.encode()).unwrap(), block);
 
         block.state.superpage = 200;
@@ -176,7 +170,7 @@ mod tests {
         let mut block = StateBlock::default();
         let mut sector = block.encode();
 
-        block.config.compression_algorithm = CompressionAlgorithm::Identity;
+        block.options.compression_algorithm = CompressionAlgorithm::Identity;
         sector[9] = 0;
         little_endian::write(&mut sector, seahash::hash(sector[8..]));
         assert_eq!(sector, block.encode());

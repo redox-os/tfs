@@ -63,7 +63,7 @@ quick_error! {
         ///
         /// Multiple reasons exists for this to happen:
         ///
-        /// 1. The compression configuration option has been changed without recompressing clusters.
+        /// 1. The compression option has been changed without recompressing clusters.
         /// 2. Silent data corruption occured, and did the unlikely thing to has the right checksum.
         /// 3. There is a bug in compression or decompression.
         InvalidCompression {
@@ -81,6 +81,20 @@ quick_error! {
     }
 }
 
+/// Allocator options.
+///
+/// When an allocator system is provided, the user must provide some option, so they can adjust the
+/// behavior to their needs. This struct contain the parameters used to construct the allocator
+/// system.
+struct Options {
+    /// The options from the state block.
+    state_block: state_block::Options,
+    /// The options from the disk header.
+    disk_header: disk_header::Options,
+
+    // In the future, allocator specific options may be added here.
+}
+
 /// The state of some cluster.
 ///
 /// This caches a cluster uncompressed such that there is no need for decompression when appending
@@ -96,7 +110,7 @@ struct ClusterState {
     uncompressed: Vec<u8>,
 }
 
-/// The page manager.
+/// The page allocator system.
 ///
 /// This is the center point of the I/O stack, providing allocation, deallocation, compression,
 /// etc. It manages the clusters (with the page abstraction) and caches the disks.
@@ -113,7 +127,7 @@ struct Allocator<D> {
     ///
     /// This is the configuration part of the state block. We don't need a lock, since we won't
     /// mutate it while the system is initialized.
-    config: state_block::Config,
+    options: state_block::Options,
     /// The free-cache.
     ///
     /// This contains some number of pointers to free clusters, allowing multiple threads to
@@ -143,18 +157,42 @@ impl<D: Disk> Allocator<D> {
         // Read the state block.
         cache.read(0).map(|state_block| {
             // Parse the state block.
-            let state_block::StateBlock { state, config } =
-                state_block::StateBlock::decode(state_block, cache.header.checksum_algorithm);
+            let state_block::StateBlock { state, options } =
+                state_block::StateBlock::decode(state_block, cache.disk_header().checksum_algorithm);
 
             // I'm sure you're smart enough to figure out what is happening here. I trust you ^^.
             Allocator {
                 cache: cache,
                 state: Mutex::new(state),
-                config: config,
+                options: options,
                 free: SegQueue::new(),
                 last_cluster: thread_object::Object::default(),
                 dedup_table: dedup::Table::default(),
             }
+        })
+    }
+
+    /// Initialize a new system given a set of options.
+    ///
+    /// This uses the parameters from `options` to initialize a new, empty system on the disk
+    /// `disk`. This doesn't open the disk, as `Allocator::open()` does: Instead it creates a new
+    /// fresh system, ignoring the existing data.
+    ///
+    /// The initialization is complete when the returned future completes.
+    pub fn init(disk: D, options: Options) -> impl Future<Allocator, Error> {
+        // Initialize the disk (below the allocator stack).
+        Cache::init(disk, options.disk_header).and_then(|cache| {
+            // Write the state block to the start of the disk.
+            cache.write(0, options.state_block.encode()).map(|_| cache)
+
+            unimplemented!("We should add every cluster to the freelist here.");
+        }).map(|cache| Allocator {
+            cache: cache,
+            state: Mutex::new(state),
+            options: options.state_block,
+            free: SegQueue::new(),
+            last_cluster: thread_object::Object::default(),
+            dedup_table: dedup::Table::default(),
         })
     }
 
@@ -233,7 +271,7 @@ impl<D: Disk> Allocator<D> {
     fn alloc_eager(&self, buf: Box<disk::SectorBuf>, cksum: u32)
         -> impl Future<page::Pointer, Error> {
         // Handle the case where compression is disabled.
-        if self.config.compression_algorithm == CompressionAlgorithm::Identity {
+        if self.options.compression_algorithm == CompressionAlgorithm::Identity {
             // Pop a cluster from the freelist.
             return self.freelist_pop()
                 // Write the cluster with the raw, uncompressed data.
@@ -364,14 +402,14 @@ impl<D: Disk> Allocator<D> {
         self.cache.forget(page.cluster)
     }
 
-    /// Calculate the checksum of some buffer, based on the user configuration.
+    /// Calculate the checksum of some buffer, based on the user choice.
     fn checksum(&self, buf: &disk::SectorBuf) -> u64 {
         trace!(self, "calculating checksum");
 
         self.cache.disk_header().hash(buf)
     }
 
-    /// Compress some data based on the compression configuration option.
+    /// Compress some data based on the compression option.
     ///
     /// # Panics
     ///
@@ -380,7 +418,7 @@ impl<D: Disk> Allocator<D> {
         trace!(self, "compressing data");
 
         // Compress the input.
-        let compressed = match self.config.compression_algorithm {
+        let compressed = match self.options.compression_algorithm {
             // We'll panic if compression is disabled, as it is assumed that the caller handles
             // this case.
             CompressionAlgorithm::Identity => panic!("Compression was disabled."),
@@ -406,7 +444,7 @@ impl<D: Disk> Allocator<D> {
         }
     }
 
-    /// Decompress some data based on the compression configuration option.
+    /// Decompress some data based on the compression option.
     ///
     /// # Panics
     ///
@@ -417,7 +455,7 @@ impl<D: Disk> Allocator<D> {
         // Find the padding delimited (i.e. the last non-zero byte).
         if let Some((len, _)) = cluster.enumerate().rev().find(|(_, x)| x != 0) {
             // We found the delimiter and can now distinguish padding from data.
-            Ok(match self.config.compression_algorithm {
+            Ok(match self.options.compression_algorithm {
                 // We'll panic if compression is disabled, as it is assumed that the caller handles
                 // this case.
                 CompressionAlgorithm::Identity => panic!("Compression was disabled."),
@@ -440,7 +478,7 @@ impl<D: Disk> Allocator<D> {
         // Do it, lil' pupper. We do not need to wrap it in `future::lazy()` as `lock()` is already
         // lazy.
         self.state.lock().and_then(|state| self.cache.write(0, state_block::StateBlock {
-            config: self.config,
+            options: self.options,
             state: state,
         }.encode()))
     }

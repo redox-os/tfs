@@ -65,7 +65,7 @@ impl<D: Disk> Driver<D> {
     /// The result is wrapped in a future, which represents the operation, such that it can be
     /// executed asynchronously.
     fn open<D: Disk>(disk: D, password: &[u8]) -> impl Future<Driver, Error> {
-        info!(disk, "initializing the driver");
+        info!(disk, "loading the state and initializing the driver");
 
         // Read the disk header.
         debug!(disk, "read the disk header");
@@ -99,6 +99,24 @@ impl<D: Disk> Driver<D> {
         }).and_then(|driver| {
             // Flush the updated header.
             driver.flush_header().map(|_| driver)
+        })
+    }
+
+    /// Initialize a disk with a new header.
+    ///
+    /// This sets the disk header (provided by the `header` argument) of disk `disk` and returns
+    /// the driver representing the disk.
+    ///
+    /// It is used as an entry point to create a new file system.
+    fn init<D: Disk>(disk: D, options: header::Options) -> impl Future<Driver, Error> {
+        info!("creating a new system");
+
+        // Create the new header from the user-specified options.
+        let header = DiskHeader::new(options);
+        // Write the header to the disk.
+        disk.write(0, header.encode()).map(|_| Driver {
+            header: header,
+            disk: disk,
         })
     }
 
