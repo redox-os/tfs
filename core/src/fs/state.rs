@@ -1,5 +1,5 @@
 struct State {
-    alloc: alloc::Manager,
+    alloc: alloc::Allocator,
     reachable: cbloom::Filter,
 }
 
