@@ -4,6 +4,8 @@
 //! non-obviously, since clusters can hold more than one page at once (compression). Every cluster
 //! will maximize the number of pages held and when it's filled up, a new cluster will be fetched.
 
+use futures::sync::Mutex;
+
 /// The atomic ordering used in the allocator.
 const ORDERING: atomic::Ordering = atomic::Ordering::Relaxed;
 
@@ -98,7 +100,7 @@ struct Manager {
     /// This is the state as stored in the state block. The reason we do not store the whole state
     /// block in one is that, we want to avoid the lock when reading the static parts of the state
     /// block (e.g. configuration).
-    state: Lutex<state_block::State>,
+    state: Mutex<state_block::State>,
     /// The configuration options.
     ///
     /// This is the configuration part of the state block. We don't need a lock, since we won't
@@ -425,9 +427,9 @@ impl Manager {
     fn flush_state_block(&mut self) -> impl Future<(), disk::Error> {
         trace!(self, "flushing the state block");
 
-        // Do it, lil' pupper. We wrap it in `future::lazy()` to make sure that we don't first read
-        // and encode the state block and then much later flush it.
-        self.state.get().and_then(|state| self.cache.write(self.driver.header.state_block_address, state_block::StateBlock {
+        // Do it, lil' pupper. We do not need to wrap it in `future::lazy()` as `lock()` is already
+        // lazy.
+        self.state.lock().and_then(|state| self.cache.write(self.driver.header.state_block_address, state_block::StateBlock {
             config: self.config,
             state: state,
         }.encode()))
@@ -450,68 +452,74 @@ impl Manager {
                 // load it.
 
                 // Lock the state.
-                let state = self.state.lock();
-                // Just in case that another thread have filled the free-cache while we were
-                // locking the state, we will check if new clusters are in the free-cache.
-                if Some(x) = self.free.pop() {
-                    // We had a cluster in the free-cache.
-                    return free;
-                }
-
-                // Grab the next metacluster. If no other metacluster exists, we return an error.
-                let head = state.freelist_head.ok_or(Error::OutOfClusters)?;
-                // Load the new metacluster, and return the old metacluster.
-                let free = self.cache.read_then(head.cluster, |buf| {
-                    // Check that the checksum matches.
-                    let found = self.checksum(buf);
-                    if head.checksum != found {
-                        // Checksums do not match; throw an error.
-                        return Err(Error::MetacluterChecksumMismatch {
-                            cluster: head.cluster,
-                            expected: head.checksum,
-                            found: found,
-                        });
+                self.state.lock().and_then(|state| {
+                    // Just in case that another thread have filled the free-cache while we were
+                    // locking the state, we will check if new clusters are in the free-cache.
+                    if Some(x) = self.free.pop() {
+                        // We had a cluster in the free-cache.
+                        return free;
                     }
 
-                    // Now, we'll replace the old head metacluster with the chained metacluster.
-                    trace!(self, "metacluster checksum matched", "checksum" => found);
-
-                    // Replace the checksum of the head metacluster with the checksum of the
-                    // chained metacluster, which will soon be the head metacluster.
-                    head.checksum = little_endian::read(buf);
-                    // We'll initialize a window iterating over the pointers in this metacluster.
-                    let mut window = &buf[8..];
-                    // The first pointer points to the chained metacluster.
-                    let old_head = mem::replace(&mut head.cluster, little_endian::read(window));
-
-                    // The rest are free.
-                    while window.len() >= 8 {
-                        // Slide the window to the right.
-                        window = &window[8..];
-                        // Read the pointer.
-                        if let Some(cluster) = little_endian::read(window) {
-                            // There was anohter pointer in the metacluster, push it to the
-                            // free-cache.
-                            self.free.push(cluster)
-                        } else {
-                            // The pointer was a null pointer, so the metacluster is over.
-                            break;
+                    // Grab the next metacluster. If no other metacluster exists, we return an
+                    // error.
+                    let head = state.freelist_head.ok_or(Error::OutOfClusters)?;
+                    // Load the new metacluster, and return the old metacluster.
+                    let free = self.cache.read_then(head.cluster, |buf| {
+                        // Check that the checksum matches.
+                        let found = self.checksum(buf);
+                        if head.checksum != found {
+                            // Checksums do not match; throw an error.
+                            return Err(Error::MetacluterChecksumMismatch {
+                                cluster: head.cluster,
+                                expected: head.checksum,
+                                found: found,
+                            });
                         }
-                    }
 
-                    // Drop the old metacluster from the cache.
-                    self.cache.forget(old_head)?;
+                        // Now, we'll replace the old head metacluster with the chained
+                        // metacluster.
+                        trace!(self, "metacluster checksum matched", "checksum" => found);
 
-                    // We return the old head metacluster, and will use it as the popped free
-                    // cluster.  Mein gott, dis is incredibly convinient. *sniff*
-                    old_head
-                });
+                        // Replace the checksum of the head metacluster with the checksum of the
+                        // chained metacluster, which will soon be the head metacluster.
+                        head.checksum = little_endian::read(buf);
+                        // We'll initialize a window iterating over the pointers in this
+                        // metacluster.
+                        let mut window = &buf[8..];
+                        // The first pointer points to the chained metacluster.
+                        let old_head = mem::replace(&mut head.cluster, little_endian::read(window));
 
-                // Release the lock.
-                drop(state)
+                        // The rest are free.
+                        while window.len() >= 8 {
+                            // Slide the window to the right.
+                            window = &window[8..];
+                            // Read the pointer.
+                            if let Some(cluster) = little_endian::read(window) {
+                                // There was anohter pointer in the metacluster, push it to the
+                                // free-cache.
+                                self.free.push(cluster)
+                            } else {
+                                // The pointer was a null pointer, so the metacluster is over.
+                                break;
+                            }
+                        }
 
-                // Flush the state block to account for the changes. And return the popped cluster.
-                self.flush_state_block().map(|_| free)
+                        // Drop the old metacluster from the cache.
+                        self.cache.forget(old_head)?;
+
+                        // We return the old head metacluster, and will use it as the popped free
+                        // cluster. Mein gott, dis is incredibly convinient. *sniff* I should
+                        // really stop doing Zizek parody comments in my code.
+                        old_head
+                    });
+
+                    // Release the lock.
+                    drop(state)
+
+                    // Flush the state block to account for the changes. And return the popped
+                    // cluster.
+                    self.flush_state_block().map(|_| free)
+                })
             }
         })
     }
