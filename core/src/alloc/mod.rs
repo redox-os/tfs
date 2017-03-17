@@ -16,6 +16,8 @@ mod state_block;
 
 /// The atomic ordering used in the allocator.
 const ORDERING: atomic::Ordering = atomic::Ordering::Relaxed;
+/// The maximal number of clusters in a freelist node.
+const CLUSTERS_IN_FREELIST_NODE: u64 = cluster::SECTOR_SIZE / cluster::POINTER_SIZE;
 
 quick_error! {
     /// A page management error.
@@ -180,12 +182,12 @@ impl<D: Disk> Allocator<D> {
     ///
     /// The initialization is complete when the returned future completes.
     pub fn init(disk: D, options: Options) -> impl Future<Allocator, Error> {
+        unimplemented!();
+
         // Initialize the disk (below the allocator stack).
         Cache::init(disk, options.disk_header).and_then(|cache| {
             // Write the state block to the start of the disk.
             cache.write(0, options.state_block.encode()).map(|_| cache)
-
-            unimplemented!("We should add every cluster to the freelist here.");
         }).map(|cache| Allocator {
             cache: cache,
             state: Mutex::new(state),
@@ -533,14 +535,14 @@ impl<D: Disk> Allocator<D> {
                         head.checksum = little_endian::read(buf);
                         // We'll initialize a window iterating over the pointers in this
                         // metacluster.
-                        let mut window = &buf[8..];
+                        let mut window = &buf[cluster::POINTER_SIZE..];
                         // The first pointer points to the chained metacluster.
                         let old_head = mem::replace(&mut head.cluster, little_endian::read(window));
 
                         // The rest are free.
                         while window.len() >= 8 {
                             // Slide the window to the right.
-                            window = &window[8..];
+                            window = &window[cluster::POINTER_SIZE..];
                             // Read the pointer.
                             if let Some(cluster) = little_endian::read(window) {
                                 // There was anohter pointer in the metacluster, push it to the
@@ -591,7 +593,7 @@ impl<D: Disk> Allocator<D> {
         while let Some(free) = self.free.pop() {
             if window == disk::SECTOR_SIZE {
                 little_endian::write(&mut buf, cksum);
-                little_endian::write(&mut buf[8..], cluster);
+                little_endian::write(&mut buf[cluster::POINTER_SIZE..], cluster);
 
                 cluster = free;
                 cksum = self.checksum(buf);
