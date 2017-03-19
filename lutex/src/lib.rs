@@ -14,6 +14,10 @@ use futures::task::{self, Task};
 
 const ORDERING: atomic::Ordering = atomic::Ordering::Relaxed;
 
+/// A `Lutex` worker future.
+///
+/// This future does on job queued to the lutex every poll. When the job of the data, it
+/// represents, is done, the return value of the inner data's job is returned.
 pub struct Worker<T, R, E> {
     ret: Arc<AtomicOption<Result<R, E>>>,
     lutex: Arc<LutexInternal<T>>,
@@ -24,14 +28,15 @@ impl<T, R, E> Future for Worker<T, R, E> {
     type Error = E;
 
     fn poll(&mut self) -> futures::Poll<R, E> {
-        if self.lutex.progress() {
-            match self.ret.take(ORDERING) {
-                Some(Ok(x)) => Ok(futures::Async::Ready(x)),
-                Some(Err(x)) => Err(x),
-                None => Ok(futures::Async::NotReady),
-            }
-        } else {
-            Ok(futures::Async::NotReady)
+        self.lutex.progress();
+
+        match self.ret.take(ORDERING) {
+            Some(Ok(x)) => Ok(futures::Async::Ready(x)),
+            Some(Err(x)) => Err(x),
+            None => {
+                self.lutex.park();
+                Ok(futures::Async::NotReady)
+            },
         }
     }
 }
@@ -53,41 +58,43 @@ impl<T> LutexInternal<T> {
         }
     }
 
-    fn progress(&self) -> bool {
+    fn progress(&self) {
         if !self.locked.swap(true, ORDERING) {
             let f = self.queue.try_pop().unwrap();
             f(self.data.get());
             self.locked.store(false, ORDERING);
             self.parked.try_pop().map(|task| task.unpark());
-
-            true
-        } else {
-            self.parked.push(task::park());
-            false
         }
     }
+
+    fn park(&self) {
+        self.parked.push(task::park());
+    }
 }
+
+unsafe impl<T> Sync for LutexInternal<T> {}
+unsafe impl<T> Send for LutexInternal<T> {}
 
 pub struct Lutex<T> {
     inner: Arc<LutexInternal<T>>,
 }
 
 impl<T> Lutex<T> {
+    /// Create a new `Lutex<T>` with some initial data.
     pub fn new(data: T) -> Lutex<T> {
         Lutex {
             inner: Arc::new(LutexInternal::new(data)),
         }
     }
 
-    pub fn with<F: 'static>(&self, f: F) -> impl Future<Item = (), Error = ()>
-        where F: FnOnce(&mut T) {
-        self.try_with::<(), (), _>(|x| {
-            f(x);
-            Ok(())
+    pub fn with<R: 'static, F: 'static + Send>(&self, f: F) -> Worker<T, R, ()>
+        where F: FnOnce(&mut T) -> R {
+        self.try_with::<R, (), _>(|x| {
+            Ok(f(x))
         })
     }
 
-    pub fn try_with<R: 'static, E: 'static, F: 'static>(&self, f: F) -> impl Future<Item = R, Error = E>
+    pub fn try_with<R: 'static, E: 'static, F: 'static + Send>(&self, f: F) -> Worker<T, R, E>
         where F: FnOnce(&mut T) -> Result<R, E> {
         let ret = Arc::new(AtomicOption::new());
 
@@ -103,9 +110,18 @@ impl<T> Lutex<T> {
     }
 }
 
+impl<T> Clone for Lutex<T> {
+    fn clone(&self) -> Lutex<T> {
+        Lutex {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::thread;
 
     #[test]
     fn single_thread_queue() {
@@ -117,5 +133,39 @@ mod tests {
         lutex.with(|x| *x += 2).wait().unwrap();
         lutex.with(|x| *x += 2).wait().unwrap();
         lutex.with(|x| assert_eq!(*x, 104)).wait().unwrap();
+    }
+
+    #[test]
+    fn many_threads() {
+        let lutex = Lutex::new(0);
+        let mut v = Vec::new();
+        for _ in 0..1000 {
+            let lutex = lutex.clone();
+            v.push(thread::spawn(move || lutex.with(|x| *x += 1)));
+        }
+
+        v.push(thread::spawn(move || lutex.with(|x| assert_eq!(*x, 100))));
+
+        for i in v {
+            i.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn mutually_exclusive() {
+        let lutex = Lutex::new(false);
+        let mut v = Vec::new();
+        for _ in 0..1000 {
+            let lutex = lutex.clone();
+            v.push(thread::spawn(move || lutex.with(|x| {
+                assert!(!*x);
+                *x = true;
+                *x = false;
+            })));
+        }
+
+        for i in v {
+            i.join().unwrap();
+        }
     }
 }
