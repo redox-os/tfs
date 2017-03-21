@@ -17,7 +17,8 @@ mod state_block;
 /// The atomic ordering used in the allocator.
 const ORDERING: atomic::Ordering = atomic::Ordering::Relaxed;
 /// The maximal number of clusters in a freelist node.
-const CLUSTERS_IN_FREELIST_NODE: u64 = cluster::SECTOR_SIZE / cluster::POINTER_SIZE;
+const CLUSTERS_IN_FREELIST_NODE: u64 = cluster::SECTOR_SIZE / cluster::POINTER_SIZE - 1;
+// We subtract 1 to account for checksum.
 
 quick_error! {
     /// A page management error.
@@ -474,15 +475,17 @@ impl<D: Disk> Allocator<D> {
     /// Flush the state block.
     ///
     /// This creates a future, which will flush the state block when executed.
-    fn flush_state_block(&mut self) -> impl Future<(), disk::Error> {
+    ///
+    /// It takes a mutable reference to the state in order to avoid clogging up the transaction and
+    /// flushing asynchronized.
+    fn flush_state_block(&mut self, state: &mut State) -> impl Future<(), disk::Error> {
         trace!(self, "flushing the state block");
 
-        // Do it, lil' pupper. We do not need to wrap it in `future::lazy()` as `lock()` is already
-        // lazy.
-        self.state.lock().and_then(|state| self.cache.write(0, state_block::StateBlock {
+        // Encode and write to virtual sector 0, the state block's sector.
+        self.cache.write(0, state_block::StateBlock {
             options: self.options,
             state: state,
-        }.encode()))
+        }.encode())
     }
 
     /// Pop from the freelist.
@@ -498,23 +501,16 @@ impl<D: Disk> Allocator<D> {
                 // We had a cluster in the free-cache.
                 free
             } else {
-                // We were unable to pop from the free-cache, so we must grab the next metacluster and
-                // load it.
+                // We were unable to pop from the free-cache, so we must grab the next metacluster
+                // and load it.
 
                 // Lock the state.
-                self.state.lock().and_then(|state| {
-                    // Just in case that another thread have filled the free-cache while we were
-                    // locking the state, we will check if new clusters are in the free-cache.
-                    if Some(x) = self.free.pop() {
-                        // We had a cluster in the free-cache.
-                        return free;
-                    }
-
+                self.state.with(|state| {
                     // Grab the next metacluster. If no other metacluster exists, we return an
                     // error.
                     let head = state.freelist_head.ok_or(Error::OutOfClusters)?;
                     // Load the new metacluster, and return the old metacluster.
-                    let free = self.cache.read_then(head.cluster, |buf| {
+                    self.cache.read_then(head.cluster, |buf| {
                         // Check that the checksum matches.
                         let found = self.checksum(buf);
                         if head.checksum != found {
@@ -539,6 +535,11 @@ impl<D: Disk> Allocator<D> {
                         // The first pointer points to the chained metacluster.
                         let old_head = mem::replace(&mut head.cluster, little_endian::read(window));
 
+                        // It is absolutely crucial that we don't simply push directly to
+                        // `self.free` as we're in an atomic transaction, which can potentially be
+                        // run multiple times. Hence, such behavior could cause weird bugs such as
+                        // double free.
+                        let mut free = Vec::with_capacity(CLUSTERS_IN_FREELIST_NODE);
                         // The rest are free.
                         while window.len() >= 8 {
                             // Slide the window to the right.
@@ -547,28 +548,36 @@ impl<D: Disk> Allocator<D> {
                             if let Some(cluster) = little_endian::read(window) {
                                 // There was anohter pointer in the metacluster, push it to the
                                 // free-cache.
-                                self.free.push(cluster)
+                                free.push(cluster)
                             } else {
                                 // The pointer was a null pointer, so the metacluster is over.
                                 break;
                             }
                         }
 
+                        // Finally we push the old head to the vector, as it is free now.
+                        free.push(old_head);
+
                         // Drop the old metacluster from the cache.
                         self.cache.forget(old_head)?;
 
-                        // We return the old head metacluster, and will use it as the popped free
-                        // cluster. Mein gott, dis is incredibly convinient. *sniff* I should
-                        // really stop doing Zizek parody comments in my code.
-                        old_head
-                    });
+                        free
+                    })
+                }).and_then(|free| {
+                    // Finally, we must flush the state block before we can add the found clutters
+                    // to the free cache.
+                    // FIXME: The `map` here is ugly.
+                    self.flush_state_block(state).map(|_| free)
+                }).map(|free| {
+                    // At this point, the transaction have run and the state block is flushed.
 
-                    // Release the lock.
-                    drop(state)
+                    // Push every (except one) element of our temporary vector of free clusters.
+                    for i in free[1..] {
+                        self.free.push(i);
+                    }
 
-                    // Flush the state block to account for the changes. And return the popped
-                    // cluster.
-                    self.flush_state_block().map(|_| free)
+                    // We use the last cluster as the popped cluster.
+                    free[0]
                 })
             }
         })
