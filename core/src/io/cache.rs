@@ -45,7 +45,7 @@ impl<D: Disk> Cache<D> {
     fn write(
         &self,
         sector: disk::Sector,
-        buf: Box<disk::SectorBuf>
+        buf: Box<disk::SectorBuf>,
     ) -> impl Future<(), disk::Error> {
         debug!(self, "writing sector"; "sector" => sector);
 

@@ -7,7 +7,11 @@ struct State {
 }
 
 impl Fs {
-    pub fn alloc(&self, buf: disk::SectorBuf, description: &'static str) -> impl Future<page::Pointer, Error> {
+    pub fn alloc(
+        &self,
+        buf: disk::SectorBuf,
+        description: &'static str,
+    ) -> impl Future<page::Pointer, Error> {
         debug!(self, "allocating buffer", "description" => description);
 
         // Allocate the buffer.
