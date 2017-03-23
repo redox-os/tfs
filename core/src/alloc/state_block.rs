@@ -84,7 +84,10 @@ struct State {
 
 impl StateBlock {
     /// Parse the binary representation of a state block.
-    fn decode(buf: &disk::SectorBuf, checksum_algorithm: header::ChecksumAlgorithm) -> Result<StateBlock, Error> {
+    fn decode(
+        buf: &disk::SectorBuf,
+        checksum_algorithm: header::ChecksumAlgorithm,
+    ) -> Result<StateBlock, Error> {
         // Make sure that the checksum of the state block matches the 8 byte field in the start.
         let expected = little_endian::read(&buf);
         let found = checksum_algorithm.hash(&buf[8..]);

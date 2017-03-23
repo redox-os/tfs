@@ -159,8 +159,10 @@ mod tests {
     use std::{ops, mem, fmt};
 
     fn test_int<T>(n: T)
-        where T: Encode + Decode + Copy + PartialEq + ops::BitAnd<T, Output = T> + ops::Shr<T,
-              Output = T> + From<u8> + fmt::Debug {
+    where
+        T: Encode + Decode + Copy + PartialEq + From<u8> + fmt::Debug + ops::BitAnd<T, Output = T>
+            + ops::Shr<T, Output = T>,
+    {
         let len = mem::size_of::<T>();
         let mut buf = [0; 32];
         write(&mut buf, n);

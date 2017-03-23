@@ -34,18 +34,19 @@ impl State {
     /// Hash a buffer with some seed.
     pub fn hash(buf: &[u8], (mut a, mut b, mut c, mut d): (u64, u64, u64, u64)) -> State {
         unsafe {
-            // We use 4 different registers to store seperate hash states, because this allows us to update
-            // them seperately, and consequently exploiting ILP to update the states in parallel.
+            // We use 4 different registers to store seperate hash states, because this allows us
+            // to update them seperately, and consequently exploiting ILP to update the states in
+            // parallel.
 
             // The pointer to the current bytes.
             let mut ptr = buf.as_ptr();
-            /// The end of the "main segment", i.e. the biggest buffer s.t. the length is divisible by
-            /// 32.
+            /// The end of the "main segment", i.e. the biggest buffer s.t. the length is divisible
+            /// by 32.
             let end_ptr = buf.as_ptr().offset(buf.len() as isize & !0x1F);
 
             while end_ptr > ptr {
-                // Modern CPUs allow the pointer arithmetic to be done in place, hence not introducing
-                // tmpvars.
+                // Modern CPUs allow the pointer arithmetic to be done in place, hence not
+                // introducing tmpvars.
                 a ^= helper::read_u64(ptr);
                 b ^= helper::read_u64(ptr.offset(8));
                 c ^= helper::read_u64(ptr.offset(16));
@@ -54,15 +55,16 @@ impl State {
                 // Increment the pointer.
                 ptr = ptr.offset(32);
 
-                // Diffuse the updated registers. We hope that each of these are executed in parallel.
+                // Diffuse the updated registers. We hope that each of these are executed in
+                // parallel.
                 a = helper::diffuse(a);
                 b = helper::diffuse(b);
                 c = helper::diffuse(c);
                 d = helper::diffuse(d);
             }
 
-            // Calculate the number of excessive bytes. These are bytes that could not be handled in
-            // the loop above.
+            // Calculate the number of excessive bytes. These are bytes that could not be handled
+            // in the loop above.
             let mut excessive = buf.len() as usize + buf.as_ptr() as usize - end_ptr as usize;
             // Handle the excessive bytes.
             match excessive {
@@ -264,10 +266,10 @@ pub fn hash(buf: &[u8]) -> u64 {
 /// This is not secure, as [the key can be extracted with a bit of computational
 /// work](https://github.com/ticki/tfs/issues/5), as such, it is recommended to have a fallback
 /// hash function (adaptive hashing) in the case of hash flooding. It can be considered unbroken if
-/// the output is not known (i.e. no malicious party has access to the raw values of the keys,
-/// only a permutation thereof).), however I absolutely do not recommend using it for this. If you
-/// want to be strict, this should only be used as a layer of obfuscation, such that the fallback
-/// (e.g. SipHash) is harder to trigger.
+/// the output is not known (i.e. no malicious party has access to the raw values of the keys, only
+/// a permutation thereof).), however I absolutely do not recommend using it for this. If you want
+/// to be strict, this should only be used as a layer of obfuscation, such that the fallback (e.g.
+/// SipHash) is harder to trigger.
 ///
 /// In the future, I might strengthen the security if possible while having backward compatibility
 /// with the default initialization vector.

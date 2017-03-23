@@ -21,8 +21,12 @@ pub struct Table<K, V>  {
 }
 
 impl<K: Hash + Eq, V> Table<K, V> {
-    fn two_entries(pair_a: Pair<K, V>, sponge_a: Sponge, pair_b: Pair<K, V>, sponge_b: Sponge)
-        -> Table<K, V> {
+    fn two_entries(
+        pair_a: Pair<K, V>,
+        sponge_a: Sponge,
+        pair_b: Pair<K, V>,
+        sponge_b: Sponge,
+    ) -> Table<K, V> {
         // Start with an empty table.
         let mut table = Table::default();
 
@@ -150,7 +154,12 @@ impl<K: Hash + Eq, V> Table<K, V> {
         }
     }
 
-    pub fn remove(&self, key: &K, sponge: Sponge, guard: &epoch::Guard) -> Option<epoch::Shared<K, V>> {
+    pub fn remove(
+        &self,
+        key: &K,
+        sponge: Sponge,
+        guard: &epoch::Guard,
+    ) -> Option<epoch::Shared<K, V>> {
         // We squeeze the sponge to get the right entry of our table, in which we will potentially
         // remove the key.
         let entry = self.table[sponge.squeeze() as usize];

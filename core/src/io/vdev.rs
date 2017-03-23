@@ -78,8 +78,8 @@ impl<D: Disk> Driver<D> {
             match driver.header.state_flag {
                 // Throw a warning if it wasn't properly shut down.
                 StateFlag::Open => {
-                    warn!(driver, "the disk's state flag is still open, likely wasn't properly shut down \
-                                   last time; beware of data loss");
+                    warn!(driver, "the disk's state flag is still open, likely wasn't properly shut \
+                                   down last time; beware of data loss");
                 },
                 // The state inconsistent; throw an error.
                 StateFlag::Inconsistent => return Err(OpenError::InconsistentState),

@@ -86,10 +86,8 @@ impl State {
         // components are mutually distinct, and thus swapping even and odd chunks will affect the
         // result, because it is sensitive to the initial condition. To add discreteness, we
         // diffuse.
-        helper::diffuse(self.a
-            ^ self.b
-            ^ self.c
-            ^ self.d
+        helper::diffuse(
+            self.a ^ self.b ^ self.c ^ self.d
             // We XOR in the number of written bytes to make it zero-sensitive when excessive bytes
             // are written (0u32.0u8 ≠ 0u16.0u8).
             ^ total as u64
@@ -115,7 +113,13 @@ impl State {
 /// maximal performance, but this makes code significantly less readable. As such, this version has
 /// only one goal: to make the algorithm readable and understandable.
 pub fn hash(buf: &[u8]) -> u64 {
-    hash_seeded(buf, 0x16f11fe89b0d677c, 0xb480a793d8e6c86c, 0x6fe2e5aaf078ebc9, 0x14f994a4c5259381)
+    hash_seeded(
+        buf,
+        0x16f11fe89b0d677c,
+        0xb480a793d8e6c86c,
+        0x6fe2e5aaf078ebc9,
+        0x14f994a4c5259381
+    )
 }
 
 /// The seeded version of the reference implementation.

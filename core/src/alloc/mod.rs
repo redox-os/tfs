@@ -214,8 +214,12 @@ impl<D: Disk> Allocator<D> {
     /// # Panics
     ///
     /// This will panic if compression is disabled.
-    fn alloc_in_new_cluster(&self, buf: Box<disk::SectorBuf>, last_cluster: &mut Option<ClusterState>, cksum: u32)
-        -> impl Future<page::Pointer, Error> {
+    fn alloc_in_new_cluster(
+        &self,
+        buf: Box<disk::SectorBuf>,
+        last_cluster: &mut Option<ClusterState>,
+        cksum: u32,
+    ) -> impl Future<page::Pointer, Error> {
         // Pop the cluster from the freelist, then attempt to compress the data.
         self.freelist_pop().and_then(|cluster| if let Some(compressed) = self.compress(buf) {
             // We were able to compress the page to fit into the cluster. At first, compressing the
@@ -271,8 +275,11 @@ impl<D: Disk> Allocator<D> {
     /// This **does not** update the deduplication table, nor does it try to look for duplicates.
     /// Futhermore, some of the logic acts eagerly, and thus it ought to be wrapped in
     /// `future::lazy()` to avoid it being out of sequence.
-    fn alloc_eager(&self, buf: Box<disk::SectorBuf>, cksum: u32)
-        -> impl Future<page::Pointer, Error> {
+    fn alloc_eager(
+        &self,
+        buf: Box<disk::SectorBuf>,
+        cksum: u32,
+    ) -> impl Future<page::Pointer, Error> {
         // Handle the case where compression is disabled.
         if self.options.compression_algorithm == CompressionAlgorithm::Identity {
             // Pop a cluster from the freelist.
@@ -360,8 +367,10 @@ impl<D: Disk> Allocator<D> {
     /// Read/dereference a page.
     ///
     /// This reads page `page` and returns the content, wrapped in a future.
-    pub fn read(&self, page: page::Pointer)
-        -> impl Future<atomic_hash_map::Value<disk::SectorBuf>, Error> {
+    pub fn read(
+        &self,
+        page: page::Pointer,
+    ) -> impl Future<atomic_hash_map::Value<disk::SectorBuf>, Error> {
         trace!(self, "reading page"; "page" => page);
 
         // Read the cluster in which the page is stored.
