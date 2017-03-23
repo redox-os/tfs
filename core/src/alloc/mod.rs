@@ -125,7 +125,7 @@ struct Allocator<D> {
     /// This is the state as stored in the state block. The reason we do not store the whole state
     /// block in one is that, we want to avoid the lock when reading the static parts of the state
     /// block (e.g. configuration).
-    state: Mutex<state_block::State>,
+    state: tm::Memory<state_block::State>,
     /// The configuration options.
     ///
     /// This is the configuration part of the state block. We don't need a lock, since we won't
@@ -166,7 +166,7 @@ impl<D: Disk> Allocator<D> {
             // I'm sure you're smart enough to figure out what is happening here. I trust you ^^.
             Allocator {
                 cache: cache,
-                state: Mutex::new(state),
+                state: tm::Memory::new(state),
                 options: options,
                 free: SegQueue::new(),
                 last_cluster: thread_object::Object::default(),
@@ -191,7 +191,7 @@ impl<D: Disk> Allocator<D> {
             cache.write(0, options.state_block.encode()).map(|_| cache)
         }).map(|cache| Allocator {
             cache: cache,
-            state: Mutex::new(state),
+            state: tm::Memory::new(state),
             options: options.state_block,
             free: SegQueue::new(),
             last_cluster: thread_object::Object::default(),
