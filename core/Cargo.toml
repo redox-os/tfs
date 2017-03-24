@@ -9,7 +9,7 @@ lz4-compress = "0.1"
 quick-error = "1.1"
 ring = "0.7"
 seahash = "3.0"
-slog = "2.0"
+slog = "1.5"
 speck = "1.0"
 
 [features]

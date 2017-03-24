@@ -30,7 +30,7 @@ impl little_endian::Decode for Option<Pointer> {
         } else {
             // The pointer wasn't null, so we can simply read it as an integer. Note that we have
             // already ensured that it is not null, so it is safe.
-            Some(Pointer(unsafe { NonZero::new(little_endian::read(from) })))
+            Some(Pointer(unsafe { NonZero::new(little_endian::read(from)) }))
         }
     }
 }

@@ -92,7 +92,7 @@ impl<D: Disk> Cache<D> {
             trace!(self, "cache miss; reading from disk"; "sector" => sector);
 
             // Insert the sector into the cache tracker.
-            self.tracker.touch(sector):
+            self.tracker.touch(sector);
 
             // Fetch the data from the disk.
             self.disk.read(sector).map(|buf| {

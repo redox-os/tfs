@@ -284,7 +284,7 @@ impl DiskHeader {
         //
         // This section stores a single number, namely the UID. The UID is supposed to be a secret
         // ID used throughout the code, such as seed for hashing and salt for key stretching.
-        let uid = little_endian::read(&buf[16..])
+        let uid = little_endian::read(&buf[16..]);
 
         // # State section
         //

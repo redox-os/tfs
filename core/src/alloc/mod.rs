@@ -310,7 +310,7 @@ impl<D: Disk> Allocator<D> {
                 if let Some(compress) = self.compress(state.uncompressed) {
                     // It succeeded! Write the compressed data into the cluster.
                     return self.cache.write(state.cluster, compressed).map(|_| page::Pointer {
-                        cluster: state.cluster.
+                        cluster: state.cluster,
                         // The offset is determined by simple division to get the number of
                         // sectors the uncompressed buffer spans.
                         offset: Some(state.uncompressed.len() / disk::SECTOR_SIZE),

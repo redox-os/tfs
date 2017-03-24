@@ -11,8 +11,8 @@ impl Array<T> {
         self.len <= POINTERS_IN_NODE
     }
 
-    fn for_each<F>(&self, fs: &fs::State, range: Range, f: F) -> Result<(), alloc::Error>
-    where F: Fn(usize, page::Pointer) -> impl Future<(), alloc::Error> {
+    fn for_each<F>(&self, fs: &fs::State, range: Range, f: F) -> impl Future<(), alloc::Error>
+    where F: Fn(usize, page::Pointer) {
         unimplemented!();
     }
 }

@@ -1,10 +1,6 @@
-mod alloc;
 mod cache;
 mod cluster;
 mod crypto;
-mod dedup;
 mod disk;
 mod header;
-mod page;
-mod state_block;
 mod vdev;
