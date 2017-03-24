@@ -148,7 +148,8 @@ impl<K, V> Bucket<K, V> {
     /// Does the bucket match a given key?
     ///
     /// This returns `true` if the bucket is a KV pair with key `key`. If not, `false` is returned.
-    fn key_matches(&self, key: &K) -> bool where K: PartialEq {
+    fn key_matches(&self, key: &K) -> bool
+    where K: PartialEq {
         if let Bucket::Contains(ref candidate_key, _) = *self {
             // Check if the keys matches.
             candidate_key == key
@@ -225,7 +226,7 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
     ///
     /// The read guard from the RW-lock of the bucket is returned.
     fn scan<F>(&self, key: &K, matches: F) -> RwLockReadGuard<Bucket<K, V>>
-        where F: Fn(&Bucket<K, V>) -> bool {
+    where F: Fn(&Bucket<K, V>) -> bool {
         // Hash the key.
         let hash = self.hash(key);
 
@@ -251,7 +252,7 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
     /// This is similar to `scan`, but instead of an immutable lock guard, a mutable lock guard is
     /// returned.
     fn scan_mut<F>(&self, key: &K, matches: F) -> RwLockWriteGuard<Bucket<K, V>>
-        where F: Fn(&Bucket<K, V>) -> bool {
+    where F: Fn(&Bucket<K, V>) -> bool {
         // Hash the key.
         let hash = self.hash(key);
 
@@ -277,7 +278,7 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
     /// This is similar to `scan_mut`, but it safely bypasses the locks by making use of the
     /// aliasing invariants of `&mut`.
     fn scan_mut_no_lock<F>(&mut self, key: &K, matches: F) -> &mut Bucket<K, V>
-        where F: Fn(&Bucket<K, V>) -> bool {
+    where F: Fn(&Bucket<K, V>) -> bool {
         // Hash the key.
         let hash = self.hash(key);
         // TODO: To tame the borrowchecker, we fetch this in advance.
@@ -636,7 +637,7 @@ impl<K, V> CHashMap<K, V> {
     /// Deprecated. Do not use.
     #[deprecated]
     pub fn filter<F>(&self, predicate: F)
-        where F: Fn(&K, &V) -> bool {
+    where F: Fn(&K, &V) -> bool {
         // Following the naming conventions of the standard library...
         self.retain(predicate)
     }
@@ -650,7 +651,7 @@ impl<K, V> CHashMap<K, V> {
     /// must lock on every table entry. However, it won't block other operations of the table,
     /// while filtering.
     pub fn retain<F>(&self, predicate: F)
-        where F: Fn(&K, &V) -> bool {
+    where F: Fn(&K, &V) -> bool {
         // Acquire the read lock to the table.
         let table = self.table.read();
         // Run over every bucket and apply the filter.
@@ -796,8 +797,10 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
     /// This looks up `key`. If it exists, the reference to its value is passed through closure
     /// `update`.  If it doesn't exist, the result of closure `insert` is inserted.
     pub fn upsert<F, G>(&self, key: K, insert: F, update: G)
-        where F: FnOnce() -> V,
-              G: FnOnce(&mut V) {
+    where
+        F: FnOnce() -> V,
+        G: FnOnce(&mut V),
+    {
         // Expand and lock the table. We need to expand to ensure the bounds on the load factor.
         let lock = self.table.read();
         {
@@ -830,7 +833,7 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
     ///
     /// Note that if `f` returns `None`, the entry of key `key` is removed unconditionally.
     pub fn alter<F>(&self, key: K, f: F)
-        where F: FnOnce(Option<V>) -> Option<V> {
+    where F: FnOnce(Option<V>) -> Option<V> {
         // Expand and lock the table. We need to expand to ensure the bounds on the load factor.
         let lock = self.table.read();
         {

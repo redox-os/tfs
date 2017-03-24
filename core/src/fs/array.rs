@@ -12,7 +12,7 @@ impl Array<T> {
     }
 
     fn for_each<F>(&self, fs: &fs::State, range: Range, f: F) -> Result<(), alloc::Error>
-        where F: Fn(usize, page::Pointer) -> impl Future<(), alloc::Error> {
+    where F: Fn(usize, page::Pointer) -> impl Future<(), alloc::Error> {
         unimplemented!();
     }
 }

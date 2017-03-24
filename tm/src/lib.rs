@@ -18,8 +18,10 @@ impl<T> Memory<T> {
     }
 
     fn with<F>(&self, f: F)
-        where F: Fn(&T) -> T,
-              T: Clone {
+    where
+        F: Fn(&T) -> T,
+        T: Clone,
+    {
         let epoch = epoch::pin();
         loop {
             let ptr = unsafe { &*self.inner.load(ORDERING) };

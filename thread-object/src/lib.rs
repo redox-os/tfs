@@ -69,7 +69,8 @@ impl<T: Clone + Any> Object<T> {
     ///
     /// The reason we use a closure is to prevent the programmer leaking the pointer to another
     /// thread, causing memory safety issues as the pointer is only valid in the current thread.
-    pub fn with<F, R>(&self, f: F) -> R where F: FnOnce(&mut T) -> R {
+    pub fn with<F, R>(&self, f: F) -> R
+    where F: FnOnce(&mut T) -> R {
         // We'll fetch it from the thread object map.
         THREAD_OBJECTS.with(|map| {
             // TODO: Eliminate this `RefCell`.
@@ -89,7 +90,8 @@ impl<T: Clone + Any> Object<T> {
     }
 
     /// Copy the inner value.
-    pub fn get(&self) -> T where T: Copy {
+    pub fn get(&self) -> T
+    where T: Copy {
         self.with(|x| *x)
     }
 }
