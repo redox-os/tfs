@@ -693,3 +693,12 @@ fn capacity_not_less_than_len() {
     a.insert(item, 0);
     assert!(a.capacity() > a.len());
 }
+
+#[test]
+fn insert_into_map_full_of_free_buckets() {
+    let m = CHashMap::with_capacity(1);
+    for i in 0..100 {
+        m.insert(i, 0);
+        m.remove(&i);
+    }
+}
