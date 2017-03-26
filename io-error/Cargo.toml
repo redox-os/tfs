@@ -1,0 +1,10 @@
+[package]
+name = "io-error"
+version = "0.1.0"
+authors = ["ticki <Ticki@users.noreply.github.com>"]
+description = "Simple and convenient macro for creating I/O errors."
+repository = "https://github.com/ticki/tfs"
+documentation = "https://docs.rs/io-error"
+license = "MIT"
+keywords = ["error", "err", "io", "error-chain", "quick-error"]
+exclude = ["target", "Cargo.lock"]
