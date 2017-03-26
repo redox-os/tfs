@@ -845,6 +845,7 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
                     // Set the bucket to a KV pair with the new value.
                     *bucket = Bucket::Contains(key, new_val);
                     // No extension required, as the bucket already had a KV pair previously.
+                    return;
                 } else {
                     // The old entry was removed, so we decrement the length of the map.
                     self.len.fetch_sub(1, ORDERING);

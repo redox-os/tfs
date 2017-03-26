@@ -254,7 +254,7 @@ fn alter_string() {
         x.push('a');
         Some(x)
     });
-    assert_eq!(m.len(), 2);
+    assert_eq!(m.len(), 1);
     assert_eq!(&*m.get(&1).unwrap(), "a");
 }
 
