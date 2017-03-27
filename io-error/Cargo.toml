@@ -1,6 +1,6 @@
 [package]
 name = "io-error"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["ticki <Ticki@users.noreply.github.com>"]
 description = "Simple and convenient macro for creating I/O errors."
 repository = "https://github.com/ticki/tfs"

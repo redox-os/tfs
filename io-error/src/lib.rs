@@ -43,10 +43,14 @@ impl error::Error for Err {
 /// # Example
 ///
 /// ```rust
+/// #[macro_use]
+/// extern crate io_error;
+///
 /// let x = 42 + 3;
 /// let error = err!(NotFound, "my error description", "this is an error, x is {}", x);
 /// let error2 = err!(InvalidData, "my second error description");
 /// ```
+#[macro_export]
 macro_rules! err {
     ($kind:ident, $desc:expr, $($rest:tt)*) => {
         // Construct the I/O error.
