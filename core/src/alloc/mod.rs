@@ -273,7 +273,7 @@ impl<D: Disk> Allocator<D> {
     /// returns the page pointer wrapped in a future.
     ///
     /// This **does not** update the deduplication table, nor does it try to look for duplicates.
-    /// Futhermore, some of the logic acts eagerly, and thus it ought to be wrapped in
+    /// Furthermore, some of the logic acts eagerly, and thus it ought to be wrapped in
     /// `future::lazy()` to avoid it being out of sequence.
     fn alloc_eager(
         &self,
@@ -555,7 +555,7 @@ impl<D: Disk> Allocator<D> {
                             window = &window[cluster::POINTER_SIZE..];
                             // Read the pointer.
                             if let Some(cluster) = little_endian::read(window) {
-                                // There was anohter pointer in the metacluster, push it to the
+                                // There was another pointer in the metacluster, push it to the
                                 // free-cache.
                                 free.push(cluster)
                             } else {
