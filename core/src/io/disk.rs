@@ -14,33 +14,6 @@ const SECTOR_SIZE: usize = 512;
 /// The size of a sector pointer.
 const SECTOR_POINTER_SIZE: usize = 8;
 
-quick_error! {
-    /// A disk I/O error.
-    enum Error {
-        /// The read or write exceeded the address space of the disk.
-        ///
-        /// This is triggered when the sector read or written to does not exist.
-        OutOfBounds {
-            /// The sector out-of-bounds.
-            sector: Sector,
-        } {
-            display("Disk sector {} past end of disk.", sector)
-            description("Disk sector past end of disk.")
-        }
-        /// The sector is determined to be corrupted per the hardware checks.
-        ///
-        /// Most modern hard disks implement some form of consistency checks. If said check fails, this
-        /// error shall be returned.
-        CorruptSector {
-            /// The corrupt sector.
-            sector: Sector,
-        } {
-            display("Disk sector {} is corrupt.", sector)
-            description("Corrupt disk sector.")
-        }
-    }
-}
-
 /// A storage device.
 ///
 /// This trait acts similarly to `std::io::{Read, Write}`, but is designed specifically for disks.

@@ -1,27 +1,3 @@
-quick_error! {
-    /// A state block parsing error.
-    enum Error {
-        /// Unknown or implementation-specific compression algorithm.
-        UnknownCompressionAlgorithm {
-            description("Unknown compression algorithm option.")
-        }
-        /// Invalid compression algorithm.
-        InvalidCompressionAlgorithm {
-            description("Invalid compression algorithm option.")
-        }
-        /// The checksums doesn't match.
-        ChecksumMismatch {
-            /// The checksum of the data.
-            expected: u16,
-            /// The expected/stored value of the checksum.
-            found: u16,
-        } {
-            display("Mismatching checksums in the state block - expected {:x}, found {:x}.", expected, found)
-            description("Mismatching checksum.")
-        }
-    }
-}
-
 /// A compression algorithm configuration option.
 enum CompressionAlgorithm {
     /// Identity function/compression disabled.
@@ -41,8 +17,8 @@ impl TryFrom<u16> for CompressionAlgorithm {
         match from {
             0 => Ok(CompressionAlgorithm::Identity),
             1 => Ok(CompressionAlgorithm::Lz4),
-            0x8000...0xFFFF => Err(Error::UnknownCompressionAlgorithm),
-            _ => Err(Error::InvalidCompressionAlgorithm),
+            0x8000...0xFFFF => Err(err!(Corruption, "unknown implementation-defined compression algorithm option {:x}", from)),
+            _ => Err(err!(Corruption, "invalid compression algorithm option {:x}", from)),
         }
     }
 }
@@ -92,10 +68,8 @@ impl StateBlock {
         let expected = little_endian::read(&buf);
         let found = checksum_algorithm.hash(&buf[8..]);
         if expected != found {
-            return Err(Error::ChecksumMismatch {
-                expected: expected,
-                found: found,
-            });
+            return Err(err!(Corruption, "mismatching checksums in the state block - expected \
+                            {:x}, found {:x}", expected, found));
         }
 
         Ok(StateBlock {
@@ -197,7 +171,7 @@ mod tests {
     fn mismatching_checksum() {
         let mut sector = StateBlock::default().encode();
         sector[2] = 20;
-        assert_eq!(StateBlock::decode(sector), Err(Error::ChecksumMismatch));
+        assert_eq!(StateBlock::decode(sector).unwrap_err().kind, Kind::Corruption);
     }
 
     #[test]
@@ -207,6 +181,6 @@ mod tests {
         sector = StateBlock::default().encode();
 
         sector[8] = 0xFF;
-        assert_eq!(StateBlock::decode(sector), Err(Error::InvalidCompression));
+        assert_eq!(StateBlock::decode(sector).unwrap_err().kind, Kind::Corruption);
     }
 }

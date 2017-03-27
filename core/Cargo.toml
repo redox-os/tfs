@@ -4,7 +4,6 @@ version = "0.1.0"
 authors = ["ticki <ticki@users.noreply.github.com>"]
 
 [dependencies]
-little-endian = "1.0"
 lz4-compress = "0.1"
 quick-error = "1.1"
 ring = "0.7"

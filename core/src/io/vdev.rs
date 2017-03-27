@@ -7,32 +7,10 @@
 //! sector enumeration or provide some redundancy, encryption, or similar features working on disk
 //! level.
 //!
-//! The term vdev has equivalent meaning in the context of ZFS.
+//! The term vdev has similar meaning in the context of ZFS.
 //!
 //! It is important that vdevs keep the invariants of the inner vdev. In particular, it may not
 //! leave to an inconsistent state, unless the inner vdev does.
-
-quick_error! {
-    /// A driver loading error.
-    enum Error {
-        /// The state flag was set to "inconsistent".
-        InconsistentState {
-            description("The state flag is marked inconsistent.")
-        }
-        /// A disk header parsing error.
-        Parse(err: ParseError) {
-            from()
-            description("Disk header parsing error")
-            display("Disk header parsing error: {}", err)
-        }
-        /// A disk error.
-        Disk(err: disk::Error) {
-            from()
-            description("Disk I/O error")
-            display("Disk I/O error: {}", err)
-        }
-    }
-}
 
 /// A driver transforming a normal disk into a disk respecting the vdev setup.
 ///
@@ -82,7 +60,7 @@ impl<D: Disk> Driver<D> {
                                    down last time; beware of data loss");
                 },
                 // The state inconsistent; throw an error.
-                StateFlag::Inconsistent => return Err(OpenError::InconsistentState),
+                StateFlag::Inconsistent => return Err(err!(Corruption, "the file system is in an inconsistent state, possibly due to crash")),
             }
 
             // Set the state flag to open.

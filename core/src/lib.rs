@@ -5,8 +5,6 @@
 
 #[macro_use]
 extern crate slog;
-#[macro_use]
-extern crate quick_error;
 
 mod macros;
 mod alloc;

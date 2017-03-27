@@ -20,70 +20,6 @@ const ORDERING: atomic::Ordering = atomic::Ordering::Relaxed;
 const CLUSTERS_IN_FREELIST_NODE: u64 = cluster::SECTOR_SIZE / cluster::POINTER_SIZE - 1;
 // We subtract 1 to account for checksum.
 
-quick_error! {
-    /// A page management error.
-    enum Error {
-        /// No clusters left in the freelist.
-        ///
-        /// This is the equivalent to OOM, but with disk space.
-        OutOfClusters {
-            description("Out of free clusters.")
-        }
-        /// A page checksum did not match.
-        ///
-        /// The checksum of the data and the checksum stored in the page pointer did not match.
-        ///
-        /// This indicates some form of data corruption in the sector storing the page.
-        PageChecksumMismatch {
-            /// The page with the mismatching checksum.
-            page: page::Pointer,
-            /// The actual checksum of the page.
-            found: u32,
-        } {
-            display("Mismatching checksums in {} - expected {:x}, found {:x}.",
-                    page, page.checksum, found)
-            description("Mismatching checksum in page.")
-        }
-        /// A metacluster checksum did not match.
-        ///
-        /// The checksum of the metacluster and the checksum stored in the previous metacluster
-        /// pointer did not match.
-        ///
-        /// This indicates some form of data corruption in the sector storing the metacluster.
-        MetacluterChecksumMismatch {
-            /// The corrupted metacluster whose stored and actual checksum mismatches.
-            cluster: cluster::Pointer,
-            /// The expected/stored checksum.
-            expected: u64,
-            /// The actual checksum of the data.
-            found: u64,
-        } {
-            display("Mismatching checksums in metacluster {:x} - expected {:x}, found {:x}.",
-                    cluster, expected.checksum, found)
-            description("Mismatching checksum in metacluster.")
-        }
-        /// The compressed data is invalid and cannot be decompressed.
-        ///
-        /// Multiple reasons exists for this to happen:
-        ///
-        /// 1. The compression option has been changed without recompressing clusters.
-        /// 2. Silent data corruption occured, and did the unlikely thing to has the right checksum.
-        /// 3. There is a bug in compression or decompression.
-        InvalidCompression {
-            cluster: cluster::Pointer,
-        } {
-            display("Unable to decompress data from cluster {}.", cluster)
-            description("Unable to decompress data.")
-        }
-        /// A disk error.
-        Disk(err: disk::Error) {
-            from()
-            description("Disk I/O error.")
-            display("Disk I/O error: {}", err)
-        }
-    }
-}
-
 /// Allocator options.
 ///
 /// When an allocator system is provided, the user must provide some option, so they can adjust the
@@ -397,9 +333,8 @@ impl<D: Disk> Allocator<D> {
             let cksum = self.checksum(buf) as u32;
             if cksum as u32 != page.checksum {
                 // The checksums mismatched, thrown an error.
-                return Err(Error::PageChecksumMismatch {
-                    page: page,
-                    found: cksum,
+                return Err(err!(Corruption, "mismatching checksums in {} - expected {:x}, found \
+                                {:x}", page, page.checksum, cksum)
                 });
             }
 
@@ -476,8 +411,8 @@ impl<D: Disk> Allocator<D> {
             })
         } else {
             // No delimiter was found, indicating data corruption.
-            // TODO: Use a special error for this.
-            Err(Error::InvalidCompression)
+            // TODO: Provide the sector number.
+            Err(err!(Corruption, "invalid compression"))
         }
     }
 
@@ -517,18 +452,16 @@ impl<D: Disk> Allocator<D> {
                 self.state.with(|state| {
                     // Grab the next metacluster. If no other metacluster exists, we return an
                     // error.
-                    let head = state.freelist_head.ok_or(Error::OutOfClusters)?;
+                    let head = state.freelist_head.ok_or(err!(OutOfSpace, "out of free clusters"))?;
                     // Load the new metacluster, and return the old metacluster.
                     self.cache.read_then(head.cluster, |buf| {
                         // Check that the checksum matches.
                         let found = self.checksum(buf);
                         if head.checksum != found {
                             // Checksums do not match; throw an error.
-                            return Err(Error::MetacluterChecksumMismatch {
-                                cluster: head.cluster,
-                                expected: head.checksum,
-                                found: found,
-                            });
+                            return Err(err!(Corruption, "mismatching checksums in metacluster {:x} \
+                                            - expected {:x}, found {:x}", head.cluster,
+                                            head.checksum, found));
                         }
 
                         // Now, we'll replace the old head metacluster with the chained

@@ -46,7 +46,7 @@ impl<D: Disk> Cache<D> {
         &self,
         sector: disk::Sector,
         buf: Box<disk::SectorBuf>,
-    ) -> impl Future<(), disk::Error> {
+    ) -> impl Future<(), Error> {
         debug!(self, "writing sector"; "sector" => sector);
 
         // Then insert it into the cache.
@@ -75,7 +75,7 @@ impl<D: Disk> Cache<D> {
     fn read_then<F, T, E>(&self, sector: disk::Sector, map: F) -> impl Future<T, E>
     where
         F: Fn(atomic_hash_map::Value<disk::SectorBuf>) -> Result<T, E>,
-        E: From<disk::Error>,
+        E: From<Error>,
     {
         debug!(self, "reading sector"; "sector" => sector);
 

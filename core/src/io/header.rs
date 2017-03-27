@@ -109,7 +109,7 @@ enum MagicNumber {
 }
 
 impl TryFrom<&[u8]> for MagicNumber {
-    type Err = ParseError;
+    type Err = Error;
 
     fn from(string: &[u8]) -> Result<MagicNumber, Error> {
         match string {
@@ -118,7 +118,7 @@ impl TryFrom<&[u8]> for MagicNumber {
             // Total compatibility.
             TOTAL_COMPATIBILITY_MAGIC_NUMBER => Ok(MagicNumber::TotalCompatibility),
             // Unknown format; abort.
-            _ => Err(Error::UnknownFormat),
+            x => Err(err!(Corruption, "invalid magic number {:x}", x)),
         }
     }
 }
@@ -158,8 +158,8 @@ impl TryFrom<u16> for ChecksumAlgorithm {
     fn try_from(from: u16) -> Result<ChecksumAlgorithm, Error> {
         match from {
             1 => Ok(ChecksumAlgorithm::SeaHash),
-            0x8000...0xFFFF => Err(Error::UnknownChecksumAlgorithm),
-            _ => Err(Error::InvalidChecksumAlgorithm),
+            0x8000...0xFFFF => Err(err!(Implementation, "unknown implementation-defined checksum algorithm {:x}", from)),
+            _ => Err(err!(Corruption, "invalid checksum algorithm {:x}", from)),
         }
     }
 }
@@ -277,7 +277,7 @@ impl DiskHeader {
         // version, it's compatible.
         if version_number >> 16 != VERSION_NUMBER >> 16 || version_number > VERSION_NUMBER {
             // The version is not compatible; abort.
-            return Err(Error::IncompatibleVersion);
+            return Err(err!(Implementation, "incompatible version {:x}", version_number));
         }
 
         // # Unique identifier
@@ -309,7 +309,7 @@ impl DiskHeader {
             if vdev_section.len() < 2 {
                 // There is no more labels and the terminator is not read yet. This is considered
                 // an error.
-                return Err(Error::MissingTerminatorVdev);
+                return Err(err!(Corruption, "missing terminator vdev"));
             }
             // Read the 16-bit label.
             let label = little_endian::read(vdev_section);
@@ -325,11 +325,9 @@ impl DiskHeader {
                 // A SPECK encryption cipher.
                 2 => vdev_stack.push(Vdev::Speck),
                 // Implementation defined vdev, which this implementation does not support.
-                0xFFFF => return Err(Error::UnknownVdev),
+                0xFFFF => return Err(err!(Implementation, "unknown implementation-defined vdev")),
                 // Invalid vdevs (vdevs that are necessarily invalid under this version).
-                _ => return Err(Error::InvalidVdev {
-                    label: label,
-                }),
+                _ => return Err(err!(Corruption, "invalid vdev label {:x}", label)),
             }
         }
 
@@ -344,10 +342,8 @@ impl DiskHeader {
         let expected = little_endian::read(&buf[128..]);
         let found = checksum_algorithm.hash(&buf[..128]);
         if expected != found {
-            return Err(Error::ChecksumMismatch {
-                expected: expected,
-                found: found,
-            });
+            return Err(err!(Corruption, "mismatching checksums in the disk header - expected \
+                                         {:x}, found {:x}", expected, found));
         }
 
         DiskHeader {
@@ -494,7 +490,7 @@ mod tests {
         sector[0] = b'A';
 
         little_endian::write(&mut sector[504..], seahash::hash(sector[..504]));
-        assert_eq!(DiskHeader::decode(sector), Err(Error::UnknownFormat));
+        assert_eq!(DiskHeader::decode(sector).unwrap_err().kind, Kind::Implementation);
     }
 
     #[test]
@@ -503,7 +499,7 @@ mod tests {
         sector[11] = 0xFF;
 
         little_endian::write(&mut sector[504..], seahash::hash(sector[..504]));
-        assert_eq!(DiskHeader::decode(sector), Err(Error::IncompatibleVersion));
+        assert_eq!(DiskHeader::decode(sector).unwrap_err().kind, Kind::Implementation);
     }
 
     #[test]
@@ -511,7 +507,7 @@ mod tests {
         let mut sector = DiskHeader::default().encode();
         sector[48] = 6;
         little_endian::write(&mut sector[504..], seahash::hash(sector[..504]));
-        assert_eq!(DiskHeader::decode(sector), Err(Error::UnknownStateFlag));
+        assert_eq!(DiskHeader::decode(sector).unwrap_err().kind, Kind::Implementation);
     }
 
     #[test]
@@ -520,10 +516,10 @@ mod tests {
 
         sector[32] = 0;
         little_endian::write(&mut sector[504..], seahash::hash(sector[..504]));
-        assert_eq!(DiskHeader::decode(sector), Err(Error::InvalidChecksumAlgorithm));
+        assert_eq!(DiskHeader::decode(sector).unwrap_err().kind, Kind::Corruption);
         sector[33] = 0x80;
         little_endian::write(&mut sector[504..], seahash::hash(sector[..504]));
-        assert_eq!(DiskHeader::decode(sector), Err(Error::UnknownChecksumAlgorithm));
+        assert_eq!(DiskHeader::decode(sector).unwrap_err().kind, Kind::Implementation);
     }
 
     #[test]
@@ -531,19 +527,19 @@ mod tests {
         let mut sector = DiskHeader::default().encode();
         sector[64] = 0xFF;
         little_endian::write(&mut sector[504..], seahash::hash(sector[..504]));
-        assert_eq!(DiskHeader::decode(sector), Err(Error::InvalidVdev));
+        assert_eq!(DiskHeader::decode(sector).unwrap_err().kind, Kind::Corruption);
         sector[65] = 0xFF;
         little_endian::write(&mut sector[504..], seahash::hash(sector[..504]));
-        assert_eq!(DiskHeader::decode(sector), Err(Error::UnknownVdev));
+        assert_eq!(DiskHeader::decode(sector).unwrap_err().kind, Kind::Implementation);
 
         sector = DiskHeader::default().encode();
         sector[64] = 1;
         sector[66] = 0xFF;
         little_endian::write(&mut sector[504..], seahash::hash(sector[..504]));
-        assert_eq!(DiskHeader::decode(sector), Err(Error::InvalidVdev));
+        assert_eq!(DiskHeader::decode(sector).unwrap_err().kind, Kind::Corruption);
         sector[67] = 0xFF;
         little_endian::write(&mut sector[504..], seahash::hash(sector[..504]));
-        assert_eq!(DiskHeader::decode(sector), Err(Error::UnknownVdev));
+        assert_eq!(DiskHeader::decode(sector).unwrap_err().kind, Kind::Implementation);
     }
 
     #[test]
@@ -551,11 +547,11 @@ mod tests {
         let mut sector = DiskHeader::default().encode();
 
         sector[5] = 28;
-        assert_eq!(DiskHeader::decode(sector), Err(Error::ChecksumMismatch));
+        assert_eq!(DiskHeader::decode(sector).unwrap_err().kind, Kind::Corruption);
 
         sector = DiskHeader::default().encode();
 
         sector[500] = 28;
-        assert_eq!(DiskHeader::decode(sector), Err(Error::ChecksumMismatch));
+        assert_eq!(DiskHeader::decode(sector).unwrap_err().kind, Kind::Corruption);
     }
 }
