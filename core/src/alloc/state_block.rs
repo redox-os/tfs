@@ -41,21 +41,21 @@ struct FreelistHead {
 }
 
 /// The TFS state block.
-struct StateBlock {
+pub struct StateBlock {
     /// The static options section of the state block.
-    options: Options,
+    pub options: Options,
     /// The dynamic state section of the state block.
-    state: State,
+    pub state: State,
 }
 
 /// The state sub-block.
-struct State {
+pub struct State {
     /// A pointer to the superpage.
-    superpage: Option<page::Pointer>,
+    pub superpage: Option<page::Pointer>,
     /// The freelist head.
     ///
     /// If the freelist is empty, this is set to `None`.
-    freelist_head: Option<FreelistHead>,
+    pub freelist_head: Option<FreelistHead>,
 }
 
 impl StateBlock {

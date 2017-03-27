@@ -53,7 +53,7 @@ struct ClusterState {
 ///
 /// This is the center point of the I/O stack, providing allocation, deallocation, compression,
 /// etc. It manages the clusters (with the page abstraction) and caches the disks.
-struct Allocator<D> {
+pub struct Allocator<D> {
     /// The inner disk cache.
     cache: Cache<D>,
     /// The on-disk state.
@@ -334,8 +334,7 @@ impl<D: Disk> Allocator<D> {
             if cksum as u32 != page.checksum {
                 // The checksums mismatched, thrown an error.
                 return Err(err!(Corruption, "mismatching checksums in {} - expected {:x}, found \
-                                {:x}", page, page.checksum, cksum)
-                });
+                                {:x}", page, page.checksum, cksum));
             }
 
             Ok(ret)
@@ -466,7 +465,7 @@ impl<D: Disk> Allocator<D> {
 
                         // Now, we'll replace the old head metacluster with the chained
                         // metacluster.
-                        trace!(self, "metacluster checksum matched", "checksum" => found);
+                        trace!(self, "metacluster checksum matched"; "checksum" => found);
 
                         // Replace the checksum of the head metacluster with the checksum of the
                         // chained metacluster, which will soon be the head metacluster.
@@ -568,7 +567,7 @@ impl<D: Disk> Allocator<D> {
     }
 }
 
-impl Drop for Allocator {
+impl<D: Disk> Drop for Allocator<D> {
     fn drop(&mut self) {
         // Flush the buffered free clusters to avoid leaking space.
         self.flush_free();

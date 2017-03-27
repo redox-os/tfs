@@ -3,11 +3,14 @@
 //! This module provides data structures for eliminating duplicates at a page level, meaning that
 //! if two equal pages are allocated, they can be reduced to one, reducing the space used.
 
+extern crate crossbeam;
 extern crate ring;
 
-use crossbeam::sync::AtomicOption;
-use ring::digest;
+use self::crossbeam::sync::AtomicOption;
+use self::ring::digest;
 use std::sync::atomic;
+
+use disk;
 
 /// The atomic ordering used in the table.
 const ORDERING: atomic::Ordering = atomic::Ordering::Relaxed;
@@ -71,7 +74,7 @@ impl Candidate {
 /// deduplicated. This is due to the fact that there is no probing and thus checksum collisions
 /// cannot be resolved. Therefore, it will replace a random old candidate.
 #[derive(Default)]
-struct Table {
+pub struct Table {
     /// The table of candidates.
     ///
     /// When looking up a particular candidate, the checksum modulo the table size is used. If this

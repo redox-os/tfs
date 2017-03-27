@@ -27,7 +27,7 @@ const POINTER_SIZE: usize = 16;
 /// 1. The cluster the page is stored in.
 /// 2. _How_ to read the page from the cluster.
 /// 3. A checksum of the page.
-struct Pointer {
+pub struct Pointer {
     /// The cluster in which the page is stored.
     cluster: cluster::Pointer,
     /// The offset into the decompressed stream.

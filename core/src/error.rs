@@ -1,6 +1,3 @@
-/// A failable type.
-pub type Result<T> = Result<T, Error>;
-
 /// The category of an error.
 ///
 /// This enum contains variants representing general categories of TFS errors.
@@ -35,10 +32,10 @@ pub struct Error {
 /// description).
 #[macro_export]
 macro_rules! err {
-    ($kind:ident, $desc:expr, $($rest:tt)*) => {
+    ($kind:ident, $($rest:tt)*) => {
         $crate::Err {
             kind: $kind,
             desc: format!($($rest)*),
-        })
+        }
     };
 }
