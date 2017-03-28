@@ -1,5 +1,9 @@
 //! Unifying types and traits for on-disk structures.
 
+use futures::Future;
+
+use {fs, Error};
+
 /// An on-disk object.
 ///
 /// This trait encompasses types which represents on-disk objects. It defines certain operations
@@ -9,5 +13,5 @@ trait Object {
     ///
     /// Garbage collection works by traversing a graph and creating a set of visited nodes. This
     /// visits the node (the object) and adds it to `visited`, and then visits its adjacent nodes.
-    fn gc_visit(&self, fs: &fs::State) -> impl Future<(), alloc::Error>;
+    fn gc_visit(&self, fs: &fs::State) -> impl Future<(), Error>;
 }

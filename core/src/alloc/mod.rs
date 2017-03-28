@@ -11,8 +11,14 @@
 //! The allocator is a basic unrolled list of clusters.
 
 mod dedup;
-mod page;
-mod state_block;
+pub mod page;
+pub mod state_block;
+
+use crossbeam::sync::SegQueue;
+use futures::{future, Future};
+use std::mem;
+use {little_endian, lz4_compress, thread_object, Error};
+use disk::{cluster, Disk};
 
 /// The atomic ordering used in the allocator.
 const ORDERING: atomic::Ordering = atomic::Ordering::Relaxed;
@@ -217,7 +223,7 @@ impl<D: Disk> Allocator<D> {
         cksum: u32,
     ) -> impl Future<page::Pointer, Error> {
         // Handle the case where compression is disabled.
-        if self.options.compression_algorithm == CompressionAlgorithm::Identity {
+        if self.options.compression_algorithm == state_block::CompressionAlgorithm::Identity {
             // Pop a cluster from the freelist.
             return self.freelist_pop()
                 // Write the cluster with the raw, uncompressed data.
@@ -367,9 +373,9 @@ impl<D: Disk> Allocator<D> {
         let compressed = match self.options.compression_algorithm {
             // We'll panic if compression is disabled, as it is assumed that the caller handles
             // this case.
-            CompressionAlgorithm::Identity => panic!("Compression was disabled."),
+            state_block::CompressionAlgorithm::Identity => panic!("Compression was disabled."),
             // Compress via LZ4.
-            CompressionAlgorithm::Lz4 => lz4_compress::compress(input),
+            state_block::CompressionAlgorithm::Lz4 => lz4_compress::compress(input),
         };
 
         if compressed.len() < disk::SECTOR_SIZE {
@@ -404,9 +410,9 @@ impl<D: Disk> Allocator<D> {
             Ok(match self.options.compression_algorithm {
                 // We'll panic if compression is disabled, as it is assumed that the caller handles
                 // this case.
-                CompressionAlgorithm::Identity => panic!("Compression was disabled."),
+                state_block::CompressionAlgorithm::Identity => panic!("Compression was disabled."),
                 // Decompress the non-padding section from LZ4.
-                CompressionAlgorithm::Lz4 => lz4_compress::decompress(source[..len])?,
+                state_block::CompressionAlgorithm::Lz4 => lz4_compress::decompress(source[..len])?,
             })
         } else {
             // No delimiter was found, indicating data corruption.
@@ -421,7 +427,7 @@ impl<D: Disk> Allocator<D> {
     ///
     /// It takes a mutable reference to the state in order to avoid clogging up the transaction and
     /// flushing asynchronized.
-    fn flush_state_block(&mut self, state: &mut State) -> impl Future<(), disk::Error> {
+    fn flush_state_block(&mut self, state: &mut state_block::State) -> impl Future<(), disk::Error> {
         trace!(self, "flushing the state block");
 
         // Encode and write to virtual sector 0, the state block's sector.

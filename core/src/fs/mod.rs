@@ -1,12 +1,17 @@
 mod array;
 mod object;
 
+pub use object::Object;
+use {type_name, cbloom, alloc, disk, Error};
+use alloc::page;
+use futures::Future;
+
 struct State {
     alloc: alloc::Allocator,
     reachable: cbloom::Filter,
 }
 
-impl Fs {
+impl State {
     pub fn alloc(
         &self,
         buf: disk::SectorBuf,
@@ -23,7 +28,7 @@ impl Fs {
         self.reachable.insert(ptr);
     }
 
-    pub fn visit<T: Object>(&self, obj: T) -> Result<(), alloc::Error> {
+    pub fn visit<T: Object>(&self, obj: T) -> Result<(), Error> {
         trace!(self, "visting object"; "type" => type_name::get::<T>());
 
         obj.gc_visit(self)

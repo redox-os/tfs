@@ -17,7 +17,7 @@
 //! pointers contains this information instead.
 
 /// The size (in bytes) of a serialized page pointer.
-const POINTER_SIZE: usize = 16;
+pub const POINTER_SIZE: usize = 16;
 
 /// A page pointer.
 ///

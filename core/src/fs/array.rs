@@ -1,3 +1,10 @@
+use futures::Future;
+use std::marker::PhantomData;
+use std::ops::Range;
+
+use {disk, fs, Error};
+use alloc::page;
+
 const POINTERS_IN_NODE: u64 = disk::SECTOR_SIZE / page::POINTER_SIZE;
 
 struct Array<T> {
@@ -6,19 +13,19 @@ struct Array<T> {
     _phantom: PhantomData<T>,
 }
 
-impl Array<T> {
+impl<T> Array<T> {
     fn is_leaf(&self) -> bool {
         self.len <= POINTERS_IN_NODE
     }
 
-    fn for_each<F>(&self, fs: &fs::State, range: Range, f: F) -> impl Future<(), alloc::Error>
+    fn for_each<F>(&self, fs: &fs::State, range: Range, f: F) -> impl Future<(), Error>
     where F: Fn(usize, page::Pointer) {
         unimplemented!();
     }
 }
 
-impl<T: Object + From<page::Pointer>> Object {
-    fn gc_visit(&self, fs: &fs::State) -> impl Future<(), alloc::Error> {
+impl<T: fs::Object + From<page::Pointer>> fs::Object for Array<T> {
+    fn gc_visit(&self, fs: &fs::State) -> impl Future<(), Error> {
         unimplemented!();
     }
 }

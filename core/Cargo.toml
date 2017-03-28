@@ -8,10 +8,14 @@ crossbeam = "0.2"
 futures = "0.1"
 little-endian = "1.0"
 lz4-compress = "0.1"
+mlcr = "0.2"
+rand = "0.3"
 ring = "0.7"
+ring-pwhash = "0.1"
 seahash = "3.0"
 slog = "1.5"
 speck = "1.0"
+thread-object = "0.2"
 
 [features]
 security = []

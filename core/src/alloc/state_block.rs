@@ -1,5 +1,5 @@
 /// A compression algorithm configuration option.
-enum CompressionAlgorithm {
+pub enum CompressionAlgorithm {
     /// Identity function/compression disabled.
     Identity = 0,
     /// LZ4 compression.

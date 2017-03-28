@@ -3,9 +3,6 @@
 //! This module provides data structures for eliminating duplicates at a page level, meaning that
 //! if two equal pages are allocated, they can be reduced to one, reducing the space used.
 
-extern crate crossbeam;
-extern crate ring;
-
 use self::crossbeam::sync::AtomicOption;
 use self::ring::digest;
 use std::sync::atomic;

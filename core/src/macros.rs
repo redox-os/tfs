@@ -10,10 +10,11 @@
 /// ```
 macro_rules! delegate_log {
     ($ty:ident.$field:ident) => {
-        impl<L: slog::Drain> Drop for $ty<L> {
-            type Error = L::Error;
+        impl<E, L> ::slog::Drain for $ty<L>
+        where L: ::slog::Drain<Error = E> {
+            type Error = E;
 
-            fn log(&self, info: &slog::Record, o: &slog::OwnedKeyValueList) -> Result<(), L::Error> {
+            fn log(&self, info: &::slog::Record, o: &::slog::OwnedKeyValueList) -> Result<(), E> {
                 // Redirect the call to the field.
                 self.$field.log(info, o)
             }

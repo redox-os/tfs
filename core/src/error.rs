@@ -33,8 +33,8 @@ pub struct Error {
 #[macro_export]
 macro_rules! err {
     ($kind:ident, $($rest:tt)*) => {
-        $crate::Err {
-            kind: $kind,
+        $crate::error::Error {
+            kind: $crate::error::Kind::$kind,
             desc: format!($($rest)*),
         }
     };
