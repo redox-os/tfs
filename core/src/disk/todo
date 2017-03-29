@@ -1,0 +1,10 @@
+- Reorganize the state block to have sections similar to the disk header.
+✔ Assign a secret ID and use it for salt.
+✔ Move allocator stuff to its own module.
+✔ Make a map over infrastructure
+✔ Upsert
+- Entry API for chashmap
+✔ Move the concurrent cache tracker to the mlcr crate.
+- Remove "sector" in favor of the term "cluster"
+- Remove the checksum config option
+
