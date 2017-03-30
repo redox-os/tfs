@@ -39,7 +39,7 @@ Concurrent
     perhaps the most important feature of TFS.**
 Asynchronous
     TFS is asynchronous: operations can happen independently, and writes and
-    reads from the disk need not to block.
+    reads from the disk need not block.
 Full-disk compression
     TFS is the first file system to incorporate complete full-disk compression
     through a scheme we call RACC (random-access cluster compression). This
@@ -89,7 +89,7 @@ FAQ
 
 Why do you use SPECK as the default cipher?
     SPECK is a relatively young cipher, yet it has been subject to a lot of
-    (ineffective) cryptanalysis, so it is relatively secure. It has has really
+    (ineffective) cryptanalysis, so it is relatively secure. It has really
     good performance and a simple implementation. Portability is an important
     part of the TFS design, and truely portable AES implementations without
     side-channel attacks is harder than many think (particularly, there are
@@ -97,7 +97,7 @@ Why do you use SPECK as the default cipher?
     have this issue, and can thus be securely implemented portably with minimal
     effort.
 How similar is TFS and ZFS?
-    Not that similar, actually. The share many of the basic ideas, but
+    Not that similar, actually. They share many of the basic ideas, but
     otherwise they are essentially unconnected. But ZFS' design has shaped TFS'
     a lot.
 Is TFS Redox-only?
