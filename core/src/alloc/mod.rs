@@ -17,8 +17,9 @@ pub mod state_block;
 use crossbeam::sync::SegQueue;
 use futures::{future, Future};
 use std::mem;
+use std::sync::atomic;
+use disk::{self, cluster, Disk};
 use {little_endian, lz4_compress, thread_object, Error};
-use disk::{cluster, Disk};
 
 /// The atomic ordering used in the allocator.
 const ORDERING: atomic::Ordering = atomic::Ordering::Relaxed;
@@ -61,7 +62,7 @@ struct ClusterState {
 /// etc. It manages the clusters (with the page abstraction) and caches the disks.
 pub struct Allocator<D> {
     /// The inner disk cache.
-    cache: Cache<D>,
+    cache: disk::TfsDisk<D>,
     /// The on-disk state.
     ///
     /// This is the state as stored in the state block. The reason we do not store the whole state
@@ -98,7 +99,7 @@ impl<D: Disk> Allocator<D> {
     /// `disk`. If it fails, the future will return an error.
     pub fn open(disk: D) -> impl Future<Allocator, Error> {
         // Initialize the disk and cache.
-        let cache = Cache::open(disk);
+        let cache = disk::open(disk);
         // Read the state block.
         cache.read(0).map(|state_block| {
             // Parse the state block.
@@ -128,7 +129,7 @@ impl<D: Disk> Allocator<D> {
         unimplemented!();
 
         // Initialize the disk (below the allocator stack).
-        Cache::init(disk, options.disk_header).and_then(|cache| {
+        disk::init(disk, options.disk_header).and_then(|cache| {
             // Write the state block to the start of the disk.
             cache.write(0, options.state_block.encode()).map(|_| cache)
         }).map(|cache| Allocator {
@@ -249,7 +250,7 @@ impl<D: Disk> Allocator<D> {
                 state.uncompressed.extend_from_slice(buf);
 
                 // Try to compress the extended buffer into a single cluster.
-                if let Some(compress) = self.compress(state.uncompressed) {
+                if let Some(compressed) = self.compress(state.uncompressed) {
                     // It succeeded! Write the compressed data into the cluster.
                     return self.cache.write(state.cluster, compressed).map(|_| page::Pointer {
                         cluster: state.cluster,
@@ -412,7 +413,7 @@ impl<D: Disk> Allocator<D> {
                 // this case.
                 state_block::CompressionAlgorithm::Identity => panic!("Compression was disabled."),
                 // Decompress the non-padding section from LZ4.
-                state_block::CompressionAlgorithm::Lz4 => lz4_compress::decompress(source[..len])?,
+                state_block::CompressionAlgorithm::Lz4 => lz4_compress::decompress(cluster[..len])?,
             })
         } else {
             // No delimiter was found, indicating data corruption.
@@ -427,7 +428,7 @@ impl<D: Disk> Allocator<D> {
     ///
     /// It takes a mutable reference to the state in order to avoid clogging up the transaction and
     /// flushing asynchronized.
-    fn flush_state_block(&mut self, state: &mut state_block::State) -> impl Future<(), disk::Error> {
+    fn flush_state_block(&mut self, state: &mut state_block::State) -> impl Future<(), Error> {
         trace!(self, "flushing the state block");
 
         // Encode and write to virtual sector 0, the state block's sector.

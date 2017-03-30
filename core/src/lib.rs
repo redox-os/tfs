@@ -8,6 +8,7 @@
 #[macro_use]
 extern crate slog;
 
+extern crate cbloom;
 extern crate crossbeam;
 extern crate futures;
 extern crate little_endian;

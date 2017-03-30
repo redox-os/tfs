@@ -8,6 +8,7 @@ use self::ring::digest;
 use std::sync::atomic;
 
 use disk;
+use alloc::page;
 
 /// The atomic ordering used in the table.
 const ORDERING: atomic::Ordering = atomic::Ordering::Relaxed;

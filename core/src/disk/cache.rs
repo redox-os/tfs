@@ -1,7 +1,8 @@
 use futures::Future;
 use atomic_hashmap::AtomicHashMap;
-use {mlcr, header, Error};
+use {mlcr, Error};
 use disk::{self, vdev, Disk};
+use disk::header::DiskHeader;
 
 /// The default initial capacity of the sector map.
 const INITIAL_CAPACITY: usize = 256;
@@ -9,9 +10,9 @@ const INITIAL_CAPACITY: usize = 256;
 /// A cached disk.
 ///
 /// This wrapper manages caching of the disk.
-struct Cache<D> {
-    /// The inner driver.
-    driver: vdev::Driver<D>,
+pub struct Cached<D> {
+    /// The inner disk.
+    disk: D,
 
     /// The cache replacement tracker.
     ///
@@ -23,25 +24,14 @@ struct Cache<D> {
     sectors: AtomicHashMap<disk::Sector, disk::SectorBuf>,
 }
 
-impl<D: Disk> Cache<D> {
-    /// Open a disk.
-    ///
-    /// This reads the disk and constructs the driver and initializes the cache. Note that this
-    /// doesn't simply create a cache of `disk`. It loads the disk header and initializes the
-    /// vdev driver, which is then cached.
-    fn open(disk: D) -> Cache<D> {
-        Cache {
-            // Open the disk to the vdev driver.
-            driver: vdev::Driver::open(disk),
-            // Set empty/default values.
+impl<D: Disk> Cached<D> {
+    /// Create a cache from a backing disk.
+    fn new(disk: D) -> Cached<D> {
+        Cached {
+            disk: disk,
             tracker: mlcr::ConcurrentCache::new(),
             sectors: AtomicHashMap::with_capacity(INITIAL_CAPACITY),
         }
-    }
-
-    /// Get the disk header.
-    fn disk_header(&self) -> &header::DiskHeader {
-        &self.driver.header
     }
 
     /// Write a sector.
@@ -57,7 +47,7 @@ impl<D: Disk> Cache<D> {
         // Then insert it into the cache.
         self.sectors.insert(sector, buf);
         // Write the data to the disk.
-        self.driver.write(sector, &buf)
+        self.disk.write(sector, &buf)
     }
 
     /// Drop a sector from the cache.
@@ -125,6 +115,6 @@ impl<D: Disk> Cache<D> {
     }
 }
 
-delegate_log!(Cache.driver);
+delegate_log!(Cached.disk);
 
 // TODO: Add tests.

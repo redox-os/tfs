@@ -16,6 +16,8 @@
 //! cluster by compressing the pages together. To avoid storing metadata in the clusters, the
 //! pointers contains this information instead.
 
+use {little_endian, cluster};
+
 /// The size (in bytes) of a serialized page pointer.
 pub const POINTER_SIZE: usize = 16;
 

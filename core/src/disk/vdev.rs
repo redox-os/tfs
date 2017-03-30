@@ -13,7 +13,7 @@
 //! leave to an inconsistent state, unless the inner vdev does.
 
 use std::mem;
-use futures::{futures, Future};
+use futures::{future, Future};
 
 use Error;
 use disk::{self, Disk};
@@ -117,7 +117,7 @@ impl<D: Disk> Driver<D> {
     }
 }
 
-impl Drop for Driver {
+impl<D: Disk> Drop for Driver<D> {
     fn drop(&mut self) {
         info!(self, "closing the driver");
 
@@ -189,7 +189,7 @@ impl<D: Disk> Disk for Driver<D> {
         }
 
         // Execute all the writes, we've buffered.
-        futures::join_all(writes.into_iter().map(|(sector, buf)| {
+        future::join_all(writes.into_iter().map(|(sector, buf)| {
             self.disk.write(sector, buf)
         }))
     }

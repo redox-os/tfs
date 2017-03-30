@@ -1,3 +1,6 @@
+use std::convert::TryFrom;
+use {little_endian, disk, Error};
+
 /// A compression algorithm configuration option.
 pub enum CompressionAlgorithm {
     /// Identity function/compression disabled.
@@ -40,14 +43,6 @@ struct FreelistHead {
     checksum: u64,
 }
 
-/// The TFS state block.
-pub struct StateBlock {
-    /// The static options section of the state block.
-    pub options: Options,
-    /// The dynamic state section of the state block.
-    pub state: State,
-}
-
 /// The state sub-block.
 pub struct State {
     /// A pointer to the superpage.
@@ -56,6 +51,14 @@ pub struct State {
     ///
     /// If the freelist is empty, this is set to `None`.
     pub freelist_head: Option<FreelistHead>,
+}
+
+/// The TFS state block.
+pub struct StateBlock {
+    /// The static options section of the state block.
+    pub options: Options,
+    /// The dynamic state section of the state block.
+    pub state: State,
 }
 
 impl StateBlock {
@@ -123,6 +126,7 @@ impl StateBlock {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use error;
 
     #[test]
     fn inverse_identity() {
@@ -171,7 +175,7 @@ mod tests {
     fn mismatching_checksum() {
         let mut sector = StateBlock::default().encode();
         sector[2] = 20;
-        assert_eq!(StateBlock::decode(sector).unwrap_err().kind, Kind::Corruption);
+        assert_eq!(StateBlock::decode(sector).unwrap_err().kind, error::Kind::Corruption);
     }
 
     #[test]
@@ -181,6 +185,6 @@ mod tests {
         sector = StateBlock::default().encode();
 
         sector[8] = 0xFF;
-        assert_eq!(StateBlock::decode(sector).unwrap_err().kind, Kind::Corruption);
+        assert_eq!(StateBlock::decode(sector).unwrap_err().kind, error::Kind::Corruption);
     }
 }

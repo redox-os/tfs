@@ -17,6 +17,24 @@ pub type Sector = usize;
 /// A buffer of sector size.
 pub type SectorBuf = [u8; SECTOR_SIZE];
 
+/// A cached disk with a TFS header.
+pub type TfsDisk<D> = cache::Cached<vdev::Driver<D>>;
+
+/// Load the TFS disk.
+///
+/// This does not initialize or create the structure. It will merely load the disk.
+pub fn open<D: Disk>(disk: D, password: &[u8]) -> impl Future<TfsDisk<D>, Error> {
+    vdev::Driver::open(disk).cached()
+}
+
+/// Initialize/create the TFS disk.
+///
+/// This creates the structure (given some options given in `options`) of the disk, and effectively
+/// initializes a system.
+pub fn init<D: Disk>(disk: D, options: header::Options) -> impl Future<TfsDisk<D>, Error> {
+    vdev::Driver::init(disk, options).cached()
+}
+
 /// A storage device.
 ///
 /// This trait acts similarly to `std::io::{Read, Write}`, but is designed specifically for disks.
@@ -41,4 +59,9 @@ pub trait Disk: slog::Drain {
     /// This returns a future, which carries the operation writing `buf` into sector `sector`.
     /// First when the future has completed, the operation has been executed.
     fn write(&self, sector: Sector, buf: &SectorBuf) -> Self::WriteFuture;
+
+    /// Create a cached version of the disk.
+    fn cached(self) -> cache::Cached<Self> {
+        cache::Cached::new(self)
+    }
 }

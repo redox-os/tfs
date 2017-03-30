@@ -1,13 +1,13 @@
 //! Clusters.
 
-use std::nonzero::NonZero;
 use little_endian;
 
 /// The size (in bytes) of a cluster pointer.
 pub const POINTER_SIZE: usize = 8;
 
 /// A pointer to some cluster.
-pub struct Pointer(NonZero<u64>);
+// TODO: Use `NonZero`.
+pub struct Pointer(u64);
 
 impl little_endian::Encode for Pointer {
     fn write_le(self, into: &mut [u8]) {
@@ -31,7 +31,7 @@ impl little_endian::Decode for Option<Pointer> {
         } else {
             // The pointer wasn't null, so we can simply read it as an integer. Note that we have
             // already ensured that it is not null, so it is safe.
-            Some(Pointer(unsafe { NonZero::new(little_endian::read(from)) }))
+            Some(Pointer(little_endian::read(from)))
         }
     }
 }
