@@ -16,7 +16,7 @@ impl State {
         &self,
         buf: disk::SectorBuf,
         description: &'static str,
-    ) -> impl Future<page::Pointer, Error> {
+    ) -> future!(page::Pointer) {
         debug!(self, "allocating buffer"; "description" => description);
 
         // Allocate the buffer and insert it into the set of currently reachable pages in case that

@@ -49,7 +49,7 @@ impl<D: Disk> Driver<D> {
     ///
     /// The result is wrapped in a future, which represents the operation, such that it can be
     /// executed asynchronously.
-    fn open<D: Disk>(disk: D, password: &[u8]) -> impl Future<Driver, Error> {
+    fn open<D: Disk>(disk: D, password: &[u8]) -> future!(Driver<D>) {
         info!(disk, "loading the state and initializing the driver");
 
         // Read the disk header.
@@ -93,7 +93,7 @@ impl<D: Disk> Driver<D> {
     /// the driver representing the disk.
     ///
     /// It is used as an entry point to create a new file system.
-    fn init<D: Disk>(disk: D, options: header::Options) -> impl Future<Driver, Error> {
+    fn init<D: Disk>(disk: D, options: header::Options) -> future!(Driver<D>) {
         info!(disk, "creating a new system");
 
         // Create the new header from the user-specified options.
@@ -109,7 +109,7 @@ impl<D: Disk> Driver<D> {
     ///
     /// This returns a future, which carries this operation. First when the future has completed,
     /// the operations has been executed.
-    fn flush_header(&self) -> impl Future<(), Error> {
+    fn flush_header(&self) -> future!(()) {
         debug!(self, "flushing the disk header");
 
         // Encode and write it to the disk.

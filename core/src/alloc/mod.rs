@@ -97,7 +97,7 @@ impl<D: Disk> Allocator<D> {
     ///
     /// This future creates a future, which loads the state page and other things from a the disk
     /// `disk`. If it fails, the future will return an error.
-    pub fn open(disk: D) -> impl Future<Allocator, Error> {
+    pub fn open(disk: D) -> future!(Allocator<D>) {
         // Initialize the disk and cache.
         let cache = disk::open(disk);
         // Read the state block.
@@ -125,7 +125,7 @@ impl<D: Disk> Allocator<D> {
     /// fresh system, ignoring the existing data.
     ///
     /// The initialization is complete when the returned future completes.
-    pub fn init(disk: D, options: Options) -> impl Future<Allocator, Error> {
+    pub fn init(disk: D, options: Options) -> future!(Allocator<D>) {
         unimplemented!();
 
         // Initialize the disk (below the allocator stack).
@@ -162,7 +162,7 @@ impl<D: Disk> Allocator<D> {
         buf: Box<disk::SectorBuf>,
         last_cluster: &mut Option<ClusterState>,
         cksum: u32,
-    ) -> impl Future<page::Pointer, Error> {
+    ) -> future!(page::Pointer) {
         // Pop the cluster from the freelist, then attempt to compress the data.
         self.freelist_pop().and_then(|cluster| if let Some(compressed) = self.compress(buf) {
             // We were able to compress the page to fit into the cluster. At first, compressing the
@@ -222,7 +222,7 @@ impl<D: Disk> Allocator<D> {
         &self,
         buf: Box<disk::SectorBuf>,
         cksum: u32,
-    ) -> impl Future<page::Pointer, Error> {
+    ) -> future!(page::Pointer) {
         // Handle the case where compression is disabled.
         if self.options.compression_algorithm == state_block::CompressionAlgorithm::Identity {
             // Pop a cluster from the freelist.
@@ -276,7 +276,7 @@ impl<D: Disk> Allocator<D> {
     ///
     /// The algorithm works greedily by fitting as many pages as possible into the most recently
     /// used cluster.
-    pub fn alloc(&mut self, buf: Box<disk::SectorBuf>) -> impl Future<page::Pointer, Error> {
+    pub fn alloc(&mut self, buf: Box<disk::SectorBuf>) -> future!(page::Pointer) {
         // TODO: The variables are named things like `ptr`, which kinda contradicts the style of
         //       the rest of the code.
 
@@ -313,7 +313,7 @@ impl<D: Disk> Allocator<D> {
     pub fn read(
         &self,
         page: page::Pointer,
-    ) -> impl Future<atomic_hash_map::Value<disk::SectorBuf>, Error> {
+    ) -> future!(atomic_hash_map::Value<disk::SectorBuf>) {
         trace!(self, "reading page"; "page" => page);
 
         // Read the cluster in which the page is stored.
@@ -428,7 +428,7 @@ impl<D: Disk> Allocator<D> {
     ///
     /// It takes a mutable reference to the state in order to avoid clogging up the transaction and
     /// flushing asynchronized.
-    fn flush_state_block(&mut self, state: &mut state_block::State) -> impl Future<(), Error> {
+    fn flush_state_block(&mut self, state: &mut state_block::State) -> future!(()) {
         trace!(self, "flushing the state block");
 
         // Encode and write to virtual sector 0, the state block's sector.
@@ -441,7 +441,7 @@ impl<D: Disk> Allocator<D> {
     /// Pop from the freelist.
     ///
     /// This returns a future, which wraps a cluster pointer popped from the freelist.
-    fn freelist_pop(&mut self) -> impl Future<cluster::Pointer, Error> {
+    fn freelist_pop(&mut self) -> future!(page::Pointer) {
         // In order to avoid eager evaluation (and potentially prematurely exhausting the
         // freelist), we use lazy popping by constructing the future when evaluated.
         future::lazy(|| {

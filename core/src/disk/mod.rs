@@ -23,7 +23,7 @@ pub type TfsDisk<D> = cache::Cached<vdev::Driver<D>>;
 /// Load the TFS disk.
 ///
 /// This does not initialize or create the structure. It will merely load the disk.
-pub fn open<D: Disk>(disk: D, password: &[u8]) -> impl Future<TfsDisk<D>, Error> {
+pub fn open<D: Disk>(disk: D, password: &[u8]) -> future!(TfsDisk<D>) {
     vdev::Driver::open(disk).cached()
 }
 
@@ -31,7 +31,7 @@ pub fn open<D: Disk>(disk: D, password: &[u8]) -> impl Future<TfsDisk<D>, Error>
 ///
 /// This creates the structure (given some options given in `options`) of the disk, and effectively
 /// initializes a system.
-pub fn init<D: Disk>(disk: D, options: header::Options) -> impl Future<TfsDisk<D>, Error> {
+pub fn init<D: Disk>(disk: D, options: header::Options) -> future!(TfsDisk<D>) {
     vdev::Driver::init(disk, options).cached()
 }
 

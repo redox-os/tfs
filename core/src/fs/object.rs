@@ -13,5 +13,5 @@ trait Object {
     ///
     /// Garbage collection works by traversing a graph and creating a set of visited nodes. This
     /// visits the node (the object) and adds it to `visited`, and then visits its adjacent nodes.
-    fn gc_visit(&self, fs: &fs::State) -> impl Future<(), Error>;
+    fn gc_visit(&self, fs: &fs::State) -> future!(());
 }

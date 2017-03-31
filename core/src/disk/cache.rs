@@ -41,7 +41,7 @@ impl<D: Disk> Cached<D> {
         &self,
         sector: disk::Sector,
         buf: Box<disk::SectorBuf>,
-    ) -> impl Future<(), Error> {
+    ) -> future!(()) {
         debug!(self, "writing sector"; "sector" => sector);
 
         // Then insert it into the cache.
@@ -67,11 +67,8 @@ impl<D: Disk> Cached<D> {
     ///
     /// If an I/O operation fails, the error is returned. Otherwise, the return value of `map` is
     /// returned.
-    fn read_then<F, T, E>(&self, sector: disk::Sector, map: F) -> impl Future<T, E>
-    where
-        F: Fn(atomic_hash_map::Value<disk::SectorBuf>) -> Result<T, E>,
-        E: From<Error>,
-    {
+    fn read_then<F, T>(&self, sector: disk::Sector, map: F) -> future!(T)
+    where F: Fn(atomic_hash_map::Value<disk::SectorBuf>) -> future!(T) {
         debug!(self, "reading sector"; "sector" => sector);
 
         // Check if the sector is already available in the cache.
