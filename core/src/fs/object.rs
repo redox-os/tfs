@@ -8,7 +8,7 @@ use {fs, Error};
 ///
 /// This trait encompasses types which represents on-disk objects. It defines certain operations
 /// which such objects have in common.
-trait Object {
+pub trait Object {
     /// "Visit" the node as a part of the GC cycle.
     ///
     /// Garbage collection works by traversing a graph and creating a set of visited nodes. This

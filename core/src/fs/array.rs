@@ -18,7 +18,7 @@ impl<T> Array<T> {
         self.len <= POINTERS_IN_NODE
     }
 
-    fn for_each<F>(&self, fs: &fs::State, range: Range, f: F) -> future!(())
+    fn for_each<F>(&self, fs: &fs::State, range: Range<u64>, f: F) -> future!(())
     where F: Fn(usize, page::Pointer) {
         unimplemented!();
     }

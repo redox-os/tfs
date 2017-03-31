@@ -17,6 +17,7 @@ seahash = "3.0"
 slog = "1.5"
 speck = "1.0"
 thread-object = "0.2"
+type-name = "0.1"
 
 [features]
 security = []

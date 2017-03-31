@@ -1,17 +1,19 @@
 mod array;
 mod object;
 
-pub use object::Object;
-use {type_name, cbloom, alloc, disk, Error};
+pub use self::object::Object;
+
+use {type_name, cbloom, alloc, Error};
 use alloc::page;
 use futures::Future;
+use disk::{self, Disk};
 
-struct State {
-    alloc: alloc::Allocator,
+struct State<D> {
+    alloc: alloc::Allocator<D>,
     reachable: cbloom::Filter,
 }
 
-impl State {
+impl<D: Disk> State<D> {
     pub fn alloc(
         &self,
         buf: disk::SectorBuf,

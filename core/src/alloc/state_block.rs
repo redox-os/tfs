@@ -1,5 +1,7 @@
 use std::convert::TryFrom;
-use {little_endian, disk, Error};
+use {little_endian, Error};
+use alloc::page;
+use disk::{self, cluster};
 
 /// A compression algorithm configuration option.
 pub enum CompressionAlgorithm {
@@ -53,6 +55,12 @@ pub struct State {
     pub freelist_head: Option<FreelistHead>,
 }
 
+/// The options sub-block.
+pub struct Options {
+    /// The chosen compression algorithm.
+    pub compression_algorithm: CompressionAlgorithm,
+}
+
 /// The TFS state block.
 pub struct StateBlock {
     /// The static options section of the state block.
@@ -65,7 +73,7 @@ impl StateBlock {
     /// Parse the binary representation of a state block.
     fn decode(
         buf: &disk::SectorBuf,
-        checksum_algorithm: header::ChecksumAlgorithm,
+        checksum_algorithm: disk::header::ChecksumAlgorithm,
     ) -> Result<StateBlock, Error> {
         // Make sure that the checksum of the state block matches the 8 byte field in the start.
         let expected = little_endian::read(&buf);
@@ -96,7 +104,7 @@ impl StateBlock {
     }
 
     /// Encode the state block into a sector-sized buffer.
-    fn encode(&self, checksum_algorithm: header::ChecksumAlgorithm) -> disk::SectorBuf {
+    fn encode(&self, checksum_algorithm: disk::header::ChecksumAlgorithm) -> disk::SectorBuf {
         // Create a buffer to hold the data.
         let mut buf = disk::SectorBuf::default();
 

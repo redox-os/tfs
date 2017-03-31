@@ -20,6 +20,7 @@ extern crate ring_pwhash;
 extern crate seahash;
 extern crate speck;
 extern crate thread_object;
+extern crate type_name;
 
 #[macro_use]
 mod error;

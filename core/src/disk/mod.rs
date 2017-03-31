@@ -1,8 +1,8 @@
 mod cache;
-pub mod cluster;
 mod crypto;
-mod header;
 mod vdev;
+pub mod cluster;
+pub mod header;
 
 use futures::Future;
 use {slog, Error};

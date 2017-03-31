@@ -3,11 +3,11 @@
 //! This module provides data structures for eliminating duplicates at a page level, meaning that
 //! if two equal pages are allocated, they can be reduced to one, reducing the space used.
 
-use self::crossbeam::sync::AtomicOption;
-use self::ring::digest;
+use crossbeam::sync::AtomicOption;
+use ring::digest;
 use std::sync::atomic;
 
-use disk;
+use {little_endian, disk};
 use alloc::page;
 
 /// The atomic ordering used in the table.
@@ -25,10 +25,10 @@ impl Fingerprint {
     /// This calculates the fingerprint of page `buf` through SHA-2.
     fn new(buf: &disk::SectorBuf) -> Fingerprint {
         // Hash it into a 256-bit value.
-        let hash = digest::digest(digest::SHA256, &page).as_ref();
+        let hash = digest::digest(digest::SHA256, buf).as_ref();
 
         // Read it in two parts to get two `u128`s.
-        (NativeEndian::read(hash), NativeEndian::read(hash[16..]))
+        (little_endian::read(hash), little_endian::read(hash[16..]))
     }
 }
 
@@ -61,7 +61,7 @@ impl Candidate {
     fn is_match(&self, buf: &disk::SectorBuf) -> bool {
         // Check the fingerprint against the hash of the buffer. Again, this is strictly speak
         // heuristic, but for all practical purposes, no collisions will ever be found.
-        candidate.fingerprint == fingerprint(buf)
+        self.fingerprint == Fingerprint::new(buf)
     }
 }
 
@@ -120,7 +120,7 @@ impl Table {
         self.table[page.checksum % MAX_PAGES_IN_TABLE].swap(Candidate {
             page: page,
             // TODO: This fingerprint might be double-calculated due to the use in `dedup`.
-            fingerprint: fingerprint(buf),
+            fingerprint: Fingerprint::new(buf),
         }, ORDERING);
     }
 }

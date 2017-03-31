@@ -24,7 +24,7 @@ use {little_endian, lz4_compress, thread_object, Error};
 /// The atomic ordering used in the allocator.
 const ORDERING: atomic::Ordering = atomic::Ordering::Relaxed;
 /// The maximal number of clusters in a freelist node.
-const CLUSTERS_IN_FREELIST_NODE: u64 = cluster::SECTOR_SIZE / cluster::POINTER_SIZE - 1;
+const CLUSTERS_IN_FREELIST_NODE: u64 = disk::SECTOR_SIZE / cluster::POINTER_SIZE - 1;
 // We subtract 1 to account for checksum.
 
 /// Allocator options.
@@ -36,7 +36,7 @@ struct Options {
     /// The options from the state block.
     state_block: state_block::Options,
     /// The options from the disk header.
-    disk_header: disk_header::Options,
+    disk_header: disk::header::Options,
 
     // In the future, allocator specific options may be added here.
 }
@@ -228,7 +228,7 @@ impl<D: Disk> Allocator<D> {
             // Pop a cluster from the freelist.
             return self.freelist_pop()
                 // Write the cluster with the raw, uncompressed data.
-                .and_then(|_| self.cache.write(cluster, buf))
+                .and_then(|cluster| self.cache.write(cluster, buf).map(|_| cluster))
                 .map(|cluster| page::Pointer {
                     cluster: cluster,
                     offset: None,
@@ -340,11 +340,11 @@ impl<D: Disk> Allocator<D> {
             let cksum = self.checksum(buf) as u32;
             if cksum as u32 != page.checksum {
                 // The checksums mismatched, thrown an error.
-                return Err(err!(Corruption, "mismatching checksums in {} - expected {:x}, found \
-                                {:x}", page, page.checksum, cksum));
+                Err(err!(Corruption, "mismatching checksums in {} - expected {:x}, found {:x}",
+                         page, page.checksum, cksum));
+            } else {
+                Ok(buf)
             }
-
-            Ok(ret)
         })
     }
 
