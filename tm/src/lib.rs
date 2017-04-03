@@ -1,6 +1,3 @@
-extern crate crossbeam;
-
-use crossbeam::mem::epoch::{self, Shared};
 use std::sync::atomic::{self, AtomicPtr};
 use std::mem;
 
@@ -17,17 +14,13 @@ impl<T> Memory<T> {
         }
     }
 
-    fn with<F>(&self, f: F)
-    where
-        F: Fn(&T) -> T,
-        T: Clone,
-    {
-        let epoch = epoch::pin();
+    fn with<U, F>(&self, f: F)
+    where F: Fn(&mut T) -> U {
         loop {
-            let ptr = unsafe { &*self.inner.load(ORDERING) };
+            let ptr = unsafe { &mut *self.inner.load(ORDERING) };
 
             let ret = Box::new(f(ptr));
-            if self.inner.compare_and_swap(ptr, &ret, ORDERING) == ptr {
+            if self.inner.compare_and_swap(ptr, &mut ret, ORDERING) == ptr {
                 mem::forget(ret);
                 break;
             }
