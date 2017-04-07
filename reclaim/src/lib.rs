@@ -103,9 +103,9 @@ impl<T> Atomic<T> {
             if reader.active.load() {
                 // The reader is not released yet, and is thus considered active.
 
-                // Remove the reader from the unused set and insert it back into the log, as the
-                // snapshot is active.
-                self.snapshots.insert(unused.remove(reader.ptr).unwrap());
+                // Remove the reader from the unused set and insert it back into the log (if it
+                // exists in the unused set), as the snapshot is active.
+                unused.remove(reader.ptr).map(|x| self.snapshots.insert(x));
                 // Put the reader back in the structure.
                 self.readers.insert(reader);
             } else {
