@@ -2,7 +2,6 @@ use std::sync::atomic::{self, AtomicPtr};
 
 use std::ptr::{self, null_mut};
 use std::sync::atomic::AtomicPtr;
-use std::sync::atomic::Ordering::{Relaxed, Release, Acquire};
 
 pub struct Stack<T> {
     head: AtomicPtr<Node<T>>,
@@ -14,13 +13,13 @@ struct Node<T> {
 }
 
 impl<T> Stack<T> {
-    pub fn new() -> Stack<T> {
+    fn new() -> Stack<T> {
         Stack {
             head: AtomicPtr::new(null_mut()),
         }
     }
 
-    pub fn push(&self, t: T) {
+    fn push(&self, t: T) {
         // Allocate the node, and immediately turn it into a `*mut` pointer.
         let n = Box::into_raw(Box::new(Node {
             data: t,
@@ -29,15 +28,31 @@ impl<T> Stack<T> {
 
         loop {
             // Snapshot current head.
-            let head = self.head.load(Relaxed);
+            let head = self.head.load(atomic::Ordering::Relaxed);
 
             // Update `next` pointer with snapshot.
             unsafe { (*n).next = head; }
 
             // If snapshot is still good, link in new node.
-            if self.head.compare_and_swap(head, n, Release) == head {
+            if self.head.compare_and_swap(head, n, atomic::Ordering::Release) == head {
                 break
             }
+        }
+    }
+
+    fn take_each(&self, f: F)
+    where F: Fn(T) {
+        // Replace the old head with a null pointer.
+        let mut node = self.head.swap(AtomicPtr::default(), atomic::Ordering::Acquire);
+
+        // We traverse every node until the pointer is null.
+        while !node.is_null() {
+            // Read the node into an owned box.
+            let bx = unsafe { Box::from_raw(head) };
+            // Apply the provided closure.
+            f(bx.data);
+            // Go to the next link.
+            node = bx.next;
         }
     }
 }
