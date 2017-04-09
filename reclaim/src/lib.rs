@@ -1,8 +1,5 @@
 use std::sync::atomic::{self, AtomicPtr};
 
-use std::ptr::{self, null_mut};
-use std::sync::atomic::AtomicPtr;
-
 pub struct Stack<T> {
     head: AtomicPtr<Node<T>>,
 }
@@ -15,7 +12,7 @@ struct Node<T> {
 impl<T> Stack<T> {
     fn new() -> Stack<T> {
         Stack {
-            head: AtomicPtr::new(null_mut()),
+            head: AtomicPtr::default,
         }
     }
 
@@ -88,6 +85,17 @@ struct Atomic<T> {
 }
 
 impl<T> Atomic<T> {
+    fn new(inner: T) -> Atomic<T> {
+        Atomic {
+            inner: AtomicPtr::new(Box::into_raw(Box::new())),
+            snapshots: Stack::new(),
+            readers: Stack::new(),
+            // Initially no one is accessing the readers stack nor garbage collecting, so the flags
+            // are set to zero.
+            flags: AtomicUsize::new(0),
+        }
+    }
+
     fn gc(&self) {
         // Spin until no thread is currently modifying the stacks. This prevents premature frees in
         // the thread which is currently pushing to `self.readers`.
@@ -96,7 +104,7 @@ impl<T> Atomic<T> {
             // collection.
             let flags = self.flags.compare_and_swap(0, 1, atomic::Ordering::Relaxed);
             if flags == 0 {
-                // Currently, noone accesses the readers stack and the CAS above means that the
+                // Currently, no one accesses the readers stack and the CAS above means that the
                 // lowest bitflag have been set, indicating that a garbage collection is now
                 // active.
                 break;
@@ -145,7 +153,7 @@ impl<T> Atomic<T> {
             ptr: self.inner.load(atomic::Ordering::Relaxed),
             // We allocate the atomic boolean on the heap as it is shared between the returned RAII
             // guard and the reader stack.
-            released: Box::from_raw(Box::new(AtomicBool::new(false))),
+            released: Box::into_raw(Box::new(AtomicBool::new(false))),
         };
 
         // Register the reader through the reader stack, ensuring that it is not freed before the
