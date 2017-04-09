@@ -77,46 +77,73 @@ impl<'a, T> Reader<'a, T> {
     }
 }
 
-struct Atomic<T> {
-    inner: AtomicPtr<T>,
-    snapshots: Stack<Box<T>>,
-    readers: Stack<RawReader>,
+#[derive(Default)]
+struct State {
     flags: AtomicUsize,
 }
 
-impl<T> Atomic<T> {
-    fn new(inner: T) -> Atomic<T> {
-        Atomic {
-            inner: AtomicPtr::new(Box::into_raw(Box::new())),
-            snapshots: Stack::new(),
-            readers: Stack::new(),
-            // Initially no one is accessing the readers stack nor garbage collecting, so the flags
-            // are set to zero.
-            flags: AtomicUsize::new(0),
+impl State {
+    fn start_gc(&self) -> false {
+        // Mark that a garbage collection is pending.
+        if self.flags.fetch_or(1, atomic::Ordering::Relaxed) & 1 != 0 {
+            // Another thread is pending to or currently garbage collecting, so we won't do the
+            // same.
+            return false;
         }
-    }
 
-    fn gc(&self) {
         // Spin until no thread is currently modifying the stacks. This prevents premature frees in
         // the thread which is currently pushing to `self.readers`.
         loop {
             // Read the flags, and if no readers or garbage collectors, activate garbage
             // collection.
-            let flags = self.flags.compare_and_swap(0, 1, atomic::Ordering::Relaxed);
-            if flags == 0 {
+            let flags = self.flags.compare_and_swap(1, 0b11, atomic::Ordering::Relaxed);
+            if flags == 1 {
                 // Currently, no one accesses the readers stack and the CAS above means that the
                 // lowest bitflag have been set, indicating that a garbage collection is now
                 // active.
-                break;
-            } else if flags & 1 == 1 {
-                // Another thread is currently garbage collection. No need for this thread doing
-                // the same.
-                return;
+                return true;
             }
         }
+    }
 
-        // We've now set the lowest bit in `self.active` namely the flag defining if we are
-        // collecting.
+    fn end_gc(&self) {
+        self.flags.fetch_sub(1, atomic::Ordering::Relaxed);
+    }
+
+    fn start_read(&self) {
+        // Increment the number of threads currently pushing to the readers stack. We add two to
+        // account for the LSB being a separate bitflag.
+        self.flags.fetch_add(2, atomic::Ordering::Relaxed);
+    }
+
+    fn end_read(&self) {
+        self.flags.fetch_sub(2, atomic::Ordering::Relaxed);
+    }
+}
+
+struct Atomic<T> {
+    inner: AtomicPtr<T>,
+    snapshots: Stack<Box<T>>,
+    readers: Stack<RawReader>,
+    state: State,
+}
+
+impl<T> Atomic<T> {
+    fn new(inner: T) -> Atomic<T> {
+        Atomic {
+            inner: AtomicPtr::new(Box::into_raw(Box::new(inner))),
+            snapshots: Stack::new(),
+            readers: Stack::new(),
+            flags: State::default(),
+        }
+    }
+
+    fn gc(&self) {
+        // Start the garbage collection.
+        if !self.state.start_gc() {
+            // Another thread is garbage collecting, so we short-circuit.
+            return;
+        }
 
         // Initially, every snapshot is marked unused.
         let mut unused = self.snapshots.collect();
@@ -137,15 +164,14 @@ impl<T> Atomic<T> {
             }
         });
 
-        // Unset the bitflag defining if currently garbage collecting.
-        self.flags.fetch_and(!1, atomic::Ordering::Relaxed);
+        // End the garbage collection cycle.
+        self.state.end_gc();
     }
 
     fn get(&self) -> Reader {
-        // Increment the number of threads currently pushing to the readers stack. We add two to
-        // account for the LSB being a separate bitflag. This ensures that the read snapshot isn't
-        // freed while registering it in the reader stack.
-        self.flags.fetch_add(2, atomic::Ordering::Relaxed);
+        // To avoid another thread freeing between reading and inserting into the readers stack, we
+        // change the state to block garbage collecting for awhile.
+        self.state.start_read();
 
         // Construct the raw reader.
         let reader = RawReader {
@@ -161,7 +187,7 @@ impl<T> Atomic<T> {
         self.readers.push(reader);
 
         // Revert the original increment.
-        self.flags.fetch_sub(2, atomic::Ordering::Relaxed);
+        self.state.end_read();
 
         Reader {
             raw: reader,
