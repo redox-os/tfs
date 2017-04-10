@@ -1,5 +1,39 @@
 use std::sync::atomic::{self, AtomicPtr};
 
+static GARBAGE: Stack<Box<Drop>> = Stack::new();
+static READERS: Stack<RawReader> = Stack::new();
+static STATE: State = State::new();
+
+fn gc() {
+    // Start the garbage collection.
+    if !STATE.start_gc() {
+        // Another thread is garbage collecting, so we short-circuit.
+        return;
+    }
+
+    // Initially, every garbage is marked unused.
+    let mut unused = GARBAGE.collect();
+
+    // Traverse the readers and update the reference counts.
+    READERS.take_each(|reader| {
+        if reader.active.load() {
+            // The reader is not released yet, and is thus considered active.
+
+            // Remove the reader from the unused set and insert it back into the log (if it
+            // exists in the unused set), as the garbage is active.
+            unused.remove(reader.ptr).map(|x| GARBAGE.insert(x));
+            // Put the reader back in the structure.
+            READERS.insert(reader);
+        } else {
+            // The reader was released. Destroy it.
+            reader.destroy();
+        }
+    });
+
+    // End the garbage collection cycle.
+    STATE.end_gc();
+}
+
 pub struct Stack<T> {
     head: AtomicPtr<Node<T>>,
 }
@@ -10,9 +44,9 @@ struct Node<T> {
 }
 
 impl<T> Stack<T> {
-    fn new() -> Stack<T> {
+    const fn new() -> Stack<T> {
         Stack {
-            head: AtomicPtr::default,
+            head: AtomicPtr::new(0 as *const T),
         }
     }
 
@@ -51,6 +85,13 @@ impl<T> Stack<T> {
             // Go to the next link.
             node = bx.next;
         }
+    }
+
+    fn collect(&self) -> HashSet<T> {
+        let mut hs = HashSet::new();
+        self.take_each(|x| hs.insert(x));
+
+        hs
     }
 }
 
@@ -138,40 +179,10 @@ impl<T> Atomic<T> {
         }
     }
 
-    fn gc(&self) {
-        // Start the garbage collection.
-        if !self.state.start_gc() {
-            // Another thread is garbage collecting, so we short-circuit.
-            return;
-        }
-
-        // Initially, every snapshot is marked unused.
-        let mut unused = self.snapshots.collect();
-
-        // Traverse the readers and update the reference counts.
-        self.readers.take_each(|reader| {
-            if reader.active.load() {
-                // The reader is not released yet, and is thus considered active.
-
-                // Remove the reader from the unused set and insert it back into the log (if it
-                // exists in the unused set), as the snapshot is active.
-                unused.remove(reader.ptr).map(|x| self.snapshots.insert(x));
-                // Put the reader back in the structure.
-                self.readers.insert(reader);
-            } else {
-                // The reader was released. Destroy it.
-                reader.destroy();
-            }
-        });
-
-        // End the garbage collection cycle.
-        self.state.end_gc();
-    }
-
     fn get(&self) -> Reader {
         // To avoid another thread freeing between reading and inserting into the readers stack, we
         // change the state to block garbage collecting for awhile.
-        self.state.start_read();
+        STATE.start_read();
 
         // Construct the raw reader.
         let reader = RawReader {
@@ -184,10 +195,10 @@ impl<T> Atomic<T> {
 
         // Register the reader through the reader stack, ensuring that it is not freed before the
         // RAII guard drops (`reader.release` is set to `true`).
-        self.readers.push(reader);
+        READERS.push(reader);
 
         // Revert the original increment.
-        self.state.end_read();
+        STATE.end_read();
 
         Reader {
             raw: reader,
@@ -198,7 +209,7 @@ impl<T> Atomic<T> {
     fn set(&self, new: Box<T>) {
         // Replace the inner by the new value.
         let old = self.inner.swap(Box::into_raw(new), atomic::Ordering::Relaxed);
-        // Push the old pointer to the snapshot stack.
-        self.snapshots.push(Box::from_raw(old));
+        // Push the old pointer to the garbage stack.
+        GARBAGE.push(Box::from_raw(old));
     }
 }
