@@ -124,7 +124,7 @@ struct State {
 }
 
 impl State {
-    fn start_gc(&self) -> false {
+    fn start_gc(&self) -> bool {
         // Mark that a garbage collection is pending.
         if self.flags.fetch_or(1, atomic::Ordering::Relaxed) & 1 != 0 {
             // Another thread is pending to or currently garbage collecting, so we won't do the
@@ -162,28 +162,16 @@ impl State {
     }
 }
 
-struct Atomic<T> {
-    inner: AtomicPtr<T>,
-    snapshots: Stack<Box<T>>,
-    readers: Stack<RawReader>,
-    state: State,
-}
+pub struct Reading;
 
-impl<T> Atomic<T> {
-    fn new(inner: T) -> Atomic<T> {
-        Atomic {
-            inner: AtomicPtr::new(Box::into_raw(Box::new(inner))),
-            snapshots: Stack::new(),
-            readers: Stack::new(),
-            flags: State::default(),
-        }
-    }
-
-    fn get(&self) -> Reader {
-        // To avoid another thread freeing between reading and inserting into the readers stack, we
-        // change the state to block garbage collecting for awhile.
+impl Reading {
+    pub fn obtain() -> Reading {
         STATE.start_read();
 
+        Reading
+    }
+
+    pub fn load<T>(&self, a: &Atomic<T>) -> Reader<T> {
         // Construct the raw reader.
         let reader = RawReader {
             // Load a snapshot of the pointer.
@@ -197,16 +185,42 @@ impl<T> Atomic<T> {
         // RAII guard drops (`reader.release` is set to `true`).
         READERS.push(reader);
 
-        // Revert the original increment.
-        STATE.end_read();
-
         Reader {
             raw: reader,
             _marker: PhantomData,
         }
     }
+}
 
-    fn set(&self, new: Box<T>) {
+impl Drop for Reading {
+    fn drop(&mut self) {
+        STATE.end_read();
+    }
+}
+
+pub struct Atomic<T> {
+    inner: AtomicPtr<T>,
+    snapshots: Stack<Box<T>>,
+    readers: Stack<RawReader>,
+    state: State,
+}
+
+impl<T> Atomic<T> {
+    pub fn new(inner: T) -> Atomic<T> {
+        Atomic {
+            inner: AtomicPtr::new(Box::into_raw(Box::new(inner))),
+            snapshots: Stack::new(),
+            readers: Stack::new(),
+            flags: State::default(),
+        }
+    }
+
+    pub fn load(&self) -> Reader<T> {
+        let guard = Reading::obtain();
+        guard.load(self)
+    }
+
+    pub fn store(&self, new: Box<T>) {
         // Replace the inner by the new value.
         let old = self.inner.swap(Box::into_raw(new), atomic::Ordering::Relaxed);
         // Push the old pointer to the garbage stack.
