@@ -1,10 +1,14 @@
 use std::sync::atomic::{self, AtomicPtr};
+use std::cell::Cell;
 
 static GARBAGE: Stack<Box<Drop>> = Stack::new();
 static READERS: Stack<RawReader> = Stack::new();
 static STATE: State = State::new();
+static TICKS_BEFORE_GC: u16 = 2000;
 
-fn gc() {
+thread_local!(static CLOCK: Cell<u16> = 0);
+
+pub fn gc() {
     // Start the garbage collection.
     if !STATE.start_gc() {
         // Another thread is garbage collecting, so we short-circuit.
@@ -32,6 +36,16 @@ fn gc() {
 
     // End the garbage collection cycle.
     STATE.end_gc();
+}
+
+pub fn tick() {
+    let clock = CLOCK.get();
+    if clock == TICKS_BEFORE_GC {
+        CLOCK.set(0);
+        gc();
+    } else {
+        CLOCK.set(clock + 1);
+    }
 }
 
 pub struct Stack<T> {
@@ -195,6 +209,7 @@ impl Reading {
 impl Drop for Reading {
     fn drop(&mut self) {
         STATE.end_read();
+        tick();
     }
 }
 
@@ -225,5 +240,7 @@ impl<T> Atomic<T> {
         let old = self.inner.swap(Box::into_raw(new), atomic::Ordering::Relaxed);
         // Push the old pointer to the garbage stack.
         GARBAGE.push(Box::from_raw(old));
+
+        tick();
     }
 }
