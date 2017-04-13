@@ -2,13 +2,18 @@ use std::sync::atomic::{self, AtomicPtr};
 use std::cell::Cell;
 
 static GARBAGE: Stack<Box<Drop>> = Stack::new();
-static READERS: Stack<RawReader> = Stack::new();
+static ACTIVE_SNAPSHOTS: Stack<RawSnapshot> = Stack::new();
 static STATE: State = State::new();
 static TICKS_BEFORE_GC: u16 = 2000;
 
-thread_local!(static CLOCK: Cell<u16> = 0);
+thread_local!(static CLOCK: Cell<u16> = Cell::new(0));
+thread_local!(static ACTIVE_READERS: Cell<usize> = Cell::new(0));
 
 pub fn gc() {
+    if ACTIVE_SNAPSHOTS.get() != 0 {
+        return;
+    }
+
     // Start the garbage collection.
     if !STATE.start_gc() {
         // Another thread is garbage collecting, so we short-circuit.
@@ -18,8 +23,8 @@ pub fn gc() {
     // Initially, every garbage is marked unused.
     let mut unused = GARBAGE.collect();
 
-    // Traverse the readers and update the reference counts.
-    READERS.take_each(|reader| {
+    // Traverse the active snapshots and update the reference counts.
+    ACTIVE_SNAPSHOTS.take_each(|reader| {
         if reader.active.load() {
             // The reader is not released yet, and is thus considered active.
 
@@ -27,7 +32,7 @@ pub fn gc() {
             // exists in the unused set), as the garbage is active.
             unused.remove(reader.ptr).map(|x| GARBAGE.insert(x));
             // Put the reader back in the structure.
-            READERS.insert(reader);
+            ACTIVE_SNAPSHOTS.insert(reader);
         } else {
             // The reader was released. Destroy it.
             reader.destroy();
@@ -45,6 +50,50 @@ pub fn tick() {
         gc();
     } else {
         CLOCK.set(clock + 1);
+    }
+}
+
+pub fn read<T, F>(f: F) -> T
+where F: Fn(Reader) -> T {
+    let mut active = ACTIVE_READERS.get();
+    ACTIVE_READERS.set(active + 1);
+    if active == 0 {
+        STATE.start_read();
+    }
+
+    let reader = Reader;
+    let ret = f(&reader);
+
+    active = ACTIVE_READERS.get();
+    if active == 1 {
+        STATE.end_read();
+    }
+    ACTIVE_READERS.set(active - 1);
+
+    ret
+}
+
+pub struct Reader;
+
+impl Reader {
+    pub fn load<T>(&self, a: &Atomic<T>) -> Snapshot<T> {
+        // Construct the raw reader.
+        let reader = RawSnapshot {
+            // Load a snapshot of the pointer.
+            ptr: self.inner.load(atomic::Ordering::Relaxed),
+            // We allocate the atomic boolean on the heap as it is shared between the returned RAII
+            // guard and the reader stack.
+            released: Box::into_raw(Box::new(AtomicBool::new(false))),
+        };
+
+        // Register the reader through the reader stack, ensuring that it is not freed before the
+        // RAII guard drops (`reader.release` is set to `true`).
+        ACTIVE_SNAPSHOTS.push(reader);
+
+        Snapshot {
+            raw: reader,
+            _marker: PhantomData,
+        }
     }
 }
 
@@ -109,24 +158,24 @@ impl<T> Stack<T> {
     }
 }
 
-struct RawReader {
+struct RawSnapshot<T> {
     active: *const AtomicBool,
     ptr: *const T,
 }
 
-impl RawReader {
+impl RawSnapshot {
     unsafe fn destroy(self) {
         // Drop the atomic boolean stored on the heap.
         mem::drop_in_place(self.active);
     }
 }
 
-struct Reader<'a, T> {
-    raw: RawReader,
+struct Snapshot<'a, T> {
+    raw: RawSnapshot,
     _marker: PhantomData<'a>,
 }
 
-impl<'a, T> Reader<'a, T> {
+impl<'a, T> Snapshot<'a, T> {
     fn drop(&mut self) {
         self.raw.active.store(true);
     }
@@ -147,15 +196,15 @@ impl State {
         }
 
         // Spin until no thread is currently modifying the stacks. This prevents premature frees in
-        // the thread which is currently pushing to `self.readers`.
+        // the thread which is currently pushing to the active snapshots.
         loop {
-            // Read the flags, and if no readers or garbage collectors, activate garbage
+            // Read the flags, and if no active snapshots or garbage collectors, activate garbage
             // collection.
             let flags = self.flags.compare_and_swap(1, 0b11, atomic::Ordering::Relaxed);
             if flags == 1 {
-                // Currently, no one accesses the readers stack and the CAS above means that the
-                // lowest bitflag have been set, indicating that a garbage collection is now
-                // active.
+                // Currently, no one accesses the active snapshot stack and the CAS above means
+                // that the lowest bitflag have been set, indicating that a garbage collection is
+                // now active.
                 return true;
             }
         }
@@ -166,8 +215,8 @@ impl State {
     }
 
     fn start_read(&self) {
-        // Increment the number of threads currently pushing to the readers stack. We add two to
-        // account for the LSB being a separate bitflag.
+        // Increment the number of threads currently pushing to the active snapshot stack. We add
+        // two to account for the LSB being a separate bitflag.
         self.flags.fetch_add(2, atomic::Ordering::Relaxed);
     }
 
@@ -176,63 +225,19 @@ impl State {
     }
 }
 
-pub struct Reading;
-
-impl Reading {
-    pub fn obtain() -> Reading {
-        STATE.start_read();
-
-        Reading
-    }
-
-    pub fn load<T>(&self, a: &Atomic<T>) -> Reader<T> {
-        // Construct the raw reader.
-        let reader = RawReader {
-            // Load a snapshot of the pointer.
-            ptr: self.inner.load(atomic::Ordering::Relaxed),
-            // We allocate the atomic boolean on the heap as it is shared between the returned RAII
-            // guard and the reader stack.
-            released: Box::into_raw(Box::new(AtomicBool::new(false))),
-        };
-
-        // Register the reader through the reader stack, ensuring that it is not freed before the
-        // RAII guard drops (`reader.release` is set to `true`).
-        READERS.push(reader);
-
-        Reader {
-            raw: reader,
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl Drop for Reading {
-    fn drop(&mut self) {
-        STATE.end_read();
-        tick();
-    }
-}
-
 pub struct Atomic<T> {
     inner: AtomicPtr<T>,
-    snapshots: Stack<Box<T>>,
-    readers: Stack<RawReader>,
-    state: State,
 }
 
 impl<T> Atomic<T> {
     pub fn new(inner: T) -> Atomic<T> {
         Atomic {
             inner: AtomicPtr::new(Box::into_raw(Box::new(inner))),
-            snapshots: Stack::new(),
-            readers: Stack::new(),
-            flags: State::default(),
         }
     }
 
-    pub fn load(&self) -> Reader<T> {
-        let guard = Reading::obtain();
-        guard.load(self)
+    pub fn load(&self) -> Snapshot<T> {
+        read(|r| r.load(self))
     }
 
     pub fn store(&self, new: Box<T>) {
