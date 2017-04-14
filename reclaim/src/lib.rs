@@ -10,13 +10,20 @@ thread_local!(static CLOCK: Cell<u16> = Cell::new(0));
 thread_local!(static ACTIVE_READERS: Cell<usize> = Cell::new(0));
 
 pub fn gc() {
-    if ACTIVE_SNAPSHOTS.get() != 0 {
+    // Check if there are any active readers.
+    if ACTIVE_READERS.get() != 0 {
+        // There are. We cannot garbage collect with active readers, hence we must skip it.
         return;
     }
 
+    // TODO: Set this to !0 to avoid a gc from happening in a destructor.
+    // Set the clock back to zero to delay the next garbage collection.
+    CLOCK.set(0);
+
     // Start the garbage collection.
     if !STATE.start_gc() {
-        // Another thread is garbage collecting, so we short-circuit.
+        // Another thread is garbage collecting, so we short-circuit. We won't set back the clock,
+        // as the other thread will have collected the garbage.
         return;
     }
 
@@ -46,7 +53,6 @@ pub fn gc() {
 pub fn tick() {
     let clock = CLOCK.get();
     if clock == TICKS_BEFORE_GC {
-        CLOCK.set(0);
         gc();
     } else {
         CLOCK.set(clock + 1);
