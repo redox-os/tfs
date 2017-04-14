@@ -8,15 +8,20 @@ static TICKS_BEFORE_GC: u16 = 2000;
 
 thread_local!(static CLOCK: Cell<u16> = Cell::new(0));
 thread_local!(static ACTIVE_READERS: Cell<usize> = Cell::new(0));
+thread_local!(static GARBAGE_COLLECTING: Cell<bool> = Cell::new(false));
 
 pub fn gc() {
+    // Skip garbage collection if one is already happening in this thread.
+    if GARBAGE_COLLECTING.get() {
+        return;
+    }
+
     // Check if there are any active readers.
     if ACTIVE_READERS.get() != 0 {
         // There are. We cannot garbage collect with active readers, hence we must skip it.
         return;
     }
 
-    // TODO: Set this to !0 to avoid a gc from happening in a destructor.
     // Set the clock back to zero to delay the next garbage collection.
     CLOCK.set(0);
 
@@ -26,6 +31,10 @@ pub fn gc() {
         // as the other thread will have collected the garbage.
         return;
     }
+
+    // Set the garbage collecting flag to avoid nested, unbounded recursion in garbage collection
+    // from destructors.
+    GARBAGE_COLLECTING.set(true);
 
     // Initially, every garbage is marked unused.
     let mut unused = GARBAGE.collect();
@@ -48,6 +57,7 @@ pub fn gc() {
 
     // End the garbage collection cycle.
     STATE.end_gc();
+    GARBAGE_COLLECTING.set(false);
 }
 
 pub fn tick() {
