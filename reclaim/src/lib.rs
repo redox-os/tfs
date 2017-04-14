@@ -3,19 +3,14 @@ use std::cell::Cell;
 
 static GARBAGE: Stack<Box<Drop>> = Stack::new();
 static ACTIVE_SNAPSHOTS: Stack<RawSnapshot> = Stack::new();
-static STATE: State = State::new();
+// TODO: rename, name's shite
+static PUSHING_TO_ACTIVE_SNAPSHOTS: AtomicUsize = AtomicUsize::new(0);
 static TICKS_BEFORE_GC: u16 = 2000;
 
 thread_local!(static CLOCK: Cell<u16> = Cell::new(0));
 thread_local!(static ACTIVE_READERS: Cell<usize> = Cell::new(0));
-thread_local!(static GARBAGE_COLLECTING: Cell<bool> = Cell::new(false));
 
 pub fn gc() {
-    // Skip garbage collection if one is already happening in this thread.
-    if GARBAGE_COLLECTING.get() {
-        return;
-    }
-
     // Check if there are any active readers.
     if ACTIVE_READERS.get() != 0 {
         // There are. We cannot garbage collect with active readers, hence we must skip it.
@@ -25,22 +20,19 @@ pub fn gc() {
     // Set the clock back to zero to delay the next garbage collection.
     CLOCK.set(0);
 
-    // Start the garbage collection.
-    if !STATE.start_gc() {
-        // Another thread is garbage collecting, so we short-circuit. We won't set back the clock,
-        // as the other thread will have collected the garbage.
-        return;
-    }
-
-    // Set the garbage collecting flag to avoid nested, unbounded recursion in garbage collection
-    // from destructors.
-    GARBAGE_COLLECTING.set(true);
+    // Spin until no other thread is pushing snapshots, ensuring the stack of active snapshot is
+    // not incomplete, and therefore collectable.
+    while PUSHING_TO_ACTIVE_SNAPSHOTS.compare_and_swap(0, 1) != 0 {}
 
     // Initially, every garbage is marked unused.
     let mut unused = GARBAGE.collect();
+    let snapshots = ACTIVE_SNAPSHOTS.take();
+
+    // Set back the counter as our collection of the stacks is over.
+    PUSHING_TO_ACTIVE_SNAPSHOTS.store(0);
 
     // Traverse the active snapshots and update the reference counts.
-    ACTIVE_SNAPSHOTS.take_each(|reader| {
+    snapshots.for_each(|reader| {
         if reader.active.load() {
             // The reader is not released yet, and is thus considered active.
 
@@ -54,10 +46,6 @@ pub fn gc() {
             reader.destroy();
         }
     });
-
-    // End the garbage collection cycle.
-    STATE.end_gc();
-    GARBAGE_COLLECTING.set(false);
 }
 
 pub fn tick() {
@@ -74,7 +62,7 @@ where F: Fn(Reader) -> T {
     let mut active = ACTIVE_READERS.get();
     ACTIVE_READERS.set(active + 1);
     if active == 0 {
-        STATE.start_read();
+        PUSHING_TO_ACTIVE_SNAPSHOTS.fetch_add(1);
     }
 
     let reader = Reader;
@@ -82,7 +70,7 @@ where F: Fn(Reader) -> T {
 
     active = ACTIVE_READERS.get();
     if active == 1 {
-        STATE.end_read();
+        PUSHING_TO_ACTIVE_SNAPSHOTS.fetch_sub(1);
     }
     ACTIVE_READERS.set(active - 1);
 
@@ -150,11 +138,14 @@ impl<T> Stack<T> {
         }
     }
 
-    fn take_each(&self, f: F)
-    where F: Fn(T) {
+    fn take(&self) -> Stack<T> {
         // Replace the old head with a null pointer.
-        let mut node = self.head.swap(AtomicPtr::default(), atomic::Ordering::Acquire);
+        self.head.swap(AtomicPtr::default(), atomic::Ordering::Acquire)
+    }
 
+    fn for_each(self, f: F)
+    where F: Fn(T) {
+        let mut node = self.head;
         // We traverse every node until the pointer is null.
         while !node.is_null() {
             // Read the node into an owned box.
@@ -194,50 +185,6 @@ struct Snapshot<'a, T> {
 impl<'a, T> Snapshot<'a, T> {
     fn drop(&mut self) {
         self.raw.active.store(true);
-    }
-}
-
-#[derive(Default)]
-struct State {
-    flags: AtomicUsize,
-}
-
-impl State {
-    fn start_gc(&self) -> bool {
-        // Mark that a garbage collection is pending.
-        if self.flags.fetch_or(1, atomic::Ordering::Relaxed) & 1 != 0 {
-            // Another thread is pending to or currently garbage collecting, so we won't do the
-            // same.
-            return false;
-        }
-
-        // Spin until no thread is currently modifying the stacks. This prevents premature frees in
-        // the thread which is currently pushing to the active snapshots.
-        loop {
-            // Read the flags, and if no active snapshots or garbage collectors, activate garbage
-            // collection.
-            let flags = self.flags.compare_and_swap(1, 0b11, atomic::Ordering::Relaxed);
-            if flags == 1 {
-                // Currently, no one accesses the active snapshot stack and the CAS above means
-                // that the lowest bitflag have been set, indicating that a garbage collection is
-                // now active.
-                return true;
-            }
-        }
-    }
-
-    fn end_gc(&self) {
-        self.flags.fetch_sub(1, atomic::Ordering::Relaxed);
-    }
-
-    fn start_read(&self) {
-        // Increment the number of threads currently pushing to the active snapshot stack. We add
-        // two to account for the LSB being a separate bitflag.
-        self.flags.fetch_add(2, atomic::Ordering::Relaxed);
-    }
-
-    fn end_read(&self) {
-        self.flags.fetch_sub(2, atomic::Ordering::Relaxed);
     }
 }
 
