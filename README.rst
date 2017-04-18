@@ -91,7 +91,7 @@ Why do you use SPECK as the default cipher?
     SPECK is a relatively young cipher, yet it has been subject to a lot of
     (ineffective) cryptanalysis, so it is relatively secure. It has really
     good performance and a simple implementation. Portability is an important
-    part of the TFS design, and truely portable AES implementations without
+    part of the TFS design, and truly portable AES implementations without
     side-channel attacks is harder than many think (particularly, there are
     issues with `SubBytes` in most portable implementations). SPECK does not
     have this issue, and can thus be securely implemented portably with minimal
