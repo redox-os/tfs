@@ -3,8 +3,6 @@ use std::hash::Hash;
 use crossbeam::mem::epoch::{self, Atomic};
 use sponge::Sponge;
 
-const ORDERING: atomic::Ordering = atomic::Ordering::Relaxed;
-
 pub struct Pair<K, V> {
     key: K,
     val: V,
@@ -51,7 +49,7 @@ impl<K: Hash + Eq, V> Table<K, V> {
 
     pub fn get(&self, key: &K, sponge: Sponge, guard: &epoch::Guard) -> Option<epoch::Shared<V>> {
         // Load the entry and handle the respective cases.
-        self.table[sponge.squeeze() as usize].load(guard, ORDERING)
+        self.table[sponge.squeeze() as usize].load(guard, atomic::Ordering::Acquire)
             .and_then(|node| node.map(|node| match node {
             // The entry was a leaf and the keys match, so we can return the entry's value.
             Node::Leaf(Pair { found_key, found_val }) if key == found_key => Some(found_val),
@@ -76,7 +74,7 @@ impl<K: Hash + Eq, V> Table<K, V> {
         'aba: loop {
             // We use CAS to place the leaf if and only if the entry is empty. Otherwise, we must
             // handle the respective cases.
-            return match entry.compare_and_swap(None, Some(epoch::Owned::new(Node::Leaf(pair))), ORDERING) {
+            return match entry.compare_and_swap(None, Some(epoch::Owned::new(Node::Leaf(pair))), atomic::Ordering::Release) {
                 // We successfully set an empty entry to the new key-value pair. This of course
                 // implies that the key didn't exist at the time.
                 Ok(()) => None,
@@ -88,7 +86,7 @@ impl<K: Hash + Eq, V> Table<K, V> {
                     // updated after we read it initially. If so, we won't update it for the reason
                     // that it was logically inserted (`insert` was called) before it being removed
                     // or updated.  Hence the other version is used, and we don't touch it.
-                    => match entry.compare_and_swap(Some(Node::Leaf(found_pair)), Some(Node::Leaf(pair)), ORDERING) {
+                    => match entry.compare_and_swap(Some(Node::Leaf(found_pair)), Some(Node::Leaf(pair)), atomic::Ordering::Release) {
                         // Everything went well and the leaf was updated.
                         Ok(()) => Some(found_pair.val),
                         // Another node was inserted here, meaning that the table is simply
@@ -126,7 +124,7 @@ impl<K: Hash + Eq, V> Table<K, V> {
                     // we must handle the new value, which could be anything else (e.g. another
                     // thread could have extended the leaf too because it is inserting the same
                     // pair).
-                    match entry.compare_and_swap(old_pair, Some(epoch::Owned::new(Node::Branch(new_table))), ORDERING) {
+                    match entry.compare_and_swap(old_pair, Some(epoch::Owned::new(Node::Branch(new_table))), atomic::Ordering::Release) {
                         // Our update went smooth, and we have extended the leaf to a branch,
                         // meaning that there now is a sub-table containing the two key-value
                         // pairs.
@@ -165,14 +163,14 @@ impl<K: Hash + Eq, V> Table<K, V> {
         let entry = self.table[sponge.squeeze() as usize];
 
         // Load the node (if any) and handle its cases.
-        entry.load(ORDERING, guard).and_then(|node| node.map(|node| match node {
+        entry.load(atomic::Ordering::Acquire, guard).and_then(|node| node.map(|node| match node {
             // There is a branch, so we must remove the key in the sub-table.
             Node::Branch(table) => table.remove(key, sponge),
             // There was a node with the key, which we will try to remove. We use CAS in order to
             // make sure that it is the same node as the one we read (`entry`), otherwise we might
             // remove a wrong node.
             Node::Leaf(Pair { key: found_key, val }) if found_key == key
-                => match entry.compare_and_swap(Some(entry), None, ORDERING) {
+                => match entry.compare_and_swap(Some(entry), None, atomic::Ordering::Release) {
                 // Removing the node succeeded: It wasn't changed in the meantime.
                 Ok(()) => Some(val),
                 // The table was extended with a new branch in the meantime, so we will forward the
@@ -193,7 +191,7 @@ impl<K: Hash + Eq, V> Table<K, V> {
 
     pub fn for_each<F: Fn(K, V)>(&self, f: F, guard: &epoch::Guard) {
         for i in self.table {
-            match i.load(guard, ORDERING) {
+            match i.load(guard, atomic::Ordering::Acquire) {
                 Some(Node::Leaf(Pair { key, val })) => f(key, val),
                 Some(Node::Branch(table)) => table.for_each(f, guard),
             }
@@ -202,7 +200,7 @@ impl<K: Hash + Eq, V> Table<K, V> {
 
     pub fn take_each<F: Fn(K, V)>(&self, f: F, guard: &epoch::Guard) {
         for i in self.table {
-            match i.load(guard, ORDERING) {
+            match i.load(guard, atomic::Ordering::Acquire) {
                 Some(Node::Leaf(Pair { key, val })) => f(key, val),
                 Some(Node::Branch(table)) => table.take_each(f, guard),
             }
