@@ -67,3 +67,9 @@ impl State {
         global::transport_garbage(mem::replace(self.garbage, Vec::new()));
     }
 }
+
+impl Drop for State {
+    fn drop(&mut self) {
+        self.transport_garbage();
+    }
+}
