@@ -1,14 +1,14 @@
 #[macro_use]
 extern crate lazy_static;
 
-mod atomic;
+mod boxed;
 mod garbage;
 mod global;
 mod guard;
 mod hazard;
 mod local;
 
-pub use atomic::Atomic;
+pub use boxed::Box;
 pub use guard::Guard;
 
 pub fn gc() {
