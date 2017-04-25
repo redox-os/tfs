@@ -1,5 +1,5 @@
 [package]
-name = "reclaim"
+name = "concurrent"
 version = "0.1.0"
 authors = ["ticki <ticki@users.noreply.github.com>"]
 
