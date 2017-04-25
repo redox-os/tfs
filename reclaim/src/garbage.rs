@@ -4,6 +4,13 @@ struct Garbage {
 }
 
 impl Garbage {
+    fn new(ptr: *const u8, dtor: fn(*const u8)) -> Garbage {
+        Garbage {
+            ptr: ptr,
+            dtor: dtor,
+        }
+    }
+
     unsafe fn new_box<T>(item: *const T) -> Garbage {
         unsafe fn dtor<T>(ptr: *const u8)  {
             drop(Box::from_raw(ptr as *mut u8 as *const T));

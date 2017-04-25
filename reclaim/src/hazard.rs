@@ -1,25 +1,25 @@
-enum State {
+pub enum State {
     Free,
     Dead,
     Protect(*const u8),
 }
 
-struct Hazard {
+pub struct Hazard {
     ptr: AtomicUsize,
 }
 
 impl Hazard {
-    fn blocked() -> Hazard {
+    pub fn blocked() -> Hazard {
         Hazard {
             ptr: AtomicUsize::new(0),
         }
     }
 
-    fn block(&self) {
+    pub fn block(&self) {
         self.ptr.store(0, atomic::Ordering::Release);
     }
 
-    fn set(&self, new: State) {
+    pub fn set(&self, new: State) {
         self.ptr.store(match new {
             State::Free => 1,
             State::Dead => 2,
@@ -27,7 +27,7 @@ impl Hazard {
         }, atomic::Ordering::Release);
     }
 
-    fn get(&self) -> State {
+    pub fn get(&self) -> State {
         loop {
             return match self.ptr.load(atomic::Ordering::Acquire) {
                 // 0 means that the hazard is blocked by another thread, and we must loop until it
@@ -44,7 +44,7 @@ impl Hazard {
 /// Create a new hazard reader-writer pair.
 ///
 /// This creates a new hazard pair in blocked state.
-fn create() -> (Writer, Reader) {
+pub fn create() -> (Writer, Reader) {
     let ptr = Box:into_raw(Box::new(Hazard::blocked()));
 
     (Writer {
@@ -54,16 +54,16 @@ fn create() -> (Writer, Reader) {
     })
 }
 
-struct Reader {
+pub struct Reader {
     ptr: *mut Hazard,
 }
 
 impl Reader {
-    fn get(&self) -> State {
+    pub fn get(&self) -> State {
         self.ptr.get()
     }
 
-    unsafe fn destroy(self) {
+    pub unsafe fn destroy(self) {
         debug_assert!(self.get() == State::Dead, "Prematurely freeing an active hazard.");
         Box::from_raw(self.ptr);
     }
@@ -75,7 +75,7 @@ impl Drop for Reader {
     }
 }
 
-struct Writer {
+pub struct Writer {
     ptr: *mut Hazard,
 }
 

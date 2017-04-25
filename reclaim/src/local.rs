@@ -16,6 +16,10 @@ pub fn free_hazard(hazard: hazard::Writer) {
     STATE.free_hazard(hazard)
 }
 
+pub fn export_garbage() {
+    STATE.export_garbage();
+}
+
 #[derive(Default)]
 struct State {
     garbage: Vec<Garbage>,
@@ -39,7 +43,6 @@ impl State {
 
     fn free_hazard(&mut self, hazard: hazard::Writer) {
         const MAX_NON_FREE_HAZARDS: usize = 128;
-        const MAX_HAZARDS: usize = 512;
 
         self.available_hazards.push(hazard);
 
@@ -63,13 +66,13 @@ impl State {
         }
     }
 
-    fn transport_garbage(&mut self) {
-        global::transport_garbage(mem::replace(self.garbage, Vec::new()));
+    fn export_garbage(&mut self) {
+        global::export_garbage(mem::replace(self.garbage, Vec::new()));
     }
 }
 
 impl Drop for State {
     fn drop(&mut self) {
-        self.transport_garbage();
+        self.export_garbage();
     }
 }

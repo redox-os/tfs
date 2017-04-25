@@ -13,16 +13,20 @@ pub fn create_hazard() -> hazard::Writer {
     write
 }
 
-pub fn transport_garbage(garbage: Vec<Garbage>) {
+pub fn export_garbage(garbage: Vec<Garbage>) {
     STATE.chan.send(Message::Garbage(garbage));
     tick();
 }
 
+pub fn gc() {
+    STATE.try_gc();
+}
+
 pub fn tick() {
-    const GC_PROBABILITY: usize = (!0) / 512;
+    const GC_PROBABILITY: usize = (!0) / 64;
 
     if rand::random() < GC_PROBABILITY {
-        STATE.try_gc();
+        gc();
     }
 }
 
