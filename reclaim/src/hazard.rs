@@ -1,4 +1,4 @@
-enum HazardState {
+enum State {
     Free,
     Dead,
     Protect(*const u8),
@@ -19,23 +19,23 @@ impl Hazard {
         self.ptr.store(0, atomic::Ordering::Release);
     }
 
-    fn set(&self, new: HazardState) {
+    fn set(&self, new: State) {
         self.ptr.store(match new {
-            HazardState::Free => 1,
-            HazardState::Dead => 2,
-            HazardState::Protect(ptr) => ptr as usize,
+            State::Free => 1,
+            State::Dead => 2,
+            State::Protect(ptr) => ptr as usize,
         }, atomic::Ordering::Release);
     }
 
-    fn get(&self) -> HazardState {
+    fn get(&self) -> State {
         loop {
             return match self.ptr.load(atomic::Ordering::Acquire) {
                 // 0 means that the hazard is blocked by another thread, and we must loop until it
                 // assumes another state.
                 0 => continue,
-                1 => HazardState::Free,
-                2 => HazardState::Dead,
-                ptr => HazardState::Protect(ptr as *const u8)
+                1 => State::Free,
+                2 => State::Dead,
+                ptr => State::Protect(ptr as *const u8)
             };
         }
     }
@@ -44,42 +44,42 @@ impl Hazard {
 /// Create a new hazard reader-writer pair.
 ///
 /// This creates a new hazard pair in blocked state.
-fn create() -> (HazardWriter, HazardReader) {
+fn create() -> (Writer, Reader) {
     let ptr = Box:into_raw(Box::new(Hazard::blocked()));
 
-    (HazardWriter {
+    (Writer {
         ptr: ptr,
-    }, HazardReader {
+    }, Reader {
         ptr: ptr,
     })
 }
 
-struct HazardReader {
+struct Reader {
     ptr: *mut Hazard,
 }
 
-impl HazardReader {
-    fn get(&self) -> HazardState {
+impl Reader {
+    fn get(&self) -> State {
         self.ptr.get()
     }
 
     unsafe fn destroy(self) {
-        debug_assert!(self.get() == HazardState::Dead, "Prematurely freeing an active hazard.");
+        debug_assert!(self.get() == State::Dead, "Prematurely freeing an active hazard.");
         Box::from_raw(self.ptr);
     }
 }
 
-impl Drop for HazardReader {
+impl Drop for Reader {
     fn drop(&mut self) {
         panic!("Hazard readers ought to be destroyed manually through the `destroy` method.");
     }
 }
 
-struct HazardWriter {
+struct Writer {
     ptr: *mut Hazard,
 }
 
-impl ops::Deref for HazardWriter {
+impl ops::Deref for Writer {
     type Target = Hazard;
 
     fn deref(&self) -> &Hazard {
@@ -89,8 +89,8 @@ impl ops::Deref for HazardWriter {
     }
 }
 
-impl Drop for HazardWriter {
+impl Drop for Writer {
     fn drop(&mut self) {
-        self.set(HazardState::Dead);
+        self.set(State::Dead);
     }
 }

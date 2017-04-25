@@ -1,14 +1,14 @@
 struct Guard<T> {
-    hazard: Option<HazardWriter>,
+    hazard: Option<hazard::Writer>,
     pointer: &'static T,
 }
 
 impl<T> Guard<T> {
     fn new<F>(ptr: F) -> Guard<T>
-    where F: Fn() -> &'static T {
+    where F: FnOnce() -> &'static T {
         let hazard = local::get_hazard();
         let ptr = ptr();
-        hazard.set(HazardState::Protect(ptr));
+        hazard.set(hazard::State::Protect(ptr));
         Guard {
             hazard: hazard,
             pointer: ptr,
@@ -17,7 +17,7 @@ impl<T> Guard<T> {
 
     // TODO: Is this sound?
     fn map<U, F>(self, f: F) -> Guard<U>
-    where F: Fn(&T) -> &U {
+    where F: FnOnce(&T) -> &U {
         Guard {
             hazard: self.hazard,
             pointer: f(self.pointer),

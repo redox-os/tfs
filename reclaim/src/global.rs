@@ -1,8 +1,10 @@
+use hazard;
+
 lazy_static! {
     pub const STATE: State = State::new();
 }
 
-fn create_hazard() -> HazardWriter {
+pub fn create_hazard() -> hazard::Writer {
     // Create the hazard.
     let (write, read) = hazard::create();
     // Communicate the new hazard to the global state through the channel.
@@ -11,13 +13,22 @@ fn create_hazard() -> HazardWriter {
     write
 }
 
-fn transport_garbage(garbage: Vec<Garbage>) {
+pub fn transport_garbage(garbage: Vec<Garbage>) {
     STATE.chan.send(Message::Garbage(garbage));
+    tick();
+}
+
+pub fn tick() {
+    const GC_PROBABILITY: usize = (!0) / 512;
+
+    if rand::random() < GC_PROBABILITY {
+        STATE.try_gc();
+    }
 }
 
 enum Message {
     Garbage(Vec<Garbage>),
-    NewHazard(HazardReader),
+    NewHazard(hazard::Reader),
 }
 
 struct State {
@@ -54,7 +65,7 @@ impl State {
 struct Garbo {
     chan: mpsc::Reciever<Message>,
     garbage: Vec<Garbage>,
-    hazards: Vec<HazardReader>,
+    hazards: Vec<hazard::Reader>,
 }
 
 impl State {
@@ -83,10 +94,10 @@ impl State {
             match hazard.get() {
                 // The hazard is dead, so the other end (the writer) is not available anymore,
                 // hence we can safely destroy it.
-                HazardState::Dead => unsafe { hazard.destroy() },
+                hazard::State::Dead => unsafe { hazard.destroy() },
                 // The hazard is free and must thus be put back to the hazard list.
-                HazardState::Free => self.hazards.push(hazard),
-                HazardState::Active(ptr) => {
+                hazard::State::Free => self.hazards.push(hazard),
+                hazard::State::Active(ptr) => {
                     // This hazard is active, hence we insert the pointer it contains in our
                     // "active" set.
                     active.insert(ptr);
