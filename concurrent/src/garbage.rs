@@ -1,4 +1,4 @@
-struct Garbage {
+pub struct Garbage {
     ptr: *const u8,
     dtor: unsafe fn(*const u8),
 }

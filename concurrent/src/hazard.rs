@@ -1,3 +1,5 @@
+use std::sync::atomic::{self, AtomicUsize};
+
 pub enum State {
     Free,
     Dead,
@@ -45,7 +47,7 @@ impl Hazard {
 ///
 /// This creates a new hazard pair in blocked state.
 pub fn create() -> (Writer, Reader) {
-    let ptr = Box:into_raw(Box::new(Hazard::blocked()));
+    let ptr = Box::into_raw(Box::new(Hazard::blocked()));
 
     (Writer {
         ptr: ptr,

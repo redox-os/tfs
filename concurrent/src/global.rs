@@ -1,7 +1,8 @@
 use hazard;
+use garbage::Garbage;
 
 lazy_static! {
-    pub const STATE: State = State::new();
+    pub static ref STATE: State = State::new();
 }
 
 pub fn create_hazard() -> hazard::Writer {

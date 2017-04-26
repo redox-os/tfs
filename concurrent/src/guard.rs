@@ -1,10 +1,10 @@
-struct Guard<T> {
+pub struct Guard<T> {
     hazard: Option<hazard::Writer>,
     pointer: &'static T,
 }
 
 impl<T> Guard<T> {
-    fn new<F>(ptr: F) -> Guard<T>
+    pub fn new<F>(ptr: F) -> Guard<T>
     where F: FnOnce() -> &'static T {
         let hazard = local::get_hazard();
         let ptr = ptr();
@@ -16,7 +16,7 @@ impl<T> Guard<T> {
     }
 
     // TODO: Is this sound?
-    fn map<U, F>(self, f: F) -> Guard<U>
+    pub fn map<U, F>(self, f: F) -> Guard<U>
     where F: FnOnce(&T) -> &U {
         Guard {
             hazard: self.hazard,

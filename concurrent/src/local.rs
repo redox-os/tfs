@@ -1,4 +1,6 @@
+use std::mem;
 use {global, hazard};
+use garbage::Garbage;
 
 thread_local! {
     static STATE: State = State::default();
