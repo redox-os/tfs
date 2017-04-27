@@ -1,3 +1,5 @@
+//! The global state.
+
 use std::sync::{mpsc, Mutex};
 use std::collections::HashSet;
 use std::mem;

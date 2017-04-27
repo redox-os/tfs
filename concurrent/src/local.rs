@@ -1,3 +1,5 @@
+//! The thread-local state.
+
 use std::mem;
 use {global, hazard};
 use garbage::Garbage;
