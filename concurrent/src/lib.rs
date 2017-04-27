@@ -1,14 +1,15 @@
 #[macro_use]
 extern crate lazy_static;
+extern crate rand;
 
-mod boxed;
+mod cell;
 mod garbage;
 mod global;
 mod guard;
 mod hazard;
 mod local;
 
-pub use boxed::Cell;
+pub use cell::Cell;
 pub use guard::Guard;
 
 use std::mem;

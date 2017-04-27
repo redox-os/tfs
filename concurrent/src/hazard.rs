@@ -1,4 +1,5 @@
 use std::sync::atomic::{self, AtomicUsize};
+use std::ops;
 
 pub enum State {
     Free,
@@ -47,7 +48,7 @@ impl Hazard {
 ///
 /// This creates a new hazard pair in blocked state.
 pub fn create() -> (Writer, Reader) {
-    let ptr = Box::into_raw(Box::new(Hazard::blocked()));
+    let ptr = Box::into_raw(Box::new(Hazard::blocked())) as &'static Hazard;
 
     (Writer {
         ptr: ptr,
@@ -57,7 +58,7 @@ pub fn create() -> (Writer, Reader) {
 }
 
 pub struct Reader {
-    ptr: *mut Hazard,
+    ptr: &'static Hazard,
 }
 
 impl Reader {
@@ -78,16 +79,14 @@ impl Drop for Reader {
 }
 
 pub struct Writer {
-    ptr: *mut Hazard,
+    ptr: &'static Hazard,
 }
 
 impl ops::Deref for Writer {
     type Target = Hazard;
 
     fn deref(&self) -> &Hazard {
-        unsafe {
-            &*self.ptr
-        }
+        self.ptr
     }
 }
 

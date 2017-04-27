@@ -1,4 +1,7 @@
-use hazard;
+use std::sync::{mpsc, Mutex};
+use std::collections::HashSet;
+use std::mem;
+use {rand, hazard};
 use garbage::Garbage;
 
 lazy_static! {
@@ -68,7 +71,7 @@ impl State {
 }
 
 struct Garbo {
-    chan: mpsc::Reciever<Message>,
+    chan: mpsc::Receiver<Message>,
     garbage: Vec<Garbage>,
     hazards: Vec<hazard::Reader>,
 }

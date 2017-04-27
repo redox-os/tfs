@@ -26,3 +26,6 @@ impl Garbage {
         unsafe { self.dtor(self.ptr); }
     }
 }
+
+// We must do this manually due to the raw pointer.
+unsafe impl Send for Garbage {}

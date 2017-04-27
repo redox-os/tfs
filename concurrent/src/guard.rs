@@ -1,4 +1,8 @@
-pub struct Guard<T> {
+use std::ops;
+use {hazard, local};
+
+// TODO: Remove this `'static` bound.
+pub struct Guard<T: 'static> {
     hazard: Option<hazard::Writer>,
     pointer: &'static T,
 }

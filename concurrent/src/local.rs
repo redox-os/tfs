@@ -39,7 +39,7 @@ impl State {
             hazard.block();
             hazard
         } else {
-            global::get_hazard()
+            global::create_hazard()
         }
     }
 
