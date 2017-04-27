@@ -72,6 +72,36 @@ impl<T> Cell<T> {
         guard
     }
 
+    /// Set a value if it matches.
+    ///
+    /// This compares `self` to `old`. If they match, the value is set to `new` and `Ok(())` is
+    /// returned. Otherwise, `Err(new)` is returned.
+    ///
+    /// The `ordering` defines what constraints the atomic operation has. Refer to the LLVM
+    /// documentation for more information.
+    pub fn compare_and_set(&self, old: &T, new: Box<T>, ordering: atomic::Ordering)
+    -> Result<(), Box<T>)> {
+        // Compare-and-swap the value.
+        let ptr = self.inner.compare_and_swap(old, &new, ordering);
+
+        // Check if the CAS was successful.
+        if ptr == old {
+            // It was. `self` is now `new`.
+
+            // This is critical for avoiding premature drop as the pointer to the box is stored in
+            // `self.inner` now.
+            mem::forget(new);
+
+            // Queue the now-unreachable garbage of `old`.
+            local::add_garbage(Garbage::new(old));
+
+            Ok()
+        } else {
+            // It failed.
+            Err(new)
+        }
+    }
+
     /// Swap a value if it matches.
     ///
     /// This compares `self` to `old`. If they match, it is swapped with `new` and a guard to the
