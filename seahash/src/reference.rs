@@ -22,7 +22,7 @@
 //! a' = b
 //! b' = c
 //! c' = d
-//! d  = g(a ⊕ n)
+//! d' = g(a ⊕ n)
 //! ```
 //!
 //! `g(x)` is defined as `g(x) = j(h(j(x)))` with `h(x) = (x ≫ 32) ≫ (x ≫ 60)` and `j(x) ≡ px (mod
