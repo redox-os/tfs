@@ -82,7 +82,7 @@ impl<T> Cell<T> {
     /// The `ordering` defines what constraints the atomic operation has. Refer to the LLVM
     /// documentation for more information.
     pub fn compare_and_set(&self, old: &T, new: Box<T>, ordering: atomic::Ordering)
-    -> Result<(), Box<T>)> {
+    -> Result<(), Box<T>> {
         // Compare-and-swap the value.
         let ptr = self.inner.compare_and_swap(old, &new, ordering);
 

@@ -99,7 +99,7 @@ pub fn gc() {
     // Export the local garbage to ensure that the garbage of the current thread gets collected.
     local::export_garbage();
     // Run the global GC.
-    global::gc():
+    global::gc();
 }
 
 /// Declare a pointer unreachable garbage to be deleted eventually.
