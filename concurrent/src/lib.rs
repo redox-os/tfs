@@ -22,7 +22,7 @@
 //! access a value through references, as well as update it, and more. Refer to the respective docs
 //! for more information.
 //!
-//! ## Why not epochs?
+//! ## Why not crossbeam/epochs?
 //!
 //! Epoch-based reclamation has some unfortunate issues. It cannot work properly if an epoch is
 //! constantly active. It assumes that at some point, the thread reads no objects, which is true in
@@ -34,7 +34,7 @@
 //! the "epochs" (in this case "hazards") later.
 //!
 //! While I have no benchmarks yet, the tests I've made (on skiplists and other structures)
-//! generally shows that `concurrent` outperforms `epoch` in most cases.
+//! generally shows that `concurrent` outperforms `crossbeam` in most cases.
 //!
 //! ## Internals
 //!
