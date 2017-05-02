@@ -74,16 +74,31 @@ enum Message {
 ///
 /// It is divided into two parts: The channel and the garbo. The channel buffers messages, which
 /// will eventually be executed at garbo, which holds all the data structures and is protected by a
-/// mutex.
-#[derive(Default)]
+/// mutex. The garbo holds the other end to the channel.
 struct State {
     /// The message-passing channel.
-    chan: Channel<Message>,
+    chan: mpsc::Sender<Message>,
     /// The garbo part of the state.
     garbo: Mutex<Garbo>,
 }
 
 impl State {
+    /// Initialize a new state.
+    fn new() -> State {
+        // Create the message-passing channel.
+        let (send, recv) = mpsc::channel();
+
+        // Construct the state from the two halfs of the channel.
+        State {
+            chan: send,
+            garbo: Mutex::new(Garbo {
+                chan: recv,
+                garbage: Vec::new(),
+                hazards: Vec::new(),
+            })
+        }
+    }
+
     /// Try to collect the garbage.
     ///
     /// This will handle all of the messages in the channel and then attempt at collect the
@@ -94,9 +109,8 @@ impl State {
     fn try_gc(&self) {
         // Lock the "garbo" (the part of the state needed to GC).
         if let Ok(garbo) = self.garbo.try_lock() {
-            // Execute all the messages in the channel.
-            self.chan.take_each(|i| garbo.handle(i));
-
+            // Handle all the messages sent.
+            garbo.handle_all();
             // Collect the garbage.
             garbo.gc();
         }
@@ -108,6 +122,8 @@ impl State {
 /// This part is supposed to act like the garbage collecting part. It handles hazards, garbage, and
 /// the receiving point of the message-passing channel.
 struct Garbo {
+    /// The channel of messages.
+    chan: mpsc::Receiver<Message>,
     /// The to-be-destroyed garbage.
     garbage: Vec<Garbage>,
     /// The current hazards.
@@ -125,6 +141,14 @@ impl Garbo {
             Message::Garbage(garbage) => self.garbage.append(garbage),
             // Register the new hazard into the state.
             Message::NewHazard(hazard) => self.hazards.push(hazard),
+        }
+    }
+
+    /// Receive and handle all the messages.
+    fn handle_all(&mut self) {
+        // Pop messages one-by-one and handle them respectively.
+        while let Ok(msg) = self.chan.try_recv() {
+            self.handle(msg);
         }
     }
 
