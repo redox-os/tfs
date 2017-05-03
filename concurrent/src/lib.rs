@@ -60,6 +60,7 @@
 
 #[macro_use]
 extern crate lazy_static;
+extern crate parking_lot;
 extern crate rand;
 
 mod cell;
@@ -68,6 +69,7 @@ mod global;
 mod guard;
 mod hazard;
 mod local;
+mod mpsc;
 
 pub use cell::Cell;
 pub use guard::Guard;

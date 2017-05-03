@@ -5,4 +5,5 @@ authors = ["ticki <ticki@users.noreply.github.com>"]
 
 [dependencies]
 lazy_static = "0.2"
+parking_lot = "0.4"
 rand = "0.3"

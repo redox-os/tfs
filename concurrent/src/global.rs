@@ -1,9 +1,9 @@
 //! The global state.
 
-use std::sync::{mpsc, Mutex};
+use parking_lot::Mutex;
 use std::collections::HashSet;
 use std::mem;
-use {rand, hazard};
+use {rand, hazard, mpsc};
 use garbage::Garbage;
 
 lazy_static! {
@@ -146,10 +146,10 @@ impl Garbo {
 
     /// Receive and handle all the messages.
     fn handle_all(&mut self) {
-        // Pop messages one-by-one and handle them respectively.
-        while let Ok(msg) = self.chan.try_recv() {
+        // Go over every message.
+        self.chan.recv_all(|msg| {
             self.handle(msg);
-        }
+        });
     }
 
     /// Garbage collect all unused garbage.
