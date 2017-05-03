@@ -20,6 +20,7 @@ use std::ops;
 ///
 /// Note that this `enum` excludes the blocked state, because it is semantically different from the
 /// other states.
+#[derive(PartialEq)]
 pub enum State {
     /// The hazard does not currently protect any object.
     Free,
@@ -144,7 +145,7 @@ impl Reader {
         debug_assert!(self.get() == State::Dead, "Prematurely freeing an active hazard.");
 
         // Load the pointer and deallocate it.
-        Box::from_raw(self.ptr.load(atomic::Ordering::Acquire));
+        Box::from_raw(self.ptr as *const Hazard as *mut Hazard);
     }
 }
 

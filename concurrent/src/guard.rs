@@ -45,10 +45,10 @@ impl<T> Guard<T> {
         let ptr = ptr();
         // Now that we have the pointer, we can protect it by the hazard, unblocking a pending
         // garbage collection if it exists.
-        hazard.set(hazard::State::Protect(ptr));
+        hazard.set(hazard::State::Protect(ptr as *const T as *const u8));
 
         Guard {
-            hazard: hazard,
+            hazard: Some(hazard),
             pointer: ptr,
         }
     }

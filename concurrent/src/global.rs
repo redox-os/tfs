@@ -177,7 +177,7 @@ impl Garbo {
         }
 
         // Take the garbage and scan it for unused garbage.
-        for garbage in mem::replace(self.garbage, Vec::new()) {
+        for garbage in mem::replace(&mut self.garbage, Vec::new()) {
             if active.contains(garbage.ptr) {
                 // If the garbage is in the set of active pointers, it will be put back to the
                 // garbage list.

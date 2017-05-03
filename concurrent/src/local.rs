@@ -65,7 +65,7 @@ struct State {
 impl State {
     /// Get the number of hazards in the cache which are not in state "free".
     fn non_free_hazards(&self) -> usize {
-        self.available_hazard.len() - self.available_hazards_free_before
+        self.available_hazards.len() - self.available_hazards_free_before
     }
 
     /// See `get_hazard()`.
@@ -103,7 +103,7 @@ impl State {
             }
 
             // Update the counter such that we mark the new hazards set to "free".
-            self.available_hazards_free_before = self.available_hazards_free_before.len();
+            self.available_hazards_free_before = self.available_hazards.len();
         }
     }
 
@@ -125,7 +125,7 @@ impl State {
     /// See `export_garbage()`.
     fn export_garbage(&mut self) {
         // Clear the vector and export the garbage.
-        global::export_garbage(mem::replace(self.garbage, Vec::new()));
+        global::export_garbage(mem::replace(&mut self.garbage, Vec::new()));
     }
 }
 

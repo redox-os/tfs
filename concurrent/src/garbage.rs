@@ -43,7 +43,7 @@ impl Garbage {
     unsafe fn new_box<T>(item: *const T) -> Garbage {
         unsafe fn dtor<T>(ptr: *const u8)  {
             // Drop the box represented by `ptr`.
-            Box::from_raw(ptr as *mut u8 as *const T);
+            Box::from_raw(ptr as *mut u8 as *mut T);
         }
 
         Garbage {
@@ -52,7 +52,7 @@ impl Garbage {
         }
     }
 
-    fn destroy(self) {
+    pub fn destroy(self) {
         unsafe { self.dtor(self.ptr); }
     }
 }
