@@ -91,9 +91,15 @@ impl<'a> Encoder<'a> {
     ///
     /// This is guaranteed to be below `DICTIONARY_SIZE`.
     fn get_cur_hash(&self) -> usize {
-        // Use LCG hashing to generate a relatively good hash of the four bytes batch at the
+        // Use PCG transform to generate a relatively good hash of the four bytes batch at the
         // cursor.
-        self.get_batch_at_cursor().wrapping_mul(134775813).wrapping_add(1) as usize % DICTIONARY_SIZE
+        let mut x = self.get_batch_at_cursor().wrapping_mul(0xa4d94a4f);
+        let a = x >> 16;
+        let b = x >> 30;
+        x ^= a >> b;
+        x = x.wrapping_mul(0xa4d94a4f);
+
+        x as usize % DICTIONARY_SIZE
     }
 
     /// Read a 4-byte "batch" from some position.
