@@ -102,7 +102,7 @@ impl Hazard {
 /// This creates a new hazard pair in blocked state.
 pub fn create() -> (Writer, Reader) {
     // Allocate the hazard on the heap.
-    let ptr = Box::into_raw(Box::new(Hazard::blocked())) as &'static Hazard;
+    let ptr: &'static Hazard = unsafe { &*Box::into_raw(Box::new(Hazard::blocked())) };
 
     // Construct the values.
     (Writer {

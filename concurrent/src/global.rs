@@ -10,7 +10,7 @@ lazy_static! {
     /// The global state.
     ///
     /// This state is shared between all the threads.
-    pub static ref STATE: State = State::new();
+    static ref STATE: State = State::new();
 }
 
 /// Create a new hazard.
@@ -53,7 +53,7 @@ pub fn tick() {
     const GC_PROBABILITY: usize = (!0) / 64;
 
     // Generate a random number and compare it against the probability.
-    if rand::random() <= GC_PROBABILITY {
+    if rand::random::<usize>() <= GC_PROBABILITY {
         // The outfall was to GC.
         gc();
     }
@@ -108,7 +108,7 @@ impl State {
     /// currently active in the hazards.
     fn try_gc(&self) {
         // Lock the "garbo" (the part of the state needed to GC).
-        if let Ok(garbo) = self.garbo.try_lock() {
+        if let Some(garbo) = self.garbo.try_lock() {
             // Handle all the messages sent.
             garbo.handle_all();
             // Collect the garbage.
@@ -138,7 +138,7 @@ impl Garbo {
     fn handle(&mut self, msg: Message) {
         match msg {
             // Append the garbage bulk to the garbage list.
-            Message::Garbage(garbage) => self.garbage.append(garbage),
+            Message::Garbage(mut garbage) => self.garbage.append(&mut garbage),
             // Register the new hazard into the state.
             Message::NewHazard(hazard) => self.hazards.push(hazard),
         }
@@ -158,14 +158,14 @@ impl Garbo {
         let mut active = HashSet::with_capacity(self.hazards.len());
 
         // Take out the hazards and go over them one-by-one.
-        for hazard in mem::replace(self.hazards, Vec::with_capacity(self.hazards.len())) {
+        for hazard in mem::replace(&mut self.hazards, Vec::with_capacity(self.hazards.len())) {
             match hazard.get() {
                 // The hazard is dead, so the other end (the writer) is not available anymore,
                 // hence we can safely destroy it.
                 hazard::State::Dead => unsafe { hazard.destroy() },
                 // The hazard is free and must thus be put back to the hazard list.
                 hazard::State::Free => self.hazards.push(hazard),
-                hazard::State::Active(ptr) => {
+                hazard::State::Protect(ptr) => {
                     // This hazard is active, hence we insert the pointer it contains in our
                     // "active" set.
                     active.insert(ptr);
@@ -178,7 +178,7 @@ impl Garbo {
 
         // Take the garbage and scan it for unused garbage.
         for garbage in mem::replace(&mut self.garbage, Vec::new()) {
-            if active.contains(garbage.ptr) {
+            if active.contains(&garbage.ptr()) {
                 // If the garbage is in the set of active pointers, it will be put back to the
                 // garbage list.
                 self.garbage.push(garbage);

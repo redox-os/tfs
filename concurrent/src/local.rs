@@ -14,7 +14,7 @@ thread_local! {
 /// This garbage is pushed to a thread-local queue. When enough garbage is accumulated in the
 /// thread, it is exported to the global state.
 pub fn add_garbage(garbage: Garbage) {
-    STATE.add_garbage(garbage)
+    STATE.with(|s| s.add_garbage(garbage));
 }
 
 /// Get a blocked hazard.
@@ -22,14 +22,14 @@ pub fn add_garbage(garbage: Garbage) {
 /// If possible, this will simply pop one of the thread-local cache of hazards. Otherwise, one must
 /// be registered in the global state.
 pub fn get_hazard() -> hazard::Writer {
-    STATE.get_hazard()
+    STATE.with(|s| s.get_hazard())
 }
 
 /// Free a hazard.
 ///
 /// This frees a hazard to the thread-local cache of hazards.
 pub fn free_hazard(hazard: hazard::Writer) {
-    STATE.free_hazard(hazard)
+    STATE.with(|s| s.free_hazard(hazard));
 }
 
 /// Export the garbage of this thread to the global state.
@@ -37,7 +37,7 @@ pub fn free_hazard(hazard: hazard::Writer) {
 /// This is useful for propagating accumulated garbage such that it can be destroyed by the next
 /// garbage collection.
 pub fn export_garbage() {
-    STATE.export_garbage();
+    STATE.with(|s| s.export_garbage());
 }
 
 /// A thread-local state.

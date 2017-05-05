@@ -75,6 +75,7 @@ pub use cell::Cell;
 pub use guard::Guard;
 
 use std::mem;
+use garbage::Garbage;
 
 /// Collect garbage.
 ///
@@ -121,5 +122,7 @@ pub fn gc() {
 /// `ptr` from now on, as such thing can mean that new guards can be created after it is dropped
 /// causing use-after-free.
 pub fn add_garbage<T>(ptr: &'static T, dtor: fn(&'static T)) {
-    local::add_garbage(ptr, mem::transmute(dtor));
+    local::add_garbage(unsafe {
+        Garbage::new(ptr as *const T as *const u8 as *mut u8, mem::transmute(dtor))
+    });
 }

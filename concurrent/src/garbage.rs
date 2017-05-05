@@ -20,7 +20,7 @@ impl Garbage {
     ///
     /// This takes the pointer and destructor (which takes pointer as argument) and construct the
     /// corresponding garbage item.
-    fn new(ptr: *const u8, dtor: fn(*const u8)) -> Garbage {
+    pub fn new(ptr: *const u8, dtor: fn(*const u8)) -> Garbage {
         Garbage {
             ptr: ptr,
             dtor: dtor,
@@ -40,20 +40,28 @@ impl Garbage {
     /// to secure against double-drops and other issues arising from the fact that we're passing a
     /// pointer.
     // TODO: Find a way to do this safely.
-    unsafe fn new_box<T>(item: *const T) -> Garbage {
+    pub unsafe fn new_box<T>(item: *const T) -> Garbage {
         unsafe fn dtor<T>(ptr: *const u8)  {
             // Drop the box represented by `ptr`.
             Box::from_raw(ptr as *mut u8 as *mut T);
         }
 
         Garbage {
-            ptr: item,
+            ptr: item as *const u8,
             dtor: dtor::<T>,
         }
     }
 
+    /// Get the inner pointer of the garbage.
+    pub fn ptr(&self) -> *const u8 {
+        self.ptr
+    }
+
+    /// Destroy the garbage.
+    ///
+    /// This runs the destructor associated with the data.
     pub fn destroy(self) {
-        unsafe { self.dtor(self.ptr); }
+        unsafe { (self.dtor)(self.ptr); }
     }
 }
 

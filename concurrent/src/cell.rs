@@ -30,7 +30,7 @@ impl<T> Cell<T> {
     /// documentation for more information.
     pub fn load(&self, ordering: atomic::Ordering) -> Guard<T> {
         // Load the inner and wrap it in a guard.
-        Guard::new(|| unsafe { &*self.inner.load(ordering) });
+        Guard::new(|| unsafe { &*self.inner.load(ordering) })
     }
 
     /// Store a new value in the cell.
@@ -42,9 +42,9 @@ impl<T> Cell<T> {
     /// documentation for more information.
     pub fn store(&self, new: Box<T>, ordering: atomic::Ordering) {
         // Swap the contents with the new value.
-        let ptr = self.inner.swap(&new, ordering);
+        let ptr = self.inner.swap(Box::into_raw(new), ordering);
         // Queue the deletion of the content.
-        local::add_garbage(unsafe { Garbage::new(ptr) });
+        local::add_garbage(unsafe { Garbage::new_box(ptr) });
     }
 
     /// Swap the old value with a new.
@@ -64,12 +64,12 @@ impl<T> Cell<T> {
         // otherwise we might introduce premature frees.
         let guard = Guard::new(|| {
             // Swap the atomic pointer with the new one.
-            unsafe { &*self.inner.swap(new, ordering) }
+            unsafe { &*self.inner.swap(Box::into_raw(new), ordering) }
         });
 
         // Since the pointer is now unreachable from the cell, it can safely be queued for
         // deletion.
-        local::add_garbage(Garbage::new(&guard));
+        local::add_garbage(unsafe { Garbage::new_box(&*guard) });
 
         guard
     }
@@ -83,24 +83,23 @@ impl<T> Cell<T> {
     /// documentation for more information.
     pub fn compare_and_set(&self, old: &T, new: Box<T>, ordering: atomic::Ordering)
     -> Result<(), Box<T>> {
+        // Cast the box to a raw pointer, to ignore the destructor if the CAS succeeds.
+        let new = Box::into_raw(new);
+
         // Compare-and-swap the value.
-        let ptr = self.inner.compare_and_swap(old, &new, ordering);
+        let ptr = self.inner.compare_and_swap(old as *const T as *mut T, new, ordering);
 
         // Check if the CAS was successful.
-        if ptr == old {
+        if ptr as *const T == old {
             // It was. `self` is now `new`.
 
-            // This is critical for avoiding premature drop as the pointer to the box is stored in
-            // `self.inner` now.
-            mem::forget(new);
+            // Queue the deletion of now-unreachable `old`.
+            local::add_garbage(unsafe { Garbage::new_box(old) });
 
-            // Queue the now-unreachable garbage of `old`.
-            local::add_garbage(Garbage::new(old));
-
-            Ok()
+            Ok(())
         } else {
-            // It failed.
-            Err(new)
+            // It failed; cast the raw pointer back to a box and return.
+            Err(unsafe { Box::from_raw(new) })
         }
     }
 
@@ -120,27 +119,26 @@ impl<T> Cell<T> {
     /// `compare_and_set`.
     pub fn compare_and_swap(&self, old: &T, new: Box<T>, ordering: atomic::Ordering)
     -> Result<Guard<T>, (Guard<T>, Box<T>)> {
+        // Cast the box to a raw pointer, to ignore the destructor if the CAS succeeds.
+        let new = Box::into_raw(new);
+
         // Create the guard beforehand to avoid premature frees.
         let guard = Guard::new(|| {
             // The guard is active, so we can do the CAS now.
-            unsafe { &*self.inner.compare_and_swap(old, &new, ordering) }
+            unsafe { &*self.inner.compare_and_swap(old as *const T as *mut T, new, ordering) }
         });
 
         // Check if the CAS was successful.
-        if guard == old {
+        if &*guard as *const T == old {
             // It was. `self` is now `new`.
 
-            // This is critical for avoiding premature drop as the pointer to the box is stored in
-            // `self.inner` now.
-            mem::forget(new);
-
-            // Queue the now-unreachable garbage of `old`.
-            local::add_garbage(Garbage::new(old));
+            // Queue the deletion of now-unreachable garbage `old`.
+            local::add_garbage(unsafe { Garbage::new_box(old) });
 
             Ok(guard)
         } else {
-            // It failed.
-            Err((guard, new))
+            // It failed; cast the raw pointer back to a box and return.
+            Err((guard, unsafe { Box::from_raw(new) }))
         }
     }
 }
