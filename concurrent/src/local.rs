@@ -1,12 +1,13 @@
 //! The thread-local state.
 
 use std::mem;
+use std::cell::RefCell;
 use {global, hazard};
 use garbage::Garbage;
 
 thread_local! {
     /// The state of this thread.
-    static STATE: State = State::default();
+    static STATE: RefCell<State> = RefCell::new(State::default());
 }
 
 /// Add new garbage to be deleted.
@@ -14,7 +15,7 @@ thread_local! {
 /// This garbage is pushed to a thread-local queue. When enough garbage is accumulated in the
 /// thread, it is exported to the global state.
 pub fn add_garbage(garbage: Garbage) {
-    STATE.with(|s| s.add_garbage(garbage));
+    STATE.with(|s| s.borrow_mut().add_garbage(garbage));
 }
 
 /// Get a blocked hazard.
@@ -22,14 +23,14 @@ pub fn add_garbage(garbage: Garbage) {
 /// If possible, this will simply pop one of the thread-local cache of hazards. Otherwise, one must
 /// be registered in the global state.
 pub fn get_hazard() -> hazard::Writer {
-    STATE.with(|s| s.get_hazard())
+    STATE.with(|s| s.borrow_mut().get_hazard())
 }
 
 /// Free a hazard.
 ///
 /// This frees a hazard to the thread-local cache of hazards.
 pub fn free_hazard(hazard: hazard::Writer) {
-    STATE.with(|s| s.free_hazard(hazard));
+    STATE.with(|s| s.borrow_mut().free_hazard(hazard));
 }
 
 /// Export the garbage of this thread to the global state.
@@ -37,7 +38,7 @@ pub fn free_hazard(hazard: hazard::Writer) {
 /// This is useful for propagating accumulated garbage such that it can be destroyed by the next
 /// garbage collection.
 pub fn export_garbage() {
-    STATE.with(|s| s.export_garbage());
+    STATE.with(|s| s.borrow_mut().export_garbage());
 }
 
 /// A thread-local state.
