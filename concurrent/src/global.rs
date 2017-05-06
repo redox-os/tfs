@@ -108,7 +108,7 @@ impl State {
     /// currently active in the hazards.
     fn try_gc(&self) {
         // Lock the "garbo" (the part of the state needed to GC).
-        if let Some(garbo) = self.garbo.try_lock() {
+        if let Some(mut garbo) = self.garbo.try_lock() {
             // Handle all the messages sent.
             garbo.handle_all();
             // Collect the garbage.
@@ -147,9 +147,9 @@ impl Garbo {
     /// Receive and handle all the messages.
     fn handle_all(&mut self) {
         // Go over every message.
-        self.chan.recv_all(|msg| {
+        for msg in self.chan.recv_all() {
             self.handle(msg);
-        });
+        }
     }
 
     /// Garbage collect all unused garbage.
@@ -158,7 +158,8 @@ impl Garbo {
         let mut active = HashSet::with_capacity(self.hazards.len());
 
         // Take out the hazards and go over them one-by-one.
-        for hazard in mem::replace(&mut self.hazards, Vec::with_capacity(self.hazards.len())) {
+        let len = self.hazards.len(); // TODO: This should be substituted into next line.
+        for hazard in mem::replace(&mut self.hazards, Vec::with_capacity(len)) {
             match hazard.get() {
                 // The hazard is dead, so the other end (the writer) is not available anymore,
                 // hence we can safely destroy it.
@@ -185,7 +186,7 @@ impl Garbo {
             } else {
                 // The garbage is unused and not referenced by any hazard, hence we can safely
                 // destroy it.
-                unsafe { garbage.destroy(); }
+                garbage.destroy();
             }
         }
     }

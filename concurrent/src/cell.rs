@@ -1,6 +1,5 @@
 //! Concurrent, atomic cells.
 
-use std::mem;
 use std::sync::atomic::{self, AtomicPtr};
 
 use local;

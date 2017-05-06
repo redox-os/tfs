@@ -58,10 +58,10 @@ impl<T> Guard<T> {
     /// This allows one to map a pointer to a pointer e.g. to an object referenced by the old. It
     /// is very convinient for creating APIs without the need for creating a wrapper type.
     // TODO: Is this sound?
-    pub fn map<U, F>(self, f: F) -> Guard<U>
+    pub fn map<U, F>(mut self, f: F) -> Guard<U>
     where F: FnOnce(&T) -> &U {
         Guard {
-            hazard: self.hazard,
+            hazard: self.hazard.take(),
             pointer: f(self.pointer),
         }
     }

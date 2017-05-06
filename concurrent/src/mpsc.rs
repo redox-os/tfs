@@ -50,11 +50,8 @@ impl<T> Receiver<T> {
     /// Receive all the elements in the queue.
     ///
     /// This takes all the elements and applies the given closure to them in an unspecified order.
-    pub fn recv_all<F>(&self, f: F)
-    where F: Fn(T) {
+    pub fn recv_all(&self) -> Vec<T> {
         // Lock the vector, and replace it by an empty vector, then iterate.
-        for i in mem::replace(&mut *self.inner.lock(), Vec::new()) {
-            f(i);
-        }
+        mem::replace(&mut *self.inner.lock(), Vec::new())
     }
 }
