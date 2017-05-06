@@ -1,7 +1,13 @@
 [package]
 name = "concurrent"
 version = "0.1.0"
-authors = ["ticki <ticki@users.noreply.github.com>"]
+authors = ["ticki <Ticki@users.noreply.github.com>"]
+description = "Hazard-pointer-based concurrent memory reclamation."
+repository = "https://github.com/ticki/tfs"
+documentation = "https://docs.rs/concurrent"
+license = "MIT"
+keywords = ["crossbeam", "hazard", "concurrent", "epoch", "gc"]
+exclude = ["target", "Cargo.lock"]
 
 [dependencies]
 lazy_static = "0.2"
