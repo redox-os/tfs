@@ -24,17 +24,30 @@
 //!
 //! ## Why not crossbeam/epochs?
 //!
-//! Epoch-based reclamation has some unfortunate issues. It cannot work properly if an epoch is
-//! constantly active. It assumes that at some point, the thread reads no objects, which is true in
-//! some cases, but not always. This makes it unsuitable for many thing, such as event loops and
-//! more.
+//! Epochs and classical hazard pointers are generally faster than this crate, but it doesn't
+//! matter how fast it is, it has to be right.
 //!
-//! Futhermore, to end an epoch, the system must do some relatively expensive operations, whereas
-//! `concurrent` (and most hazard pointer implementations) need not to do this, as it can reuse
-//! the "epochs" (in this case "hazards") later.
+//! The issue with most other and faster solutions is that, if there is a non-trivial amount of
+//! threads (say 16) constantly reading/storing some pointer, it will never get to a state, where
+//! it can be reclaimed.
 //!
-//! While I have no benchmarks yet, the tests I've made (on skiplists and other structures)
-//! generally shows that `concurrent` outperforms `crossbeam` in most cases.
+//! In other words, given sufficient amount of threads and frequency, the gaps between the
+//! reclamation might be very very long, causing very high memory usage, and potentially OOM
+//! crashes.
+//!
+//! These issues are not hypothethical. It happened to me while testing the caching system of TFS.
+//! Essentially, the to-be-destroyed garbage accumulated several gigabytes, without ever being open
+//! to a collection cycle.
+//!
+//! It reminds of the MongoDB debate. It might very well be the fastest solution¹, but if it can't
+//! even ensure consistency, what is the point?
+//!
+//! That being said, there are cases where this library is faster than the alternatives.
+//! Moreover, there are cases where the other libraries are fine (e.g. if you have a bounded number
+//! of thread and a medium-long interval between accesses).
+//!
+//! ¹If you want a super fast memory reclamation system, you should try NOP™, and not calling
+//!  destructors.
 //!
 //! ## Internals
 //!
@@ -57,6 +70,12 @@
 //! Note that a garbage collection cycle might not clear all objects. For example, some objects
 //! could be protected by hazards. Others might not have been exported from the thread-local cache
 //! yet.
+//!
+//! ## Performance
+//!
+//! It is worth noting that atomic reads through this library usually requires three atomic CPU
+//! instruction, this means that if you are traversing a list or something like that, this library
+//! might not be for you.
 
 #[macro_use]
 extern crate lazy_static;
