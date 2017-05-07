@@ -9,17 +9,39 @@ use {hazard, local};
 /// pointer is gone (the data is unreachable), it can be colleceted.
 // TODO: Remove this `'static` bound.
 pub struct Guard<T: 'static> {
-    /// The hazard.
-    ///
-    /// This is wrapped in an option to allow moving it out and back to the local state in the
-    /// destructor — something that is impossible otherwise due to `drop` taking `&mut self`.
-    // TODO: ^ Get rid of the option.
-    hazard: Option<hazard::Writer>,
+    /// The inner hazard.
+    hazard: hazard::Writer,
     /// The pointer to the protected object.
     pointer: &'static T,
 }
 
 impl<T> Guard<T> {
+    /// (Failably) create a new guard.
+    ///
+    /// This has all the same restrictions and properties as `Guard::new()` (please read its
+    /// documentation before using), with the exception of being failable.
+    ///
+    /// This means that the closure can return and error and abort the creation of the guard.
+    pub fn try_new<F, E>(ptr: F) -> Result<Guard<T>, E>
+    where F: FnOnce() -> Result<&'static T, E> {
+        // Get a hazard in blocked state.
+        let hazard = local::get_hazard();
+        // Right here, any garbage collection is blocked, due to the hazard above. This ensures
+        // that between the potential read in `ptr` and it being protected by the hazard, there
+        // will be no premature free.
+
+        // Evaluate the pointer through the closure.
+        let ptr = ptr()?;
+        // Now that we have the pointer, we can protect it by the hazard, unblocking a pending
+        // garbage collection if it exists.
+        hazard.set(hazard::State::Protect(ptr as *const T as *const u8));
+
+        Ok(Guard {
+            hazard: hazard,
+            pointer: ptr,
+        })
+    }
+
     /// Create a new guard.
     ///
     /// Because it must ensure that no garbage collection happens until the pointer is read, it
@@ -35,22 +57,7 @@ impl<T> Guard<T> {
     /// collecting garbage, leading to memory leaks in those.
     pub fn new<F>(ptr: F) -> Guard<T>
     where F: FnOnce() -> &'static T {
-        // Get a hazard in blocked state.
-        let hazard = local::get_hazard();
-        // Right here, any garbage collection is blocked, due to the hazard above. This ensures
-        // that between the potential read in `ptr` and it being protected by the hazard, there
-        // will be no premature free.
-
-        // Evaluate the pointer under the pr
-        let ptr = ptr();
-        // Now that we have the pointer, we can protect it by the hazard, unblocking a pending
-        // garbage collection if it exists.
-        hazard.set(hazard::State::Protect(ptr as *const T as *const u8));
-
-        Guard {
-            hazard: Some(hazard),
-            pointer: ptr,
-        }
+        Guard::try_new(|| Ok(ptr())).unwrap()
     }
 
     /// Map the pointer to another.
@@ -58,19 +65,12 @@ impl<T> Guard<T> {
     /// This allows one to map a pointer to a pointer e.g. to an object referenced by the old. It
     /// is very convinient for creating APIs without the need for creating a wrapper type.
     // TODO: Is this sound?
-    pub fn map<U, F>(mut self, f: F) -> Guard<U>
+    pub fn map<U, F>(self, f: F) -> Guard<U>
     where F: FnOnce(&T) -> &U {
         Guard {
-            hazard: self.hazard.take(),
+            hazard: self.hazard,
             pointer: f(self.pointer),
         }
-    }
-}
-
-impl<T> Drop for Guard<T> {
-    fn drop(&mut self) {
-        // Put the hazard back to the local state for potential reuse.
-        local::free_hazard(self.hazard.take().unwrap());
     }
 }
 

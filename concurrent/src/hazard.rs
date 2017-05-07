@@ -160,10 +160,25 @@ impl Drop for Reader {
 /// This wraps a hazard and provides only ability to read and deallocate it. It is created through
 /// the `create()` function.
 ///
-/// The destructor sets the state of the hazard to "dead".
+/// The destructor relocate the hazard to the thread-local cache.
 pub struct Writer {
     /// The pointer to the heap-allocated hazard.
     ptr: &'static Hazard,
+}
+
+impl Writer {
+    /// Set the state of this hazard to "dead".
+    ///
+    /// This will ensure that the hazard won't end up in the thread-local cache, by (eventually)
+    /// deleting it globally.
+    ///
+    /// Generally, this is not recommended, as it means that your hazard cannot be reused.
+    pub fn kill(self) {
+        // Set the state to dead.
+        self.set(State::Dead);
+        // Avoid the RAII constructor.
+        mem::forget(self);
+    }
 }
 
 impl ops::Deref for Writer {
@@ -176,6 +191,10 @@ impl ops::Deref for Writer {
 
 impl Drop for Writer {
     fn drop(&mut self) {
-        self.set(State::Dead);
+        // Free the hazard to the thread-local cache. We have to clone the hazard to get around the
+        // fact that `drop` takes `&mut self`.
+        local::free_hazard(Writer {
+            ptr: self.ptr,
+        });
     }
 }
