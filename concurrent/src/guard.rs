@@ -60,6 +60,14 @@ impl<T> Guard<T> {
         Guard::try_new(|| Ok(ptr())).unwrap()
     }
 
+    /// Conditionally create a guard.
+    ///
+    /// This acts `try_new`, but with `Option` instead of `Result`.
+    pub fn maybe_new<F, E>(ptr: F) -> Option<Guard<T>>
+    where F: FnOnce() -> Option<&'static T> {
+        Guard::try_new(|| ptr().ok_or(())).ok()
+    }
+
     /// Map the pointer to another.
     ///
     /// This allows one to map a pointer to a pointer e.g. to an object referenced by the old. It

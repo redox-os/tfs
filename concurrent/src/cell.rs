@@ -1,5 +1,6 @@
 //! Concurrent, atomic cells.
 
+use std::{mem, ptr};
 use std::sync::atomic::{self, AtomicPtr};
 
 use local;
@@ -27,23 +28,29 @@ impl<T> Cell<T> {
     ///
     /// The `ordering` defines what constraints the atomic operation has. Refer to the LLVM
     /// documentation for more information.
-    pub fn load(&self, ordering: atomic::Ordering) -> Guard<T> {
+    pub fn load(&self, ordering: atomic::Ordering) -> Option<Guard<T>> {
         // Load the inner and wrap it in a guard.
-        Guard::new(|| unsafe { &*self.inner.load(ordering) })
+        Guard::maybe_new(|| unsafe {
+            self.inner.load(ordering).as_ref()
+        })
     }
 
     /// Store a new value in the cell.
     ///
-    /// The old value of the cell will eventually be dropped, at some point after all the guarding
+    /// The old value of `self` will eventually be dropped, at some point after all the guarding
     /// references are gone.
     ///
     /// The `ordering` defines what constraints the atomic operation has. Refer to the LLVM
     /// documentation for more information.
-    pub fn store(&self, new: Box<T>, ordering: atomic::Ordering) {
+    pub fn store(&self, new: Option<Box<T>>, ordering: atomic::Ordering) {
+        // Transform the optional box to a (possibly null) pointer.
+        let new = new.map_or(ptr::null_mut(), |new| Box::into_raw(new));
         // Swap the contents with the new value.
-        let ptr = self.inner.swap(Box::into_raw(new), ordering);
-        // Queue the deletion of the content.
-        local::add_garbage(unsafe { Garbage::new_box(ptr) });
+        let ptr = self.inner.swap(new, ordering);
+        if !ptr.is_null() {
+            // Queue the deletion of the content.
+            local::add_garbage(unsafe { Garbage::new_box(ptr) });
+        }
     }
 
     /// Swap the old value with a new.
@@ -58,47 +65,53 @@ impl<T> Cell<T> {
     ///
     /// This is slower than `store` as it requires initializing a new guard, which requires at
     /// least two atomic operations. Thus, when possible, you should use `store`.
-    pub fn swap(&self, new: Box<T>, ordering: atomic::Ordering) -> Guard<T> {
+    pub fn swap(&self, new: Option<Box<T>>, ordering: atomic::Ordering) -> Option<Guard<T>> {
         // Create the guard. It is very important that this is done before the garbage is added,
         // otherwise we might introduce premature frees.
-        let guard = Guard::new(|| {
+        Guard::maybe_new(|| unsafe {
             // Swap the atomic pointer with the new one.
-            unsafe { &*self.inner.swap(Box::into_raw(new), ordering) }
+            self.inner.swap(Box::into_raw(new), ordering).as_ref()
+        }).map(|guard| {
+            // Since the pointer is now unreachable from the cell, it can safely be queued for
+            // deletion.
+            local::add_garbage(unsafe { Garbage::new_box(&*guard) });
+
+            guard
         });
-
-        // Since the pointer is now unreachable from the cell, it can safely be queued for
-        // deletion.
-        local::add_garbage(unsafe { Garbage::new_box(&*guard) });
-
-        guard
     }
 
-    /// Set a value if it matches.
+    /// Store a value if the current matches a particular value.
     ///
     /// This compares `self` to `old`. If they match, the value is set to `new` and `Ok(())` is
     /// returned. Otherwise, `Err(new)` is returned.
     ///
     /// The `ordering` defines what constraints the atomic operation has. Refer to the LLVM
     /// documentation for more information.
-    pub fn compare_and_set(&self, old: &T, new: Box<T>, ordering: atomic::Ordering)
-    -> Result<(), Box<T>> {
-        // Cast the box to a raw pointer, to ignore the destructor if the CAS succeeds.
-        let new = Box::into_raw(new);
+    pub fn compare_and_store(&self, old: Option<&T>, new: Option<Box<T>>, ordering: atomic::Ordering)
+    -> Result<(), Option<Box<T>>> {
+        // Convert the paramteres to raw pointers.
+        let new_ptr = new.map_or(ptr::null_mut(), |x| &mut *x);
+        let old_ptr = old.map_or(ptr::null_mut(), |x| x as *const T as *mut T);
 
         // Compare-and-swap the value.
-        let ptr = self.inner.compare_and_swap(old as *const T as *mut T, new, ordering);
+        let ptr = self.inner.compare_and_swap(old_ptr, new_ptr, ordering);
 
         // Check if the CAS was successful.
-        if ptr as *const T == old {
+        if ptr == old_ptr {
             // It was. `self` is now `new`.
 
-            // Queue the deletion of now-unreachable `old`.
-            local::add_garbage(unsafe { Garbage::new_box(old) });
+            // Ensure that the destructor of `new` is not run.
+            mem::forget(new);
+
+            // Queue the deletion of now-unreachable `old` (unless it's `None`).
+            if !old_ptr.is_null() {
+                local::add_garbage(unsafe { Garbage::new_box(old_ptr) });
+            }
 
             Ok(())
         } else {
-            // It failed; cast the raw pointer back to a box and return.
-            Err(unsafe { Box::from_raw(new) })
+            // It failed.
+            Err(new)
         }
     }
 
@@ -116,28 +129,37 @@ impl<T> Cell<T> {
     /// This is slower than `compare_and_set` as it requires initializing a new guard, which
     /// requires at least two atomic operations. Thus, when possible, you should use
     /// `compare_and_set`.
-    pub fn compare_and_swap(&self, old: &T, new: Box<T>, ordering: atomic::Ordering)
-    -> Result<Guard<T>, (Guard<T>, Box<T>)> {
-        // Cast the box to a raw pointer, to ignore the destructor if the CAS succeeds.
-        let new = Box::into_raw(new);
+    pub fn compare_and_swap(&self, old: Option<&T>, new: Option<Box<T>>, ordering: atomic::Ordering)
+    -> Result<Option<Guard<T>>, (Option<Guard<T>>, Option<Box<T>>)> {
+        // Convert the paramteres to raw pointers.
+        let new_ptr = new.map_or(ptr::null_mut(), |x| &mut *x);
+        let old_ptr = old.map_or(ptr::null_mut(), |x| x as *const T as *mut T);
 
         // Create the guard beforehand to avoid premature frees.
-        let guard = Guard::new(|| {
+        let guard = Guard::maybe_new(|| {
             // The guard is active, so we can do the CAS now.
-            unsafe { &*self.inner.compare_and_swap(old as *const T as *mut T, new, ordering) }
+            unsafe { self.inner.compare_and_swap(old_ptr, new_ptr, ordering).as_ref() }
         });
 
+        // Convert the guard to a raw pointer.
+        let guard_ptr = guard.map_or(ptr::null_mut(), |x| &mut *x as *mut T);
+
         // Check if the CAS was successful.
-        if &*guard as *const T == old {
+        if guard_ptr == old_ptr {
             // It was. `self` is now `new`.
 
-            // Queue the deletion of now-unreachable garbage `old`.
-            local::add_garbage(unsafe { Garbage::new_box(old) });
+            // Ensure that the destructor of `new` is not run.
+            mem::forget(new);
+
+            // Queue the deletion of now-unreachable `old` (unless it's `None`).
+            if !old_ptr.is_null() {
+                local::add_garbage(unsafe { Garbage::new_box(old_ptr) });
+            }
 
             Ok(guard)
         } else {
             // It failed; cast the raw pointer back to a box and return.
-            Err((guard, unsafe { Box::from_raw(new) }))
+            Err((guard, new))
         }
     }
 }
