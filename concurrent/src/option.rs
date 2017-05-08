@@ -1,4 +1,4 @@
-//! Concurrent, atomic cells.
+//! Concurrent, atomic options.
 
 use std::{mem, ptr};
 use std::sync::atomic::{self, AtomicPtr};
@@ -7,21 +7,22 @@ use local;
 use garbage::Garbage;
 use guard::Guard;
 
-/// A concurrently accessible and updatable cell.
+/// A concurrently accessible and updatable optional pointer.
 ///
-/// This can be compared to `std::cell::RefCell` in some ways: It allows accessing, referencing,
-/// updating, etc., however contrary to `RefCell`, this is concurrent and has no aliasing
-/// restrictions. It is futher distinguished from `std::sync::AtomicPtr` in that it allows
-/// references to the inner data without the ABA problem or any variant thereof.
+/// This acts as a kind of concurrent `Option<T>`.  It can be compared to `std::cell::RefCell` in
+/// some ways: It allows accessing, referencing, updating, etc., however contrary to `RefCell`,
+/// this is concurrent and has no aliasing restrictions. It is futher distinguished from
+/// `std::sync::AtomicPtr` in that it allows references to the inner data without the ABA problem
+/// or any variant thereof.
 ///
 /// It conviniently wraps this crates API in a seemless manner.
-pub struct Cell<T> {
+pub struct Option<T> {
     /// The inner atomic pointer.
     inner: AtomicPtr<T>,
 }
 
-impl<T> Cell<T> {
-    /// Get a reference to the current content of the cell.
+impl<T> Option<T> {
+    /// Get a reference to the current content of the option.
     ///
     /// This returns a `Guard<T>`, which "protects" the inner value such that it is not dropped
     /// before the guard is no longer active. This is all handled automatically through RAII.
@@ -35,7 +36,7 @@ impl<T> Cell<T> {
         })
     }
 
-    /// Store a new value in the cell.
+    /// Store a new value in the option.
     ///
     /// The old value of `self` will eventually be dropped, at some point after all the guarding
     /// references are gone.
@@ -72,7 +73,7 @@ impl<T> Cell<T> {
             // Swap the atomic pointer with the new one.
             self.inner.swap(Box::into_raw(new), ordering).as_ref()
         }).map(|guard| {
-            // Since the pointer is now unreachable from the cell, it can safely be queued for
+            // Since the pointer is now unreachable from the option, it can safely be queued for
             // deletion.
             local::add_garbage(unsafe { Garbage::new_box(&*guard) });
 

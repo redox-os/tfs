@@ -17,7 +17,7 @@
 //!
 //! ## Usage
 //!
-//! While the low-level API is available, it is generally sufficient to use the `concurrent::Cell`
+//! While the low-level API is available, it is generally sufficient to use the `concurrent::Option`
 //! abstraction. This acts much like familiar Rust APIs. It allows the programmer to concurrently
 //! access a value through references, as well as update it, and more. Refer to the respective docs
 //! for more information.
@@ -82,7 +82,7 @@ extern crate lazy_static;
 extern crate parking_lot;
 extern crate rand;
 
-mod cell;
+mod option;
 mod garbage;
 mod global;
 mod guard;
@@ -90,7 +90,7 @@ mod hazard;
 mod local;
 mod mpsc;
 
-pub use cell::Cell;
+pub use option::Option;
 pub use guard::Guard;
 
 use std::mem;
