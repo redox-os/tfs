@@ -57,13 +57,13 @@ impl<T> Guard<T> {
     /// collecting garbage, leading to memory leaks in those.
     pub fn new<F>(ptr: F) -> Guard<T>
     where F: FnOnce() -> &'static T {
-        Guard::try_new(|| Ok(ptr())).unwrap()
+        Guard::try_new::<_, ()>(|| Ok(ptr())).unwrap()
     }
 
     /// Conditionally create a guard.
     ///
     /// This acts `try_new`, but with `Option` instead of `Result`.
-    pub fn maybe_new<F, E>(ptr: F) -> Option<Guard<T>>
+    pub fn maybe_new<F>(ptr: F) -> Option<Guard<T>>
     where F: FnOnce() -> Option<&'static T> {
         Guard::try_new(|| ptr().ok_or(())).ok()
     }

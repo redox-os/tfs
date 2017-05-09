@@ -16,12 +16,12 @@ use guard::Guard;
 /// or any variant thereof.
 ///
 /// It conviniently wraps this crates API in a seemless manner.
-pub struct Option<T> {
+pub struct AtomicOption<T> {
     /// The inner atomic pointer.
     inner: AtomicPtr<T>,
 }
 
-impl<T> Option<T> {
+impl<T> AtomicOption<T> {
     /// Get a reference to the current content of the option.
     ///
     /// This returns a `Guard<T>`, which "protects" the inner value such that it is not dropped
@@ -45,6 +45,7 @@ impl<T> Option<T> {
     /// documentation for more information.
     pub fn store(&self, new: Option<Box<T>>, ordering: atomic::Ordering) {
         // Transform the optional box to a (possibly null) pointer.
+        // TODO: Use coercions.
         let new = new.map_or(ptr::null_mut(), |new| Box::into_raw(new));
         // Swap the contents with the new value.
         let ptr = self.inner.swap(new, ordering);
@@ -67,18 +68,22 @@ impl<T> Option<T> {
     /// This is slower than `store` as it requires initializing a new guard, which requires at
     /// least two atomic operations. Thus, when possible, you should use `store`.
     pub fn swap(&self, new: Option<Box<T>>, ordering: atomic::Ordering) -> Option<Guard<T>> {
+        // Convert `new` into a raw pointer.
+        // TODO: Use coercions.
+        let new_ptr = new.map_or(ptr::null_mut(), Box::into_raw);
+
         // Create the guard. It is very important that this is done before the garbage is added,
         // otherwise we might introduce premature frees.
         Guard::maybe_new(|| unsafe {
             // Swap the atomic pointer with the new one.
-            self.inner.swap(Box::into_raw(new), ordering).as_ref()
+            self.inner.swap(new_ptr, ordering).as_ref()
         }).map(|guard| {
             // Since the pointer is now unreachable from the option, it can safely be queued for
             // deletion.
             local::add_garbage(unsafe { Garbage::new_box(&*guard) });
 
             guard
-        });
+        })
     }
 
     /// Store a value if the current matches a particular value.
@@ -88,10 +93,11 @@ impl<T> Option<T> {
     ///
     /// The `ordering` defines what constraints the atomic operation has. Refer to the LLVM
     /// documentation for more information.
-    pub fn compare_and_store(&self, old: Option<&T>, new: Option<Box<T>>, ordering: atomic::Ordering)
+    pub fn compare_and_store(&self, old: Option<&T>, mut new: Option<Box<T>>, ordering: atomic::Ordering)
     -> Result<(), Option<Box<T>>> {
         // Convert the paramteres to raw pointers.
-        let new_ptr = new.map_or(ptr::null_mut(), |x| &mut *x);
+        // TODO: Use coercions.
+        let new_ptr = new.as_mut().map_or(ptr::null_mut(), |x| &mut **x);
         let old_ptr = old.map_or(ptr::null_mut(), |x| x as *const T as *mut T);
 
         // Compare-and-swap the value.
@@ -130,10 +136,11 @@ impl<T> Option<T> {
     /// This is slower than `compare_and_set` as it requires initializing a new guard, which
     /// requires at least two atomic operations. Thus, when possible, you should use
     /// `compare_and_set`.
-    pub fn compare_and_swap(&self, old: Option<&T>, new: Option<Box<T>>, ordering: atomic::Ordering)
+    pub fn compare_and_swap(&self, old: Option<&T>, mut new: Option<Box<T>>, ordering: atomic::Ordering)
     -> Result<Option<Guard<T>>, (Option<Guard<T>>, Option<Box<T>>)> {
         // Convert the paramteres to raw pointers.
-        let new_ptr = new.map_or(ptr::null_mut(), |x| &mut *x);
+        // TODO: Use coercions.
+        let new_ptr = new.as_mut().map_or(ptr::null_mut(), |x| &mut **x);
         let old_ptr = old.map_or(ptr::null_mut(), |x| x as *const T as *mut T);
 
         // Create the guard beforehand to avoid premature frees.
@@ -143,7 +150,8 @@ impl<T> Option<T> {
         });
 
         // Convert the guard to a raw pointer.
-        let guard_ptr = guard.map_or(ptr::null_mut(), |x| &mut *x as *mut T);
+        // TODO: Use coercions.
+        let guard_ptr = guard.as_ref().map_or(ptr::null_mut(), |x| &**x as *const T as *mut T);
 
         // Check if the CAS was successful.
         if guard_ptr == old_ptr {

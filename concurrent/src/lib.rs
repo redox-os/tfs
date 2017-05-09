@@ -90,7 +90,7 @@ mod hazard;
 mod local;
 mod mpsc;
 
-pub use option::Option;
+pub use option::AtomicOption;
 pub use guard::Guard;
 
 use std::mem;

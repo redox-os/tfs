@@ -14,7 +14,9 @@
 //! rules (e.g. only the reader/global part may deallocate the hazard box).
 
 use std::sync::atomic::{self, AtomicUsize};
-use std::ops;
+use std::{ops, mem};
+
+use local;
 
 /// The state of a hazard.
 ///
