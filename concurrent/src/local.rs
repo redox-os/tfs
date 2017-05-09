@@ -136,7 +136,9 @@ impl Drop for State {
         // memory leaks.
         self.export_garbage();
 
-        // Due to RAII, the hazards will set themself to "dead", and thus eventually be deallocated
-        // by the garbo.
+        // Clear every hazard to "dead" state.
+        for hazard in self.available_hazards.drain(..) {
+            hazard.kill();
+        }
     }
 }
