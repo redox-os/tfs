@@ -16,12 +16,21 @@ use guard::Guard;
 /// or any variant thereof.
 ///
 /// It conviniently wraps this crates API in a seemless manner.
+#[derive(Default)]
 pub struct AtomicOption<T> {
     /// The inner atomic pointer.
     inner: AtomicPtr<T>,
 }
 
 impl<T> AtomicOption<T> {
+    //// Create a new concurrent option.
+    pub fn new(init: Option<Box<T>>) -> AtomicOption<T> {
+        AtomicOption {
+            // Convert the box to a raw pointer.
+            inner: AtomicPtr::new(init.map_or(ptr::null_mut(), Box::into_raw)),
+        }
+    }
+
     /// Get a reference to the current content of the option.
     ///
     /// This returns a `Guard<T>`, which "protects" the inner value such that it is not dropped
@@ -93,12 +102,12 @@ impl<T> AtomicOption<T> {
     ///
     /// The `ordering` defines what constraints the atomic operation has. Refer to the LLVM
     /// documentation for more information.
-    pub fn compare_and_store(&self, old: Option<&T>, mut new: Option<Box<T>>, ordering: atomic::Ordering)
+    pub fn compare_and_store(&self, old: Option<*const T>, mut new: Option<Box<T>>, ordering: atomic::Ordering)
     -> Result<(), Option<Box<T>>> {
         // Convert the paramteres to raw pointers.
         // TODO: Use coercions.
         let new_ptr = new.as_mut().map_or(ptr::null_mut(), |x| &mut **x);
-        let old_ptr = old.map_or(ptr::null_mut(), |x| x as *const T as *mut T);
+        let old_ptr = old.map_or(ptr::null_mut(), |x| x as *mut T);
 
         // Compare-and-swap the value.
         let ptr = self.inner.compare_and_swap(old_ptr, new_ptr, ordering);
@@ -136,12 +145,12 @@ impl<T> AtomicOption<T> {
     /// This is slower than `compare_and_set` as it requires initializing a new guard, which
     /// requires at least two atomic operations. Thus, when possible, you should use
     /// `compare_and_set`.
-    pub fn compare_and_swap(&self, old: Option<&T>, mut new: Option<Box<T>>, ordering: atomic::Ordering)
+    pub fn compare_and_swap(&self, old: Option<*const T>, mut new: Option<Box<T>>, ordering: atomic::Ordering)
     -> Result<Option<Guard<T>>, (Option<Guard<T>>, Option<Box<T>>)> {
         // Convert the paramteres to raw pointers.
         // TODO: Use coercions.
         let new_ptr = new.as_mut().map_or(ptr::null_mut(), |x| &mut **x);
-        let old_ptr = old.map_or(ptr::null_mut(), |x| x as *const T as *mut T);
+        let old_ptr = old.map_or(ptr::null_mut(), |x| x as *mut T);
 
         // Create the guard beforehand to avoid premature frees.
         let guard = Guard::maybe_new(|| {
@@ -170,5 +179,80 @@ impl<T> AtomicOption<T> {
             // It failed; cast the raw pointer back to a box and return.
             Err((guard, new))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::sync::{atomic, Arc};
+    use std::thread;
+
+    #[test]
+    fn basic_properties() {
+        let opt = AtomicOption::default();
+        assert!(opt.load(atomic::Relaxed).is_none());
+        assert!(opt.swap(None, atomic::Relaxed).is_none());
+        assert!(opt.load(atomic::Relaxed).is_none());
+        assert!(opt.swap(Some(Box::new(42)), atomic::Relaxed).is_none());
+        assert_eq!(*opt.load(atomic::Relaxed).unwrap(), 42);
+        assert_eq!(*opt.swap(Some(Box::new(43)), atomic::Relaxed).unwrap(), 42);
+        assert_eq!(*opt.load(atomic::Relaxed).unwrap(), 43);
+    }
+
+    #[test]
+    fn cas() {
+        let bx1 = Box::new(1);
+        let ptr1 = &*bx1;
+        let bx2 = Box::new(1);
+        let ptr2 = &*bx2;
+
+        let opt = AtomicOption::new(Some(bx1));
+        assert_eq!(&*opt.compare_and_swap(Some(ptr2), None, atomic::Ordering::Relaxed).unwrap_err().0.unwrap(), ptr1);
+        assert_eq!(opt.load(atomic::Relaxed), ptr1);
+
+        assert_eq!(&*opt.compare_and_swap(None, Some(Box::new(2)), atomic::Ordering::Relaxed).unwrap_err().0.unwrap(), ptr1);
+        assert_eq!(opt.load(atomic::Relaxed), ptr1);
+
+        opt.compare_and_swap(Some(ptr1), None, atomic::Ordering::Relaxed).unwrap();
+        assert!(opt.load(atomic::Relaxed).is_none());
+
+        opt.compare_and_swap(None, Some(bx2), atomic::Ordering::Relaxed).unwrap();
+        assert_eq!(opt.load(atomic::Relaxed), ptr2);
+
+        opt.compare_and_store(Some(ptr2), None, atomic::Ordering::Relaxed).unwrap();
+        opt.compare_and_store(Some(Box::new(2)), None, atomic::Ordering::Relaxed).unwrap_err();
+
+        assert!(opt.load(atomic::Relaxed).is_none());
+
+        // To check that GC doesn't segfault or something.
+        ::gc();
+        ::gc();
+        ::gc();
+        ::gc();
+    }
+
+    #[test]
+    fn spam() {
+        let opt = Arc::new(concurrent::Option::default());
+
+        let j = Vec::new();
+        for i in 0..16 {
+            let opt = opt.clone();
+            j.push(thread::spawn(move || {
+                for i in 0..1_000_000 {
+                    let x = opt.load(atomic::Ordering::Relaxed);
+                    opt.store(Some(Box::new(i)));
+                }
+                opt
+            }))
+        }
+
+        for i in j {
+            i.join().unwrap();
+        }
+
+        assert_eq!(*opt.load(atomic::Ordering::Relaxed).unwrap(), 1_000_000);
     }
 }
