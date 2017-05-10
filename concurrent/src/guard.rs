@@ -8,6 +8,7 @@ use {hazard, local};
 /// This "guards" the held pointer against garbage collection. First when all guards of said
 /// pointer is gone (the data is unreachable), it can be colleceted.
 // TODO: Remove this `'static` bound.
+#[must_use]
 pub struct Guard<T: 'static> {
     /// The inner hazard.
     hazard: hazard::Writer,
