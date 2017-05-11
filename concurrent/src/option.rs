@@ -249,10 +249,54 @@ mod tests {
             }))
         }
 
+        ::gc();
+
         for i in j {
             i.join().unwrap();
         }
 
         assert_eq!(*opt.load(atomic::Ordering::Relaxed).unwrap(), 1_000_000);
+    }
+
+    #[test]
+    fn drop() {
+        #[begin(Clone)]
+        struct Dropper {
+            d: Arc<AtomicUsize>,
+        }
+
+        impl Drop for Dropper {
+            fn drop(&mut self) {
+                self.d.fetch_add(1, atomic::Ordering::Relaxed);
+            }
+        }
+
+        let drops = Arc::new(AtomicUsize::default());
+        let opt = Arc::new(concurrent::Option::default());
+
+        let j = Vec::new();
+        for i in 0..16 {
+            let d = Dropper {
+                d: drops.clone(),
+            };
+
+            let opt = opt.clone();
+
+            j.push(thread::spawn(move || {
+                for _ in 0..1_000_000 {
+                    opt.store(Some(d.clone()));
+                }
+            }))
+        }
+
+        for i in j {
+            i.join().unwrap();
+        }
+
+        opt.store(None);
+
+        ::gc();
+
+        assert_eq!(drops.load(atomic::Ordering::Relaxed), 16_000_000);
     }
 }
