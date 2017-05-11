@@ -43,6 +43,7 @@ pub enum State {
 /// Futhermore, there is an additional state: Blocked. If the hazard is in this state, reading it
 /// will block until it no longer is. This is useful for blocking garbage collection while a value
 /// is being read (avoiding the ABA problem).
+#[derive(Debug)]
 pub struct Hazard {
     /// The inner atomic value.
     ///
@@ -163,6 +164,7 @@ impl Drop for Reader {
 /// the `create()` function.
 ///
 /// The destructor relocate the hazard to the thread-local cache.
+#[derive(Debug)]
 pub struct Writer {
     /// The pointer to the heap-allocated hazard.
     ptr: &'static Hazard,

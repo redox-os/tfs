@@ -187,44 +187,45 @@ mod tests {
     use super::*;
 
     use std::sync::{atomic, Arc};
+    use std::sync::atomic::AtomicUsize;
     use std::thread;
 
     #[test]
     fn basic_properties() {
         let opt = AtomicOption::default();
-        assert!(opt.load(atomic::Relaxed).is_none());
-        assert!(opt.swap(None, atomic::Relaxed).is_none());
-        assert!(opt.load(atomic::Relaxed).is_none());
-        assert!(opt.swap(Some(Box::new(42)), atomic::Relaxed).is_none());
-        assert_eq!(*opt.load(atomic::Relaxed).unwrap(), 42);
-        assert_eq!(*opt.swap(Some(Box::new(43)), atomic::Relaxed).unwrap(), 42);
-        assert_eq!(*opt.load(atomic::Relaxed).unwrap(), 43);
+        assert!(opt.load(atomic::Ordering::Relaxed).is_none());
+        assert!(opt.swap(None, atomic::Ordering::Relaxed).is_none());
+        assert!(opt.load(atomic::Ordering::Relaxed).is_none());
+        assert!(opt.swap(Some(Box::new(42)), atomic::Ordering::Relaxed).is_none());
+        assert_eq!(*opt.load(atomic::Ordering::Relaxed).unwrap(), 42);
+        assert_eq!(*opt.swap(Some(Box::new(43)), atomic::Ordering::Relaxed).unwrap(), 42);
+        assert_eq!(*opt.load(atomic::Ordering::Relaxed).unwrap(), 43);
     }
 
     #[test]
     fn cas() {
         let bx1 = Box::new(1);
-        let ptr1 = &*bx1;
+        let ptr1 = &*bx1 as *const usize;
         let bx2 = Box::new(1);
-        let ptr2 = &*bx2;
+        let ptr2 = &*bx2 as *const usize;
 
         let opt = AtomicOption::new(Some(bx1));
-        assert_eq!(&*opt.compare_and_swap(Some(ptr2), None, atomic::Ordering::Relaxed).unwrap_err().0.unwrap(), ptr1);
-        assert_eq!(opt.load(atomic::Relaxed), ptr1);
+        assert_eq!(ptr1, &*opt.compare_and_swap(Some(ptr2), None, atomic::Ordering::Relaxed).unwrap_err().0.unwrap());
+        assert_eq!(ptr1, &*opt.load(atomic::Ordering::Relaxed).unwrap());
 
-        assert_eq!(&*opt.compare_and_swap(None, Some(Box::new(2)), atomic::Ordering::Relaxed).unwrap_err().0.unwrap(), ptr1);
-        assert_eq!(opt.load(atomic::Relaxed), ptr1);
+        assert_eq!(ptr1, &*opt.compare_and_swap(None, Some(Box::new(2)), atomic::Ordering::Relaxed).unwrap_err().0.unwrap());
+        assert_eq!(ptr1, &*opt.load(atomic::Ordering::Relaxed).unwrap());
 
         opt.compare_and_swap(Some(ptr1), None, atomic::Ordering::Relaxed).unwrap();
-        assert!(opt.load(atomic::Relaxed).is_none());
+        assert!(opt.load(atomic::Ordering::Relaxed).is_none());
 
         opt.compare_and_swap(None, Some(bx2), atomic::Ordering::Relaxed).unwrap();
-        assert_eq!(opt.load(atomic::Relaxed), ptr2);
+        assert_eq!(ptr2, &*opt.load(atomic::Ordering::Relaxed).unwrap());
 
         opt.compare_and_store(Some(ptr2), None, atomic::Ordering::Relaxed).unwrap();
-        opt.compare_and_store(Some(Box::new(2)), None, atomic::Ordering::Relaxed).unwrap_err();
+        opt.compare_and_store(Some(Box::into_raw(Box::new(2))), None, atomic::Ordering::Relaxed).unwrap_err();
 
-        assert!(opt.load(atomic::Relaxed).is_none());
+        assert!(opt.load(atomic::Ordering::Relaxed).is_none());
 
         // To check that GC doesn't segfault or something.
         ::gc();
@@ -235,15 +236,15 @@ mod tests {
 
     #[test]
     fn spam() {
-        let opt = Arc::new(concurrent::Option::default());
+        let opt = Arc::new(AtomicOption::default());
 
-        let j = Vec::new();
-        for i in 0..16 {
+        let mut j = Vec::new();
+        for _ in 0..16 {
             let opt = opt.clone();
             j.push(thread::spawn(move || {
                 for i in 0..1_000_000 {
-                    let x = opt.load(atomic::Ordering::Relaxed);
-                    opt.store(Some(Box::new(i)));
+                    let _ = opt.load(atomic::Ordering::Relaxed);
+                    opt.store(Some(Box::new(i)), atomic::Ordering::Relaxed);
                 }
                 opt
             }))
@@ -260,7 +261,7 @@ mod tests {
 
     #[test]
     fn drop() {
-        #[begin(Clone)]
+        #[derive(Clone)]
         struct Dropper {
             d: Arc<AtomicUsize>,
         }
@@ -272,19 +273,20 @@ mod tests {
         }
 
         let drops = Arc::new(AtomicUsize::default());
-        let opt = Arc::new(concurrent::Option::default());
+        let opt = Arc::new(AtomicOption::new(None));
 
-        let j = Vec::new();
-        for i in 0..16 {
-            let d = Dropper {
-                d: drops.clone(),
-            };
+        let d = Dropper {
+            d: drops.clone(),
+        };
 
+        let mut j = Vec::new();
+        for _ in 0..16 {
+            let d = d.clone();
             let opt = opt.clone();
 
             j.push(thread::spawn(move || {
                 for _ in 0..1_000_000 {
-                    opt.store(Some(d.clone()));
+                    opt.store(Some(Box::new(d.clone())), atomic::Ordering::Relaxed);
                 }
             }))
         }
@@ -293,7 +295,7 @@ mod tests {
             i.join().unwrap();
         }
 
-        opt.store(None);
+        opt.store(None, atomic::Ordering::Relaxed);
 
         ::gc();
 

@@ -9,6 +9,7 @@ use {hazard, local};
 /// pointer is gone (the data is unreachable), it can be colleceted.
 // TODO: Remove this `'static` bound.
 #[must_use]
+#[derive(Debug)]
 pub struct Guard<T: 'static> {
     /// The inner hazard.
     hazard: hazard::Writer,
