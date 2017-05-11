@@ -191,3 +191,10 @@ impl Garbo {
         }
     }
 }
+
+impl Drop for Garbo {
+    fn drop(&mut self) {
+        // Do a final GC.
+        self.gc();
+    }
+}
