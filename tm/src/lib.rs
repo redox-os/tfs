@@ -4,24 +4,23 @@ use std::mem;
 const ORDERING: atomic::Ordering = atomic::Ordering::Relaxed;
 
 struct Memory<T> {
-    inner: AtomicPtr<T>,
+    inner: concurrent::Option<T>,
 }
 
 impl<T> Memory<T> {
     fn new(data: T) -> Memory<T> {
         Memory {
-            inner: AtomicPtr::new(Box::into_raw(Box::new(data))),
+            inner: concurrent::Option::new(Some(Box::new(data))),
         }
     }
 
-    fn with<U, F>(&self, f: F)
-    where F: Fn(&mut T) -> U {
+    fn with<F>(&self, f: F)
+    where F: Fn(&T) -> T {
         loop {
-            let ptr = unsafe { &mut *self.inner.load(ORDERING) };
+            let snapshot = self.inner.load(ORDERING).unwrap();
+            let ret = f(&*snapshot);
 
-            let ret = Box::new(f(ptr));
-            if self.inner.compare_and_swap(ptr, &mut ret, ORDERING) == ptr {
-                mem::forget(ret);
+            if self.inner.compare_and_store(Some(&*snapshot), Some(ret), ORDERING).is_ok() {
                 break;
             }
         }
