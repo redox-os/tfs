@@ -1,3 +1,7 @@
+//! The traversal sequence generator (bijective sponge).
+
+// TODO: Get rid of this all-together.
+
 use std::hash::{Hash, Hasher};
 
 /// Permute an integer pseudorandomly.
@@ -93,28 +97,37 @@ fn sigma(mut x: u8) -> u8 {
 /// When we start squeezing, we set the state to `0` again. Then we pop the highest byte from the
 /// internal buffer, which is then XOR'd with the state and permuted by σ. This gives the new state
 /// and the extracted byte.
+#[derive(Default)]
 pub struct Sponge {
-    last: u8,
+    /// The state of the sponge.
+    ///
+    /// This is equal to the last outputted byte (and if none, the last byte in the buffer).
+    state: u8,
+    /// The internal buffer.
     buffer: Vec<u8>,
 }
 
 impl Sponge {
+    /// Create a new sponge for hashing a particular key.
     pub fn new<T: Hash>(key: &T) -> Sponge {
-        let mut sponge = Sponge {
-            last: 0,
-            buffer: Vec::new(),
-        };
+        // Initialize the sponge.
+        let mut sponge = Sponge::default();
 
+        // Write the key into the sponge.
         key.hash(&mut sponge);
-        sponge.finalize();
+
+        // Switch to squeezing.
+        sponge.begin_squeeze();
 
         sponge
     }
 
+    /// Extract an output byte from the sponge.
     pub fn squeeze(&mut self) -> u8 {
-        self.last = sigma(self.last ^ self.buffer.pop().unwrap_or(0));
+        // We the popped byte XOR by the state and then permute through the table.
+        self.state = sigma(self.state ^ self.buffer.pop().unwrap_or(0));
 
-        self.last
+        self.state
     }
 
     /// Truncate the sponge to match another sponge.
@@ -126,23 +139,31 @@ impl Sponge {
     pub fn matching(&mut self, other: &Sponge) {
         // These are matching, as the two sponges are assumed to have outputted the same bytes so
         // far.
-        self.last = other.last;
+        self.state = other.state;
         // Next, truncate the buffer, so the internal buffers are of same length.
         self.buffer.truncate(other.buffer.len());
     }
 
-    fn finalize(&mut self) {
+    /// Go to squeezing state.
+    ///
+    /// This does length padding, thus ensuring bijectivity.
+    fn begin_squeeze(&mut self) {
+        // Pad with the length.
         self.write_usize(self.buffer.len());
-        self.last = 0;
+        // Zero the state.
+        self.state = 0;
     }
 }
 
 impl Hasher for Sponge {
     fn finish(&self) -> u64 {
+        // You can't produce a u64 from a sponge. It is designed to produce an endless sequence of
+        // bytes.
         unreachable!();
     }
 
     fn write(&mut self, bytes: &[u8]) {
+        // Write each byte one-by-one.
         // TODO: This could be faster.
         for &i in bytes {
             self.write_u8(i);
@@ -150,8 +171,9 @@ impl Hasher for Sponge {
     }
 
     fn write_u8(&mut self, mut i: u8) {
-        self.last = sigma(self.last ^ i);
-
-        self.buffer.push(self.last);
+        // Mix in the state and permute.
+        self.state = sigma(self.state ^ i);
+        // The new state is then pushed to the buffer to be extracted later.
+        self.buffer.push(self.state);
     }
 }

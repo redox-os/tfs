@@ -1,19 +1,25 @@
 //! Implementation of a lock-free, atomic hash table.
 //!
-//! This crate provides a high-performance implementation of a completely lock-free (no mutexes, no
-//! spin-locks, or the alike) hash table.
+//! This crate provides a high-performance implementation of a completely
+//! lock-free (no mutexes, no spin-locks, or the alike) hash table.
 //!
-//! The only instruction we use is CAS, which allows us to atomically update the table.
+//! The only instruction we use is CAS, which allows us to atomically update
+//! the table.
 //!
 //! # Design
 //!
-//! The design is similar to Feldman's lock-free hash table, but diverge on several key points.
+//! The design is similar to Feldman's lock-free hash table, but diverge on
+//! several key points.
 //!
-//! It is structured as a 256-radix tree with a pseudorandom permutation applied to the key.
-//! Contrary to open addressing, this approach is entirely lock-free and need not reallocation.
+//! It is structured as a 256-radix tree with a pseudorandom permutation
+//! applied to the key.  Contrary to open addressing, this approach is entirely
+//! lock-free and need not reallocation.
 //!
-//! The permutation is a simple table+XOR based length-padded function, which is applied to avoid
-//! excessive depth (this is what makes it a "hash table").
+//! The permutation is a simple table+XOR based length-padded function, which
+//! is applied to avoid excessive depth (this is what makes it a "hash table").
+//!
+//! See [this blog post](https://ticki.github.io/blog/an-atomic-hash-table/)
+//! for details.
 
 extern crate crossbeam;
 
@@ -24,11 +30,14 @@ use std::hash::Hash;
 use crossbeam::mem::epoch::{self, Atomic};
 use sponge::Sponge;
 
+/// A lock-free, concurrent hash map.
 pub struct HashMap<K, V> {
+    /// The root table of the hash map.
     table: table::Table<K, V>,
 }
 
 impl<K: Hash + Eq, V> HashMap<K, V> {
+    /// Insert a key with a certain value into the map.
     pub fn insert(&self, key: K, val: V) -> Option<epoch::Pinned<V>> {
         let guard = epoch::pin();
 
@@ -38,22 +47,26 @@ impl<K: Hash + Eq, V> HashMap<K, V> {
         }, Sponge::new(&key), guard).into_pinned(guard)
     }
 
-    pub fn remove(&self, key: K, sponge: Sponge) -> Option<epoch::Pinned<V>> {
+    /// Remove a key from the hash map.
+    pub fn remove(&self, key: K) -> Option<epoch::Pinned<V>> {
         let guard = epoch::pin();
 
         self.table.remove(key, Sponge::new(&key), guard).into_pinned(guard)
     }
 
+    /// Apply a closure to every entry in the map.
     pub fn for_each<F: Fn(K, V)>(&self, f: F) {
         let guard = epoch::pin();
         self.table.for_each(f, guard);
     }
 
+    /// Remove and apply a closure to every entry in the map.
     pub fn take_each<F: Fn(K, V)>(&self, f: F) {
         let guard = epoch::pin();
         self.table.take_each(f, guard);
     }
 
+    /// Remove every entry from the mapap.
     pub fn clear(&self) {
         self.take_each(|_| ());
     }
