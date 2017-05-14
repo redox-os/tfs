@@ -1,6 +1,7 @@
 //! RAII guards for hazards.
 
 use std::ops;
+use std::sync::atomic;
 use {hazard, local};
 
 /// A RAII guard protecting from garbage collection.
@@ -28,6 +29,12 @@ impl<T> Guard<T> {
     where F: FnOnce() -> Result<&'static T, E> {
         // Get a hazard in blocked state.
         let hazard = local::get_hazard();
+
+        // This fence is necessary for ensuring that `hazard` does not get reordered to after `ptr`
+        // has run.
+        // TODO: Is this fence even neccessary?
+        atomic::fence(atomic::Ordering::SeqCst);
+
         // Right here, any garbage collection is blocked, due to the hazard above. This ensures
         // that between the potential read in `ptr` and it being protected by the hazard, there
         // will be no premature free.

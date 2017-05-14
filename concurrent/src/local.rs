@@ -22,6 +22,11 @@ pub fn add_garbage(garbage: Garbage) {
 ///
 /// If possible, this will simply pop one of the thread-local cache of hazards. Otherwise, one must
 /// be registered in the global state.
+///
+/// # Fence
+///
+/// This does not fence, and you must thus be careful with updating the value afterwards, as
+/// reordering can happen, meaning that the hazard has not been blocked yet.
 pub fn get_hazard() -> hazard::Writer {
     STATE.with(|s| s.borrow_mut().get_hazard())
 }
@@ -111,7 +116,7 @@ impl State {
     /// See `add_garbage()`.
     fn add_garbage(&mut self, garbage: Garbage) {
         /// The maximal amount of garbage before exportation to the global state.
-        const MAX_GARBAGE: usize = 64;
+        const MAX_GARBAGE: usize = 128;
 
         // Push the garbage to the cache of garbage.
         self.garbage.push(garbage);
