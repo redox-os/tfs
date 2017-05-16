@@ -8,9 +8,6 @@
 //!
 //! # Design
 //!
-//! The design is similar to Feldman's lock-free hash table, but diverge on
-//! several key points.
-//!
 //! It is structured as a 256-radix tree with a pseudorandom permutation
 //! applied to the key.  Contrary to open addressing, this approach is entirely
 //! lock-free and need not reallocation.
@@ -21,7 +18,7 @@
 //! See [this blog post](https://ticki.github.io/blog/an-atomic-hash-table/)
 //! for details.
 
-extern crate crossbeam;
+extern crate concurrent;
 
 mod sponge;
 mod table;
@@ -31,6 +28,7 @@ use crossbeam::mem::epoch::{self, Atomic};
 use sponge::Sponge;
 
 /// A lock-free, concurrent hash map.
+// TODO: Make assumptions about `Hash` clear.
 pub struct HashMap<K, V> {
     /// The root table of the hash map.
     table: table::Table<K, V>,
@@ -38,32 +36,26 @@ pub struct HashMap<K, V> {
 
 impl<K: Hash + Eq, V> HashMap<K, V> {
     /// Insert a key with a certain value into the map.
-    pub fn insert(&self, key: K, val: V) -> Option<epoch::Pinned<V>> {
-        let guard = epoch::pin();
-
+    pub fn insert(&self, key: K, val: V) -> Option<concurrent::Guard<V>> {
         self.table.insert(table::Pair {
             key: key,
             val: val,
-        }, Sponge::new(&key), guard).into_pinned(guard)
+        }, Sponge::new(&key))
     }
 
     /// Remove a key from the hash map.
-    pub fn remove(&self, key: K) -> Option<epoch::Pinned<V>> {
-        let guard = epoch::pin();
-
-        self.table.remove(key, Sponge::new(&key), guard).into_pinned(guard)
+    pub fn remove(&self, key: K) -> Option<concurrent::Guard<V>> {
+        self.table.remove(key, Sponge::new(&key))
     }
 
     /// Apply a closure to every entry in the map.
     pub fn for_each<F: Fn(K, V)>(&self, f: F) {
-        let guard = epoch::pin();
-        self.table.for_each(f, guard);
+        self.table.for_each(f);
     }
 
     /// Remove and apply a closure to every entry in the map.
     pub fn take_each<F: Fn(K, V)>(&self, f: F) {
-        let guard = epoch::pin();
-        self.table.take_each(f, guard);
+        self.table.take_each(f);
     }
 
     /// Remove every entry from the mapap.

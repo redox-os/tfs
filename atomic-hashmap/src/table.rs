@@ -2,7 +2,6 @@
 
 use std::sync::atomic;
 use std::hash::Hash;
-use crossbeam::mem::epoch::{self, Atomic};
 use sponge::Sponge;
 
 /// A key-value pair.
@@ -28,7 +27,7 @@ enum Node<K, V> {
 #[derive(Default)]
 pub struct Table<K, V>  {
     /// The buckets in the table.
-    buckets: [Atomic<Node<K, V>>; 256],
+    buckets: [concurrent::Option<Node<K, V>>; 256],
 }
 
 impl<K: Hash + Eq, V> Table<K, V> {
@@ -52,11 +51,11 @@ impl<K: Hash + Eq, V> Table<K, V> {
         if pos_a != pos_b {
             // The two position did not collide, so we can insert the two pairs at the respective
             // positions
-            table[pos_a as usize] = Atomic::new(Some(epoch::Owned::new(Node::Leaf(pair_a))));
-            table[pos_b as usize] = Atomic::new(Some(epoch::Owned::new(Node::Leaf(pair_b))));
+            table[pos_a as usize] = concurrent::Option::new(Some(Box::new(Node::Leaf(pair_a))));
+            table[pos_b as usize] = concurrent::Option::new(Some(Box::new(Node::Leaf(pair_b))));
         } else {
             // The two positions from the sponge matched, so we must place another branch.
-            table[pos_a as usize] = Atomic::new(Some(epoch::Owned::new(Node::Branch(
+            table[pos_a as usize] = concurrent::Option::new(Some(Box::new(Node::Branch(
                 Table::two_entries(pair_a, sponge_a, pair_b, sponge_b)
             ))));
         }
@@ -65,9 +64,9 @@ impl<K: Hash + Eq, V> Table<K, V> {
     }
 
     /// Get the value associated with some key, given its sponge.
-    pub fn get(&self, key: &K, sponge: Sponge, guard: &epoch::Guard) -> Option<epoch::Shared<V>> {
+    pub fn get(&self, key: &K, sponge: Sponge) -> Option<concurrent::Guard<V>> {
         // Load the bucket and handle the respective cases.
-        self.buckets[sponge.squeeze() as usize].load(guard, atomic::Ordering::Acquire)
+        self.buckets[sponge.squeeze() as usize].load(atomic::Ordering::Acquire)
             .and_then(|node| node.map(|node| match node {
             // The bucket was a leaf and the keys match, so we can return the bucket's value.
             Node::Leaf(Pair { found_key, found_val }) if key == found_key => Some(found_val),
@@ -93,7 +92,11 @@ impl<K: Hash + Eq, V> Table<K, V> {
         'aba: loop {
             // We use CAS to place the leaf if and only if the bucket is empty. Otherwise, we must
             // handle the respective cases.
-            return match bucket.compare_and_swap(None, Some(epoch::Owned::new(Node::Leaf(pair))), atomic::Ordering::Release) {
+            return match bucket.compare_and_swap(
+                None,
+                Some(Box::new(Node::Leaf(pair))),
+                atomic::Ordering::Release
+            ) {
                 // We successfully set an empty bucket to the new key-value pair. This of course
                 // implies that the key didn't exist at the time.
                 Ok(()) => None,
@@ -105,7 +108,11 @@ impl<K: Hash + Eq, V> Table<K, V> {
                     // updated after we read it initially. If so, we won't update it for the reason
                     // that it was logically inserted (`insert` was called) before it being removed
                     // or updated.  Hence the other version is used, and we don't touch it.
-                    => match bucket.compare_and_swap(Some(Node::Leaf(found_pair)), Some(Node::Leaf(pair)), atomic::Ordering::Release) {
+                    => match bucket.compare_and_swap(
+                        Some(Node::Leaf(found_pair)),
+                        Some(Node::Leaf(pair)),
+                        atomic::Ordering::Release
+                    ) {
                         // Everything went well and the leaf was updated.
                         Ok(()) => Some(found_pair.val),
                         // Another node was inserted here, meaning that the table is simply
@@ -143,7 +150,11 @@ impl<K: Hash + Eq, V> Table<K, V> {
                     // If not, we must handle the new value, which could be anything else (e.g.
                     // another thread could have extended the leaf too because it is inserting the
                     // same pair).
-                    match bucket.compare_and_swap(old_pair, Some(epoch::Owned::new(Node::Branch(new_table))), atomic::Ordering::Release) {
+                    match bucket.compare_and_swap(
+                        old_pair,
+                        Some(Box::new(Node::Branch(new_table))),
+                        atomic::Ordering::Release
+                    ) {
                         // Our update went smooth, and we have extended the leaf to a branch,
                         // meaning that there now is a sub-table containing the two key-value
                         // pairs.
@@ -177,14 +188,13 @@ impl<K: Hash + Eq, V> Table<K, V> {
         &self,
         key: &K,
         sponge: Sponge,
-        guard: &epoch::Guard,
-    ) -> Option<epoch::Shared<K, V>> {
+    ) -> Option<concurrent::Guard<K, V>> {
         // We squeeze the sponge to get the right bucket of our table, in which we will potentially
         // remove the key.
         let bucket = self.buckets[sponge.squeeze() as usize];
 
         // Load the node (if any) and handle its cases.
-        bucket.load(atomic::Ordering::Acquire, guard).and_then(|node| node.map(|node| match node {
+        bucket.load(atomic::Ordering::Acquire).and_then(|node| node.map(|node| match node {
             // There is a branch, so we must remove the key in the sub-table.
             Node::Branch(table) => table.remove(key, sponge),
             // There was a node with the key, which we will try to remove. We use CAS in order to
@@ -211,15 +221,15 @@ impl<K: Hash + Eq, V> Table<K, V> {
     }
 
     /// Run a closure on every key-value pair in the table.
-    pub fn for_each<F: Fn(K, V)>(&self, f: F, guard: &epoch::Guard) {
+    pub fn for_each<F: Fn(K, V)>(&self, f: F) {
         // Go over every bucket in the table.
         for i in self.buckets {
             // Load the bucket from the table.
-            match i.load(guard, atomic::Ordering::Acquire) {
+            match i.load(atomic::Ordering::Acquire) {
 				// There is a leaf; we simply apply the function to the inner value.
                 Some(Node::Leaf(Pair { key, val })) => f(key, val),
 				// There is a branch; hence we must recurse with the call.
-                Some(Node::Branch(table)) => table.for_each(f, guard),
+                Some(Node::Branch(table)) => table.for_each(f),
                 // This is an orphan, we have nothing more to do.
 				None => (),
             }
@@ -227,15 +237,15 @@ impl<K: Hash + Eq, V> Table<K, V> {
     }
 
     /// Remove and run a closure on every key-value pair in the table.
-    pub fn take_each<F: Fn(K, V)>(&self, f: F, guard: &epoch::Guard) {
+    pub fn take_each<F: Fn(K, V)>(&self, f: F) {
         // Go over every bucket in the table.
         for i in self.buckets {
             // Remove the bucket from the table.
-            match i.swap(None, guard, atomic::Ordering::Acquire) {
+            match i.swap(None, atomic::Ordering::Acquire) {
 				// There is a leaf; we simply apply the function to the inner value.
                 Some(Node::Leaf(Pair { key, val })) => f(key, val),
 				// There is a brnach; hence we must recurse with the call.
-                Some(Node::Branch(table)) => table.take_each(f, guard),
+                Some(Node::Branch(table)) => table.take_each(f),
                 // This is an orphan, we have nothing more to do.
 				None => (),
             }
