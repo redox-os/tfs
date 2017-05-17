@@ -138,7 +138,8 @@ I've written a number of pieces on the design of TFS:
 - `Collision Resolution with Nested Hash Tables <https://ticki.github.io/blog/collision-resolution-with-nested-hash-tables/>`_.
   This describes the method of nested hash tables we use for the directory
   structure.
-- `An Atomic Hash Table`_.  This describes the concurrent, in-memory hash table/key-value store.
+- `An Atomic Hash Table <https://ticki.github.io/blog/an-atomic-hash-table/>`_.
+  This describes the concurrent, in-memory hash table/key-value store.
 
 Specification
 -------------
