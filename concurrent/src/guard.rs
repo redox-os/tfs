@@ -40,15 +40,24 @@ impl<T> Guard<T> {
         // will be no premature free.
 
         // Evaluate the pointer through the closure.
-        let ptr = ptr()?;
-        // Now that we have the pointer, we can protect it by the hazard, unblocking a pending
-        // garbage collection if it exists.
-        hazard.set(hazard::State::Protect(ptr as *const T as *const u8));
+        match ptr() {
+            Ok(ptr) => {
+                // Now that we have the pointer, we can protect it by the hazard, unblocking a pending
+                // garbage collection if it exists.
+                hazard.set(hazard::State::Protect(ptr as *const T as *const u8));
 
-        Ok(Guard {
-            hazard: hazard,
-            pointer: ptr,
-        })
+                Ok(Guard {
+                    hazard: hazard,
+                    pointer: ptr,
+                })
+            },
+            Err(err) => {
+                // Set the hazard to free to ensure that the hazard doesn't remain blocking.
+                hazard.set(hazard::State::Free);
+
+                Err(err)
+            }
+        }
     }
 
     /// Create a new guard.
