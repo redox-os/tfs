@@ -14,7 +14,7 @@
 //! rules (e.g. only the reader/global part may deallocate the hazard box).
 
 use std::sync::atomic::{self, AtomicUsize};
-use std::{ops, mem};
+use std::{ops, mem, thread};
 
 use local;
 
@@ -149,6 +149,8 @@ impl Reader {
 
         // Load the pointer and deallocate it.
         Box::from_raw(self.ptr as *const Hazard as *mut Hazard);
+        // Ensure that the RAII destructor doesn't kick in and crashes the program.
+        mem::forget(self);
     }
 }
 
@@ -180,7 +182,7 @@ impl Writer {
     pub fn kill(self) {
         // Set the state to dead.
         self.set(State::Dead);
-        // Avoid the RAII constructor.
+        // Avoid the RAII destructor.
         mem::forget(self);
     }
 }
@@ -195,10 +197,26 @@ impl ops::Deref for Writer {
 
 impl Drop for Writer {
     fn drop(&mut self) {
-        // Free the hazard to the thread-local cache. We have to clone the hazard to get around the
-        // fact that `drop` takes `&mut self`.
-        local::free_hazard(Writer {
-            ptr: self.ptr,
-        });
+        // Implementation note: Freeing to local state in the destructor does lead to issues with
+        // panicking, which this conditional is supposed to solve. The alternative is to outright
+        // set the hazard to state "dead", disregarding whether the thread is panicking or not.
+        // This is fairly nice for some purposes, but it makes it necessary to store an `Option` in
+        // `Guard`, as one must avoid the hazard from being set to state "dead" after being
+        // relocated to the local state. As such, this approach (where the destructor automatically
+        // puts the hazard back into the local cache) is nicer. For more information on its
+        // alternative, see commit b7047c263cbd614b7c828d68b29d7928be543623.
+        if thread::panicking() {
+            // If the thread is unwinding, there is no point in putting it back in the thread-local
+            // cache. In fact, it might cause problems, if the unwinding tries to garbage collect
+            // and the hazard is in blocked state. For this reason, we simply set the state to
+            // "dead" and move on.
+            self.ptr.set(State::Dead);
+        } else {
+            // Free the hazard to the thread-local cache. We have to clone the hazard to get around the
+            // fact that `drop` takes `&mut self`.
+            local::free_hazard(Writer {
+                ptr: self.ptr,
+            });
+        }
     }
 }

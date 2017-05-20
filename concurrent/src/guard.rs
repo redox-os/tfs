@@ -98,3 +98,14 @@ impl<T> ops::Deref for Guard<T> {
         self.pointer
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[should_panic]
+    fn panic_during_guard_creation() {
+        let _ = Guard::new(|| -> &'static u8 { panic!() });
+    }
+}
