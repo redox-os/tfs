@@ -38,7 +38,7 @@ Concurrent
     to manage the data, and scales linearly by the number of cores. **This is
     perhaps the most important feature of TFS.**
 Asynchronous
-    TFS is asynchronous: operations can happen independently, and writes and
+    TFS is asynchronous: operations can happen independently; writes and
     reads from the disk need not block.
 Full-disk compression
     TFS is the first file system to incorporate complete full-disk compression
@@ -46,7 +46,7 @@ Full-disk compression
     means that every cluster is compressed only affecting performance slightly.
     It is estimated that you get 60-120% more usable space.
 Revision history
-    TFS stores a revision history of every file, without imposing extra
+    TFS stores a revision history of every file without imposing extra
     overhead. This means that you can revert any file into an earlier version,
     backing up the system automatically and without imposed overhead from
     copying.
@@ -91,7 +91,7 @@ Why do you use SPECK as the default cipher?
     SPECK is a relatively young cipher, yet it has been subject to a lot of
     (ineffective) cryptanalysis, so it is relatively secure. It has really
     good performance and a simple implementation. Portability is an important
-    part of the TFS design, and truely portable AES implementations without
+    part of the TFS design, and truly portable AES implementations without
     side-channel attacks is harder than many think (particularly, there are
     issues with `SubBytes` in most portable implementations). SPECK does not
     have this issue, and can thus be securely implemented portably with minimal
@@ -113,7 +113,7 @@ Why is ZMicro so slow? Will it affect the performance of TFS?
     performance is paid back by the reduced number of writes. In fact, more
     than 50% of the allocations with ZMicro will only write one sector, as
     opposed to 3. Secondly, no matter how fast your disk is, it will not get
-    anywhere near the performance of ZMicro, because disk operations are
+    anywhere near the performance of ZMicro because disk operations are
     inherently slow, and when put in perspective, the performance of the
     compression is really unimportant.
 Extendible hashing or B+ trees?
