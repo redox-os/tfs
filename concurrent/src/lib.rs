@@ -1,7 +1,7 @@
 //! # `concurrent` — An efficient concurrent reclamation system
 //!
 //! `concurrent` builds upon hazard pointers to create a extremely performant system for
-//! concurrently handling memory. It is more general and convinient — and often also faster — than
+//! concurrently handling memory. It is more general and convenient — and often also faster — than
 //! epoch-based reclamation.
 //!
 //! ## Why?
@@ -35,7 +35,7 @@
 //! reclamation might be very very long, causing very high memory usage, and potentially OOM
 //! crashes.
 //!
-//! These issues are not hypothethical. It happened to me while testing the caching system of TFS.
+//! These issues are not hypothetical. It happened to me while testing the caching system of TFS.
 //! Essentially, the to-be-destroyed garbage accumulated several gigabytes, without ever being open
 //! to a collection cycle.
 //!
@@ -110,7 +110,7 @@ use garbage::Garbage;
 /// Note that it is not necessary to call this manually, it will do so automatically after some
 /// time has passed.
 ///
-/// However, it can be nice if you have just trashed a very memory-hungy item in the current
+/// However, it can be nice if you have just trashed a very memory-hungry item in the current
 /// thread, and want to attempt to GC it.
 ///
 /// # Other threads

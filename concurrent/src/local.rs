@@ -64,7 +64,7 @@ struct State {
     /// This number keeps track what hazards in `self.available_hazard` are set to state "free".
     /// Before this index, every hazard must be set to "free".
     ///
-    /// It is useful for nowing when to free the hazards to allow garbage collection.
+    /// It is useful for knowing when to free the hazards to allow garbage collection.
     available_hazards_free_before: usize,
 }
 
@@ -81,7 +81,7 @@ impl State {
             // There is; we don't need to create a new hazard.
 
             // Since the hazard popped from the cache is not blocked, we must block the hazard to
-            // satisfy the requrements of this function.
+            // satisfy the requirements of this function.
             hazard.block();
             hazard
         } else {
@@ -137,7 +137,7 @@ impl State {
 
 impl Drop for State {
     fn drop(&mut self) {
-        // The thread is exitting, thus we must export the garbage to the global state to avoid
+        // The thread is exiting, thus we must export the garbage to the global state to avoid
         // memory leaks.
         self.export_garbage();
 

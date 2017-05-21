@@ -11,11 +11,11 @@ use guard::Guard;
 ///
 /// This acts as a kind of concurrent `Option<T>`.  It can be compared to `std::cell::RefCell` in
 /// some ways: It allows accessing, referencing, updating, etc., however contrary to `RefCell`,
-/// this is concurrent and has no aliasing restrictions. It is futher distinguished from
+/// this is concurrent and has no aliasing restrictions. It is further distinguished from
 /// `std::sync::AtomicPtr` in that it allows references to the inner data without the ABA problem
 /// or any variant thereof.
 ///
-/// It conviniently wraps this crates API in a seemless manner.
+/// It conveniently wraps this crates API in a seemless manner.
 #[derive(Default)]
 pub struct AtomicOption<T> {
     /// The inner atomic pointer.
@@ -104,7 +104,7 @@ impl<T> AtomicOption<T> {
     /// documentation for more information.
     pub fn compare_and_store(&self, old: Option<*const T>, mut new: Option<Box<T>>, ordering: atomic::Ordering)
     -> Result<(), Option<Box<T>>> {
-        // Convert the paramteres to raw pointers.
+        // Convert the parameters to raw pointers.
         // TODO: Use coercions.
         let new_ptr = new.as_mut().map_or(ptr::null_mut(), |x| &mut **x);
         let old_ptr = old.map_or(ptr::null_mut(), |x| x as *mut T);
@@ -147,7 +147,7 @@ impl<T> AtomicOption<T> {
     /// `compare_and_set`.
     pub fn compare_and_swap(&self, old: Option<*const T>, mut new: Option<Box<T>>, ordering: atomic::Ordering)
     -> Result<Option<Guard<T>>, (Option<Guard<T>>, Option<Box<T>>)> {
-        // Convert the paramteres to raw pointers.
+        // Convert the parameters to raw pointers.
         // TODO: Use coercions.
         let new_ptr = new.as_mut().map_or(ptr::null_mut(), |x| &mut **x);
         let old_ptr = old.map_or(ptr::null_mut(), |x| x as *mut T);

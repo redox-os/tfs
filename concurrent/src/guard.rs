@@ -7,7 +7,7 @@ use {hazard, local};
 /// A RAII guard protecting from garbage collection.
 ///
 /// This "guards" the held pointer against garbage collection. First when all guards of said
-/// pointer is gone (the data is unreachable), it can be colleceted.
+/// pointer is gone (the data is unreachable), it can be collected.
 // TODO: Remove this `'static` bound.
 #[must_use]
 #[derive(Debug)]
@@ -32,7 +32,7 @@ impl<T> Guard<T> {
 
         // This fence is necessary for ensuring that `hazard` does not get reordered to after `ptr`
         // has run.
-        // TODO: Is this fence even neccessary?
+        // TODO: Is this fence even necessary?
         atomic::fence(atomic::Ordering::SeqCst);
 
         // Right here, any garbage collection is blocked, due to the hazard above. This ensures
@@ -89,7 +89,7 @@ impl<T> Guard<T> {
     /// Map the pointer to another.
     ///
     /// This allows one to map a pointer to a pointer e.g. to an object referenced by the old. It
-    /// is very convinient for creating APIs without the need for creating a wrapper type.
+    /// is very convenient for creating APIs without the need for creating a wrapper type.
     // TODO: Is this sound?
     pub fn map<U, F>(self, f: F) -> Guard<U>
     where F: FnOnce(&T) -> &U {
