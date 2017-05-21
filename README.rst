@@ -118,8 +118,8 @@ Why is ZMicro so slow? Will it affect the performance of TFS?
     compression is really unimportant.
 Extendible hashing or B+ trees?
     Neither. TFS uses a combination of trees and hash tables: Nested hash
-    tables. The idea is that instead of reallocating, a new subtable is
-    created in the bucket.
+    tables, a form of hash trees. The idea is that instead of reallocating, a
+    new subtable is created in the bucket.
 
 Resources on design
 -------------------
