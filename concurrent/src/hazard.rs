@@ -7,7 +7,7 @@
 //! pair" refers to the collection of the two connected ends of the hazard (they both share a
 //! pointer to the hazard on the heap). When such pair is created, its reading end is usually
 //! stored in the global state, such that a thread can check that no hazard is matching a
-//! particular object during garbage collection. The writer part controls what the stateof the
+//! particular object during garbage collection. The writer part controls what the state of the
 //! hazard is and is usually passed around locally.
 //!
 //! The asymmetry of a hazard pair is strictly speaking not necessary, but it allows to enforce
@@ -40,7 +40,7 @@ pub enum State {
 /// This type holds an atomic pointer with the state of the hazard. It represents the same as
 /// `State` but is encoded such that it is atomically accessible.
 ///
-/// Futhermore, there is an additional state: Blocked. If the hazard is in this state, reading it
+/// Furthermore, there is an additional state: Blocked. If the hazard is in this state, reading it
 /// will block until it no longer is. This is useful for blocking garbage collection while a value
 /// is being read (avoiding the ABA problem).
 #[derive(Debug)]
@@ -52,7 +52,7 @@ pub struct Hazard {
     /// - 0: blocked.
     /// - 1: free.
     /// - 2: dead
-    /// - otherwise: protecting the address represented by the `usiz represented by the `usize`e`.
+    /// - otherwise: protecting the address represented by the `usize`.
     ptr: AtomicUsize,
 }
 
@@ -120,7 +120,7 @@ pub fn create() -> (Writer, Reader) {
 /// This wraps a hazard and provides only ability to read and deallocate it. It is created through
 /// the `create()` function.
 ///
-/// The destructor will, for the sake of safety, panick. To deallocate, use `self.destroy()`
+/// The destructor will, for the sake of safety, panic. To deallocate, use `self.destroy()`
 /// instead.
 pub struct Reader {
     /// The pointer to the heap-allocated hazard.

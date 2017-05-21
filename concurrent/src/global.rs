@@ -36,7 +36,7 @@ pub fn export_garbage(garbage: Vec<Garbage>) {
     tick();
 }
 
-/// Atempt to garbage collect.
+/// Attempt to garbage collect.
 ///
 /// If another garbage collection is currently running, nothing will happen.
 pub fn gc() {
@@ -47,7 +47,7 @@ pub fn gc() {
 ///
 /// This shall be called when new garbage is added, as it will trigger a GC by some probability.
 pub fn tick() {
-    /// The probabiity of triggering a GC.
+    /// The probability of triggering a GC.
     ///
     /// This probability is given such that `0` corresponds to 0 and `!0` corresponds to `1`.
     const GC_PROBABILITY: usize = (!0) / 64;
