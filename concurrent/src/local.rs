@@ -43,7 +43,7 @@ pub fn free_hazard(hazard: hazard::Writer) {
 /// This is useful for propagating accumulated garbage such that it can be destroyed by the next
 /// garbage collection.
 pub fn export_garbage() {
-    STATE.with(|s| s.borrow_mut().export_garbage());
+    STATE.with(|s| s.borrow_mut().export_garbage_and_tick());
 }
 
 /// A thread-local state.
@@ -124,7 +124,7 @@ impl State {
         // Export the garbage if it exceeds the limit.
         // TODO: use memory instead of items as a metric.
         if self.garbage.len() > MAX_GARBAGE {
-            self.export_garbage();
+            self.export_garbage_and_tick();
         }
     }
 
@@ -133,12 +133,20 @@ impl State {
         // Clear the vector and export the garbage.
         global::export_garbage(mem::replace(&mut self.garbage, Vec::new()));
     }
+
+    /// Export garbage (see `export_garbage()`), then tick.
+    fn export_garbage_and_tick(&mut self) {
+        self.export_garbage();
+        global::tick();
+    }
 }
 
 impl Drop for State {
     fn drop(&mut self) {
         // The thread is exiting, thus we must export the garbage to the global state to avoid
-        // memory leaks.
+        // memory leaks. It is very important that this does indeed not tick, as causing garbage
+        // collection means accessing RNG state, a TLS variable, which cannot be done when, we are
+        // here, after it has deinitialized.
         self.export_garbage();
 
         // Clear every hazard to "dead" state.

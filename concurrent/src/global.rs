@@ -28,12 +28,11 @@ pub fn create_hazard() -> hazard::Writer {
 
 /// Export garbage into the global state.
 ///
-/// This adds the garbage, which will eventually be destroyed, to the global state.
+/// This adds the garbage, which will eventually be destroyed, to the global state. Note that this
+/// does not tick, and thus cannot cause garbage collection.
 pub fn export_garbage(garbage: Vec<Garbage>) {
     // Send the garbage to the message-passing channel of the state.
     STATE.chan.send(Message::Garbage(garbage));
-    // Tick the clock, potentially triggering a garbage collection.
-    tick();
 }
 
 /// Attempt to garbage collect.

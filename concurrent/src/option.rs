@@ -242,7 +242,7 @@ mod tests {
         for _ in 0..16 {
             let opt = opt.clone();
             j.push(thread::spawn(move || {
-                for i in 0..1_000_000 {
+                for i in 0..1_000_001 {
                     let _ = opt.load(atomic::Ordering::Relaxed);
                     opt.store(Some(Box::new(i)), atomic::Ordering::Relaxed);
                 }
@@ -250,6 +250,7 @@ mod tests {
             }))
         }
 
+        ::gc();
         ::gc();
 
         for i in j {
@@ -299,6 +300,7 @@ mod tests {
 
         ::gc();
 
-        assert_eq!(drops.load(atomic::Ordering::Relaxed), 16_000_000);
+        // The 16 are for the `d` variable in the loop above.
+        assert_eq!(drops.load(atomic::Ordering::Relaxed), 16_000_000 + 16);
     }
 }

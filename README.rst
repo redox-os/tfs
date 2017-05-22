@@ -50,6 +50,10 @@ Revision history
     overhead. This means that you can revert any file into an earlier version,
     backing up the system automatically and without imposed overhead from
     copying.
+Data integrity
+    TFS, like ZFS, stores full checksums of the file (not just metadata), and
+    on top of that, it is done in the parent block. That means that almost all
+    data corruption will be detected upon read.
 Copy-on-write semantics
     Similarly to Btrfs and ZFS, TFS uses CoW semantics, meaning that no cluster
     is ever overwritten directly, but instead it is copied and written to a new
