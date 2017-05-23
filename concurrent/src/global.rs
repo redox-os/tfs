@@ -1,6 +1,6 @@
 //! The global state.
 
-use parking_lot::Mutex;
+use std::sync::Mutex; // TODO: Use custom option-like thing.
 use std::collections::HashSet;
 use std::mem;
 use {rand, hazard, mpsc};
@@ -107,7 +107,7 @@ impl State {
     /// currently active in the hazards.
     fn try_gc(&self) {
         // Lock the "garbo" (the part of the state needed to GC).
-        if let Some(mut garbo) = self.garbo.try_lock() {
+        if let Ok(mut garbo) = self.garbo.try_lock() {
             // Handle all the messages sent.
             garbo.handle_all();
             // Collect the garbage.

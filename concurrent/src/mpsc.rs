@@ -8,7 +8,7 @@
 //! although this is reasonably fast as the lock is only held for very short time, it is
 //! sub-optimal, and blocking.
 
-use parking_lot::Mutex;
+use std::sync::Mutex;
 use std::sync::Arc;
 use std::mem;
 
@@ -36,7 +36,7 @@ impl<T> Sender<T> {
     /// Send an item to this channel.
     pub fn send(&self, item: T) {
         // Lock the vector, and push.
-        self.inner.lock().push(item);
+        self.inner.lock().unwrap().push(item);
     }
 }
 
@@ -52,6 +52,6 @@ impl<T> Receiver<T> {
     /// This takes all the elements and applies the given closure to them in an unspecified order.
     pub fn recv_all(&self) -> Vec<T> {
         // Lock the vector, and replace it by an empty vector, then iterate.
-        mem::replace(&mut *self.inner.lock(), Vec::new())
+        mem::replace(&mut *self.inner.lock().unwrap(), Vec::new())
     }
 }
