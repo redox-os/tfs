@@ -77,6 +77,8 @@
 //! instruction, this means that if you are traversing a list or something like that, this library
 //! might not be for you.
 
+#![feature(thread_local_state)]
+
 #[macro_use]
 extern crate lazy_static;
 extern crate parking_lot;

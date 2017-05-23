@@ -1,6 +1,6 @@
 //! The thread-local state.
 
-use std::mem;
+use std::{mem, thread};
 use std::cell::RefCell;
 use {global, hazard};
 use garbage::Garbage;
@@ -15,7 +15,12 @@ thread_local! {
 /// This garbage is pushed to a thread-local queue. When enough garbage is accumulated in the
 /// thread, it is exported to the global state.
 pub fn add_garbage(garbage: Garbage) {
-    STATE.with(|s| s.borrow_mut().add_garbage(garbage));
+    if STATE.state() == thread::LocalKeyState::Destroyed {
+        // The state was deinitialized, so we must rely on the global state for queueing garbage.
+        global::export_garbage(vec![garbage]);
+    } else {
+        STATE.with(|s| s.borrow_mut().add_garbage(garbage));
+    }
 }
 
 /// Get a blocked hazard.
@@ -28,14 +33,26 @@ pub fn add_garbage(garbage: Garbage) {
 /// This does not fence, and you must thus be careful with updating the value afterwards, as
 /// reordering can happen, meaning that the hazard has not been blocked yet.
 pub fn get_hazard() -> hazard::Writer {
-    STATE.with(|s| s.borrow_mut().get_hazard())
+    if STATE.state() == thread::LocalKeyState::Destroyed {
+        // The state was deinitialized, so we must rely on the global state for creating new
+        // hazards.
+        global::create_hazard()
+    } else {
+        STATE.with(|s| s.borrow_mut().get_hazard())
+    }
 }
 
 /// Free a hazard.
 ///
 /// This frees a hazard to the thread-local cache of hazards.
 pub fn free_hazard(hazard: hazard::Writer) {
-    STATE.with(|s| s.borrow_mut().free_hazard(hazard));
+    if STATE.state() == thread::LocalKeyState::Destroyed {
+        // Since the state was deinitialized, we cannot store it for later reuse, so we are forced
+        // to simply kill the hazard.
+        hazard.kill();
+    } else {
+        STATE.with(|s| s.borrow_mut().free_hazard(hazard));
+    }
 }
 
 /// Export the garbage of this thread to the global state.
@@ -43,7 +60,11 @@ pub fn free_hazard(hazard: hazard::Writer) {
 /// This is useful for propagating accumulated garbage such that it can be destroyed by the next
 /// garbage collection.
 pub fn export_garbage() {
-    STATE.with(|s| s.borrow_mut().export_garbage_and_tick());
+    // We can only export when the TLS variable isn't destroyed. Otherwise, there would be nothing
+    // to export!
+    if STATE.state() != thread::LocalKeyState::Destroyed {
+        STATE.with(|s| s.borrow_mut().export_garbage_and_tick());
+    }
 }
 
 /// A thread-local state.

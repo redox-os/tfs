@@ -190,8 +190,19 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::thread;
 
-    #[test]
-    fn basic_properties() {
+    struct Basic;
+
+    impl Drop for Basic {
+        fn drop(&mut self) {
+            basic();
+        }
+    }
+
+    thread_local! {
+        static BASIC: Basic = Basic;
+    }
+
+    fn basic() {
         let opt = AtomicOption::default();
         assert!(opt.load(atomic::Ordering::Relaxed).is_none());
         assert!(opt.swap(None, atomic::Ordering::Relaxed).is_none());
@@ -200,6 +211,11 @@ mod tests {
         assert_eq!(*opt.load(atomic::Ordering::Relaxed).unwrap(), 42);
         assert_eq!(*opt.swap(Some(Box::new(43)), atomic::Ordering::Relaxed).unwrap(), 42);
         assert_eq!(*opt.load(atomic::Ordering::Relaxed).unwrap(), 43);
+    }
+
+    #[test]
+    fn basic_properties() {
+        basic()
     }
 
     #[test]
@@ -302,5 +318,13 @@ mod tests {
 
         // The 16 are for the `d` variable in the loop above.
         assert_eq!(drops.load(atomic::Ordering::Relaxed), 16_000_000 + 16);
+    }
+
+    #[test]
+    fn tls() {
+        thread::spawn(|| BASIC.with(|_| {})).join().unwrap();
+        thread::spawn(|| BASIC.with(|_| {})).join().unwrap();
+        thread::spawn(|| BASIC.with(|_| {})).join().unwrap();
+        thread::spawn(|| BASIC.with(|_| {})).join().unwrap();
     }
 }
