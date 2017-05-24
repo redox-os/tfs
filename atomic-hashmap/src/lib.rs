@@ -58,7 +58,7 @@ impl<K: Hash + Eq, V> HashMap<K, V> {
         self.table.take_each(f);
     }
 
-    /// Remove every entry from the mapap.
+    /// Remove every entry from the map.
     pub fn clear(&self) {
         self.take_each(|_| ());
     }
