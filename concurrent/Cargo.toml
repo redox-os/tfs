@@ -1,6 +1,6 @@
 [package]
 name = "concurrent"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["ticki <Ticki@users.noreply.github.com>"]
 description = "Hazard-pointer-based concurrent memory reclamation."
 repository = "https://github.com/ticki/tfs"

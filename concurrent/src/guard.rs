@@ -98,6 +98,11 @@ impl<T> Guard<T> {
             pointer: f(self.pointer),
         }
     }
+
+    /// Get the raw pointer of this guard.
+    pub fn as_raw(&self) -> *const T {
+        self.pointer
+    }
 }
 
 impl<T> ops::Deref for Guard<T> {
