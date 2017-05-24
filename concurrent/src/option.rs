@@ -142,9 +142,9 @@ impl<T> AtomicOption<T> {
     ///
     /// # Performance
     ///
-    /// This is slower than `compare_and_set` as it requires initializing a new guard, which
+    /// This is slower than `compare_and_store` as it requires initializing a new guard, which
     /// requires at least two atomic operations. Thus, when possible, you should use
-    /// `compare_and_set`.
+    /// `compare_and_store`.
     pub fn compare_and_swap(&self, old: Option<*const T>, mut new: Option<Box<T>>, ordering: atomic::Ordering)
     -> Result<Option<Guard<T>>, (Option<Guard<T>>, Option<Box<T>>)> {
         // Convert the parameters to raw pointers.
