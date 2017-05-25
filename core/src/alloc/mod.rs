@@ -78,7 +78,7 @@ pub struct Allocator<D> {
     ///
     /// This contains some number of pointers to free clusters, allowing multiple threads to
     /// efficiently allocate simultaneously.
-    free: SegQueue<cluster::Pointer>,
+    free: tm::Stack<cluster::Pointer>,
     /// The last allocated cluster for this thread.
     ///
     /// If possible, newly allocated pages will be appended to this cluster. When it is filled

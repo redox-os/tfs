@@ -1,3 +1,5 @@
+extern crate concurrent;
+
 use std::sync::atomic::{self, AtomicPtr};
 use std::mem;
 
@@ -8,19 +10,23 @@ struct Memory<T> {
 }
 
 impl<T> Memory<T> {
-    fn new(data: T) -> Memory<T> {
+    fn new(data: Option<Box<T>>) -> Memory<T> {
         Memory {
-            inner: concurrent::Option::new(Some(Box::new(data))),
+            inner: concurrent::Option::new(data),
         }
     }
 
     fn with<F>(&self, f: F)
-    where F: Fn(&T) -> T {
+    where
+        F: Fn(Option<concurrent::Guard<T>>) -> Option<Box<T>>,
+        T: 'static,
+    {
         loop {
-            let snapshot = self.inner.load(ORDERING).unwrap();
-            let ret = f(&*snapshot);
+            let snapshot = self.inner.load(ORDERING);
+            let snapshot_ptr = snapshot.as_ref().map(concurrent::Guard::as_raw);
+            let ret = f(snapshot);
 
-            if self.inner.compare_and_store(Some(&*snapshot), Some(ret), ORDERING).is_ok() {
+            if self.inner.compare_and_store(snapshot_ptr, ret, ORDERING).is_ok() {
                 break;
             }
         }

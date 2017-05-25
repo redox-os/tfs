@@ -10,4 +10,4 @@ keywords = ["tm", "stm", "htm", "transactional", "memory"]
 exclude = ["target", "Cargo.lock"]
 
 [dependencies]
-crossbeam = "0.2"
+concurrent = "0.1"
