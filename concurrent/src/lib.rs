@@ -91,6 +91,7 @@ mod guard;
 mod hazard;
 mod local;
 mod mpsc;
+pub mod sync;
 
 pub use option::AtomicOption as Option;
 pub use guard::Guard;
