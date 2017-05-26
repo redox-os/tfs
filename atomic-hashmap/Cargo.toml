@@ -4,4 +4,4 @@ version = "0.1.0"
 authors = ["ticki <ticki@users.noreply.github.com>"]
 
 [dependencies]
-concurrent = "0.1"
+conc = "0.1"

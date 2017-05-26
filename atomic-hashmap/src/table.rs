@@ -27,7 +27,7 @@ enum Node<K, V> {
 #[derive(Default)]
 pub struct Table<K, V>  {
     /// The buckets in the table.
-    buckets: [concurrent::Option<Node<K, V>>; 256],
+    buckets: [conc::Option<Node<K, V>>; 256],
 }
 
 impl<K: Hash + Eq, V> Table<K, V> {
@@ -51,11 +51,11 @@ impl<K: Hash + Eq, V> Table<K, V> {
         if pos_a != pos_b {
             // The two position did not collide, so we can insert the two pairs at the respective
             // positions
-            table[pos_a as usize] = concurrent::Option::new(Some(Box::new(Node::Leaf(pair_a))));
-            table[pos_b as usize] = concurrent::Option::new(Some(Box::new(Node::Leaf(pair_b))));
+            table[pos_a as usize] = conc::Option::new(Some(Box::new(Node::Leaf(pair_a))));
+            table[pos_b as usize] = conc::Option::new(Some(Box::new(Node::Leaf(pair_b))));
         } else {
             // The two positions from the sponge matched, so we must place another branch.
-            table[pos_a as usize] = concurrent::Option::new(Some(Box::new(Node::Branch(
+            table[pos_a as usize] = conc::Option::new(Some(Box::new(Node::Branch(
                 Table::two_entries(pair_a, sponge_a, pair_b, sponge_b)
             ))));
         }
@@ -64,7 +64,7 @@ impl<K: Hash + Eq, V> Table<K, V> {
     }
 
     /// Get the value associated with some key, given its sponge.
-    pub fn get(&self, key: &K, sponge: Sponge) -> Option<concurrent::Guard<V>> {
+    pub fn get(&self, key: &K, sponge: Sponge) -> Option<conc::Guard<V>> {
         // Load the bucket and handle the respective cases.
         self.buckets[sponge.squeeze() as usize].load(atomic::Ordering::Acquire)
             .and_then(|node| node.map(|node| match node {
@@ -188,7 +188,7 @@ impl<K: Hash + Eq, V> Table<K, V> {
         &self,
         key: &K,
         sponge: Sponge,
-    ) -> Option<concurrent::Guard<K, V>> {
+    ) -> Option<conc::Guard<K, V>> {
         // We squeeze the sponge to get the right bucket of our table, in which we will potentially
         // remove the key.
         let bucket = self.buckets[sponge.squeeze() as usize];

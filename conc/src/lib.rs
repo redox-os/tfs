@@ -1,6 +1,6 @@
-//! # `concurrent` — An efficient concurrent reclamation system
+//! # `conc` — An efficient concurrent reclamation system
 //!
-//! `concurrent` builds upon hazard pointers to create a extremely performant system for
+//! `conc` builds upon hazard pointers to create a extremely performant system for
 //! concurrently handling memory. It is more general and convenient — and often also faster — than
 //! epoch-based reclamation.
 //!
@@ -17,7 +17,7 @@
 //!
 //! ## Usage
 //!
-//! While the low-level API is available, it is generally sufficient to use the `concurrent::Option`
+//! While the low-level API is available, it is generally sufficient to use the `conc::Option`
 //! abstraction. This acts much like familiar Rust APIs. It allows the programmer to concurrently
 //! access a value through references, as well as update it, and more. Refer to the respective docs
 //! for more information.

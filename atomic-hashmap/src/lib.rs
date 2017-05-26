@@ -18,7 +18,7 @@
 //! See [this blog post](https://ticki.github.io/blog/an-atomic-hash-table/)
 //! for details.
 
-extern crate concurrent;
+extern crate conc;
 
 mod sponge;
 mod table;
@@ -36,7 +36,7 @@ pub struct HashMap<K, V> {
 
 impl<K: Hash + Eq, V> HashMap<K, V> {
     /// Insert a key with a certain value into the map.
-    pub fn insert(&self, key: K, val: V) -> Option<concurrent::Guard<V>> {
+    pub fn insert(&self, key: K, val: V) -> Option<conc::Guard<V>> {
         self.table.insert(table::Pair {
             key: key,
             val: val,
@@ -44,7 +44,7 @@ impl<K: Hash + Eq, V> HashMap<K, V> {
     }
 
     /// Remove a key from the hash map.
-    pub fn remove(&self, key: K) -> Option<concurrent::Guard<V>> {
+    pub fn remove(&self, key: K) -> Option<conc::Guard<V>> {
         self.table.remove(key, Sponge::new(&key))
     }
 

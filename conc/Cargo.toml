@@ -1,10 +1,10 @@
 [package]
-name = "concurrent"
+name = "conc"
 version = "0.1.2"
 authors = ["ticki <Ticki@users.noreply.github.com>"]
 description = "Hazard-pointer-based concurrent memory reclamation."
 repository = "https://github.com/ticki/tfs"
-documentation = "https://docs.rs/concurrent"
+documentation = "https://docs.rs/conc"
 license = "MIT"
 keywords = ["crossbeam", "hazard", "concurrent", "epoch", "gc"]
 exclude = ["target", "Cargo.lock"]
