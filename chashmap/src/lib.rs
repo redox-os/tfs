@@ -437,7 +437,7 @@ impl<K: fmt::Debug, V: fmt::Debug> fmt::Debug for Table<K, V> {
             // Check if the bucket actually contains anything.
             if let Bucket::Contains(ref key, ref val) = *lock {
                 // Write it to the output stream in a nice format.
-                write!(f, "{:?} => {:?}", key, val)?;
+                write!(f, "{:?} => {:?}; ", key, val)?;
             }
         }
 
