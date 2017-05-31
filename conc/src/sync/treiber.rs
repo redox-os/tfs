@@ -1,7 +1,5 @@
-use std::ptr::{self, null_mut};
-use std::sync::atomic;
-
 pub struct Treiber;
+
 /*
 pub struct Treiber<T> {
     head: ::Option<Node<T>>,
@@ -27,7 +25,7 @@ impl<T> Treiber<T> {
                 let next = head.next
 
                 match self.head.compare_and_swap(head, next, atomic::Ordering::Release) {
-                    Ok
+                    Ok()
                     Err(new_head) => head = new_head,
                 }
             } else {

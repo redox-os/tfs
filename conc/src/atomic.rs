@@ -95,43 +95,113 @@ impl<T> Atomic<T> {
         })
     }
 
-    /// Store a value if the current matches a particular value.
+    /// Store a (raw) pointer if the current matches the specified pointer.
+    ///
+    /// This compares `self` to `old`. If they match, the value is set to `new` and `Ok(())` is
+    /// returned. Otherwise, `Err(())` is returned.
+    ///
+    /// The `ordering` defines what constraints the atomic operation has. Refer to the LLVM
+    /// documentation for more information.
+    ///
+    /// # Safety
+    ///
+    /// As this accepts a raw pointer, it is necessary to mark it as `unsafe`. To uphold the
+    /// invariants, ensure that `new` isn't used after this function has been called.
+    pub unsafe fn compare_and_store_raw(&self, old: *const T, new: *mut T, ordering: atomic::Ordering)
+    -> Result<(), ()> {
+
+        // Compare-and-swap the value and check if it was successful.
+        if self.inner.compare_and_swap(old as *mut T, new, ordering) as *const T == old {
+            // It was. `self` is now `new`.
+
+            // Queue the deletion of now-unreachable `old` (unless it's `None`).
+            if !old.is_null() {
+                local::add_garbage(Garbage::new_box(old));
+            }
+
+            Ok(())
+        } else {
+            // It failed.
+            Err(())
+        }
+    }
+
+    /// Store a pointer if the current matches the specified pointer.
     ///
     /// This compares `self` to `old`. If they match, the value is set to `new` and `Ok(())` is
     /// returned. Otherwise, `Err(new)` is returned.
     ///
     /// The `ordering` defines what constraints the atomic operation has. Refer to the LLVM
     /// documentation for more information.
-    pub fn compare_and_store(&self, old: Option<*const T>, mut new: Option<Box<T>>, ordering: atomic::Ordering)
+    pub fn compare_and_store(&self, old: Option<*const T>, new: Option<Box<T>>, ordering: atomic::Ordering)
     -> Result<(), Option<Box<T>>> {
-        // Convert the parameters to raw pointers.
-        // TODO: Use coercions.
-        let new_ptr = new.as_mut().map_or(ptr::null_mut(), |x| &mut **x);
-        let old_ptr = old.map_or(ptr::null_mut(), |x| x as *mut T);
-
-        // Compare-and-swap the value.
-        let ptr = self.inner.compare_and_swap(old_ptr, new_ptr, ordering);
-
-        // Check if the CAS was successful.
-        if ptr == old_ptr {
-            // It was. `self` is now `new`.
-
-            // Ensure that the destructor of `new` is not run.
+        // Run the CAS.
+        if unsafe {
+            self.compare_and_store_raw(
+                // Convert the input to raw pointers.
+                old.unwrap_or(ptr::null()),
+                // TODO: Does this break NOALIAS if it is enabled on `Box` in the future in `rustc`
+                //       (see also `compare_and_swap`)?
+                new.as_ref().map_or(ptr::null_mut(), |x| &**x as *const T as *mut T),
+                ordering,
+            )
+        }.is_ok() {
+            // `new` is now in `self`. We must thus ensure that the destructor isn't called, as
+            // that might cause use-after-free.
             mem::forget(new);
-
-            // Queue the deletion of now-unreachable `old` (unless it's `None`).
-            if !old_ptr.is_null() {
-                local::add_garbage(unsafe { Garbage::new_box(old_ptr) });
-            }
 
             Ok(())
         } else {
-            // It failed.
+            // Hand back the box.
             Err(new)
         }
     }
 
-    /// Swap a value if it matches.
+    /// Swap a (raw) pointer if it matches the specified pointer.
+    ///
+    /// This compares `self` to `old`. If they match, it is swapped with `new` and a guard to the
+    /// old value is returned wrapped in `Ok`. If not, a tuple containing the guard to the actual
+    /// (non-matching) value, wrapped in `Err()` is returned.
+    ///
+    /// The `ordering` defines what constraints the atomic operation has. Refer to the LLVM
+    /// documentation for more information.
+    ///
+    /// # Safety
+    ///
+    /// As this accepts a raw pointer, it is necessary to mark it as `unsafe`. To uphold the
+    /// invariants, ensure that `new` isn't used after this function has been called.
+    pub unsafe fn compare_and_swap_raw(
+        &self,
+        old: *const T,
+        new: *mut T,
+        ordering: atomic::Ordering
+    ) -> Result<Option<Guard<T>>, Option<Guard<T>>> {
+        // Create the guard beforehand to avoid premature frees.
+        let guard = Guard::maybe_new(|| {
+            // The guard is active, so we can do the CAS now.
+            self.inner.compare_and_swap(old as *mut T, new, ordering).as_ref()
+        });
+
+        // Convert the guard to a raw pointer.
+        // TODO: Use coercions.
+        let guard_ptr = guard.as_ref().map_or(ptr::null_mut(), |x| &**x as *const T as *mut T);
+
+        // Check if the CAS was successful.
+        if guard_ptr as *const T == old {
+            // It was. `self` is now `new`.
+
+            // Queue the deletion of now-unreachable `old` (unless it's `None`).
+            if !old.is_null() {
+                local::add_garbage(Garbage::new_box(old));
+            }
+
+            Ok(guard)
+        } else {
+            Err(guard)
+        }
+    }
+
+    /// Swap a pointer if it matches the specified pointer.
     ///
     /// This compares `self` to `old`. If they match, it is swapped with `new` and a guard to the
     /// old value is returned wrapped in `Ok`. If not, a tuple containing the guard to the actual
@@ -145,39 +215,26 @@ impl<T> Atomic<T> {
     /// This is slower than `compare_and_store` as it requires initializing a new guard, which
     /// requires at least two atomic operations. Thus, when possible, you should use
     /// `compare_and_store`.
-    pub fn compare_and_swap(&self, old: Option<*const T>, mut new: Option<Box<T>>, ordering: atomic::Ordering)
+    pub fn compare_and_swap(&self, old: Option<*const T>, new: Option<Box<T>>, ordering: atomic::Ordering)
     -> Result<Option<Guard<T>>, (Option<Guard<T>>, Option<Box<T>>)> {
-        // Convert the parameters to raw pointers.
-        // TODO: Use coercions.
-        let new_ptr = new.as_mut().map_or(ptr::null_mut(), |x| &mut **x);
-        let old_ptr = old.map_or(ptr::null_mut(), |x| x as *mut T);
+        // Run the CAS.
+        match unsafe {
+            self.compare_and_swap_raw(
+                // Convert the input to raw pointers.
+                old.unwrap_or(ptr::null()),
+                new.as_ref().map_or(ptr::null_mut(), |x| &**x as *const T as *mut T),
+                ordering,
+            )
+        } {
+            Ok(guard) => {
+                // `new` is now in `self`. We must thus ensure that the destructor isn't called, as
+                // that might cause use-after-free.
+                mem::forget(new);
 
-        // Create the guard beforehand to avoid premature frees.
-        let guard = Guard::maybe_new(|| {
-            // The guard is active, so we can do the CAS now.
-            unsafe { self.inner.compare_and_swap(old_ptr, new_ptr, ordering).as_ref() }
-        });
-
-        // Convert the guard to a raw pointer.
-        // TODO: Use coercions.
-        let guard_ptr = guard.as_ref().map_or(ptr::null_mut(), |x| &**x as *const T as *mut T);
-
-        // Check if the CAS was successful.
-        if guard_ptr == old_ptr {
-            // It was. `self` is now `new`.
-
-            // Ensure that the destructor of `new` is not run.
-            mem::forget(new);
-
-            // Queue the deletion of now-unreachable `old` (unless it's `None`).
-            if !old_ptr.is_null() {
-                local::add_garbage(unsafe { Garbage::new_box(old_ptr) });
-            }
-
-            Ok(guard)
-        } else {
-            // It failed; cast the raw pointer back to a box and return.
-            Err((guard, new))
+                Ok(guard)
+            },
+            // Hand back the box too.
+            Err(guard) => Err((guard, new))
         }
     }
 }
