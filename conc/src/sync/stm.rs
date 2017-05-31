@@ -1,18 +1,19 @@
 //! Software transactional memory.
 
+use Atomic;
 use std::sync::atomic;
 
 /// A software transactional memory container.
 pub struct Stm<T> {
     /// The inner data.
-    inner: ::Option<T>,
+    inner: Atomic<T>,
 }
 
 impl<T> Stm<T> {
     /// Create a new STM container.
     pub fn new(data: Option<Box<T>>) -> Stm<T> {
         Stm {
-            inner: ::Option::new(data),
+            inner: Atomic::new(data),
         }
     }
 

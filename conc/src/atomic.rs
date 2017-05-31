@@ -17,15 +17,15 @@ use guard::Guard;
 ///
 /// It conveniently wraps this crates API in a seemless manner.
 #[derive(Default)]
-pub struct AtomicOption<T> {
+pub struct Atomic<T> {
     /// The inner atomic pointer.
     inner: AtomicPtr<T>,
 }
 
-impl<T> AtomicOption<T> {
-    //// Create a new concurrent option.
-    pub fn new(init: Option<Box<T>>) -> AtomicOption<T> {
-        AtomicOption {
+impl<T> Atomic<T> {
+    /// Create a new concurrent option.
+    pub fn new(init: Option<Box<T>>) -> Atomic<T> {
+        Atomic {
             // Convert the box to a raw pointer.
             inner: AtomicPtr::new(init.map_or(ptr::null_mut(), Box::into_raw)),
         }
@@ -203,7 +203,7 @@ mod tests {
     }
 
     fn basic() {
-        let opt = AtomicOption::default();
+        let opt = Atomic::default();
         assert!(opt.load(atomic::Ordering::Relaxed).is_none());
         assert!(opt.swap(None, atomic::Ordering::Relaxed).is_none());
         assert!(opt.load(atomic::Ordering::Relaxed).is_none());
@@ -225,7 +225,7 @@ mod tests {
         let bx2 = Box::new(1);
         let ptr2 = &*bx2 as *const usize;
 
-        let opt = AtomicOption::new(Some(bx1));
+        let opt = Atomic::new(Some(bx1));
         assert_eq!(ptr1, &*opt.compare_and_swap(Some(ptr2), None, atomic::Ordering::Relaxed).unwrap_err().0.unwrap());
         assert_eq!(ptr1, &*opt.load(atomic::Ordering::Relaxed).unwrap());
 
@@ -252,7 +252,7 @@ mod tests {
 
     #[test]
     fn spam() {
-        let opt = Arc::new(AtomicOption::default());
+        let opt = Arc::new(Atomic::default());
 
         let mut j = Vec::new();
         for _ in 0..16 {
@@ -290,7 +290,7 @@ mod tests {
         }
 
         let drops = Arc::new(AtomicUsize::default());
-        let opt = Arc::new(AtomicOption::new(None));
+        let opt = Arc::new(Atomic::new(None));
 
         let d = Dropper {
             d: drops.clone(),

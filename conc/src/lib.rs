@@ -84,7 +84,7 @@ extern crate lazy_static;
 extern crate parking_lot;
 extern crate rand;
 
-mod option;
+mod atomic;
 mod garbage;
 mod global;
 mod guard;
@@ -93,7 +93,7 @@ mod local;
 mod mpsc;
 pub mod sync;
 
-pub use option::AtomicOption as Option;
+pub use atomic::Atomic;
 pub use guard::Guard;
 
 use std::mem;
