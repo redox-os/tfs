@@ -245,7 +245,7 @@ mod tests {
 
     use std::sync::{atomic, Arc};
     use std::sync::atomic::AtomicUsize;
-    use std::thread;
+    use std::{thread, ptr};
 
     struct Basic;
 
@@ -305,6 +305,40 @@ mod tests {
         ::gc();
         ::gc();
         ::gc();
+    }
+
+    #[test]
+    fn cas_raw() {
+        unsafe {
+            let bx1 = Box::new(1);
+            let ptr1 = &*bx1 as *const usize;
+            let bx2 = Box::new(1);
+            let ptr2 = &*bx2 as *const usize;
+
+            let opt = Atomic::new(Some(bx1));
+            assert_eq!(ptr1, &*opt.compare_and_swap_raw(ptr2, ptr::null_mut(), atomic::Ordering::Relaxed).unwrap_err().unwrap());
+            assert_eq!(ptr1, &*opt.load(atomic::Ordering::Relaxed).unwrap());
+
+            assert_eq!(ptr1, &*opt.compare_and_swap_raw(ptr::null(), Box::into_raw(Box::new(2)), atomic::Ordering::Relaxed).unwrap_err().unwrap());
+            assert_eq!(ptr1, &*opt.load(atomic::Ordering::Relaxed).unwrap());
+
+            opt.compare_and_swap_raw(ptr1, ptr::null_mut(), atomic::Ordering::Relaxed).unwrap();
+            assert!(opt.load(atomic::Ordering::Relaxed).is_none());
+
+            opt.compare_and_swap_raw(ptr::null(), Box::into_raw(bx2), atomic::Ordering::Relaxed).unwrap();
+            assert_eq!(ptr2, &*opt.load(atomic::Ordering::Relaxed).unwrap());
+
+            opt.compare_and_store_raw(ptr2, ptr::null_mut(), atomic::Ordering::Relaxed).unwrap();
+            opt.compare_and_store_raw(Box::into_raw(Box::new(2)), ptr::null_mut(), atomic::Ordering::Relaxed).unwrap_err();
+
+            assert!(opt.load(atomic::Ordering::Relaxed).is_none());
+
+            // To check that GC doesn't segfault or something.
+            ::gc();
+            ::gc();
+            ::gc();
+            ::gc();
+        }
     }
 
     #[test]
