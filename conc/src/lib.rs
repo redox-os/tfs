@@ -78,6 +78,7 @@
 //! might not be for you.
 
 #![feature(thread_local_state)]
+#![deny(missing_docs)]
 
 #[macro_use]
 extern crate lazy_static;

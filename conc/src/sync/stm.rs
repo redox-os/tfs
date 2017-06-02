@@ -41,6 +41,7 @@ impl<T> Stm<T> {
         }
     }
 
+    /// Read the container.
     pub fn load(&self) -> Option<::Guard<T>> {
         self.inner.load(atomic::Ordering::Relaxed)
     }
