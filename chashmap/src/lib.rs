@@ -83,11 +83,11 @@ enum Bucket<K, V> {
     /// The technique of distincting between "empty" and "removed" was first described by Knuth.
     /// The idea is that when you search for a key, you will probe over these buckets, since the
     /// key could have been pushed behind the removed element:
-    ///
+    ///```notest
     ///     Contains(k1, v1) // hash = h
     ///     Removed
     ///     Contains(k2, v2) // hash = h
-    ///
+    ///```
     /// If we stopped at `Removed`, we won't be able to find the second KV pair. So `Removed` is
     /// semantically different from `Empty`, as the search won't stop.
     ///
@@ -440,7 +440,6 @@ impl<K: fmt::Debug, V: fmt::Debug> fmt::Debug for Table<K, V> {
                 write!(f, "{:?} => {:?}; ", key, val)?;
             }
         }
-
         Ok(())
     }
 }
@@ -507,7 +506,7 @@ impl<'a, K, V: Eq> cmp::Eq for ReadGuard<'a, K, V> {}
 
 impl<'a, K: fmt::Debug, V: fmt::Debug> fmt::Debug for ReadGuard<'a, K, V> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "ReadGuard({:?})", self)
+        write!(f, "ReadGuard({:?})", &**self)
     }
 }
 
@@ -543,7 +542,7 @@ impl<'a, K, V: Eq> cmp::Eq for WriteGuard<'a, K, V> {}
 
 impl<'a, K: fmt::Debug, V: fmt::Debug> fmt::Debug for WriteGuard<'a, K, V> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "WriteGuard({:?})", self)
+        write!(f, "WriteGuard({:?})", &**self)
     }
 }
 
