@@ -148,10 +148,11 @@ I've written a number of pieces on the design of TFS:
 Specification
 -------------
 
-The full specification can be found in `specification.tex`. To render it, install `pdflatex`, and run
+The full specification can be found in `specification.tex`. To render it,
+install `texlive` or another distribution with XeTeX, and run
 
 .. code:: bash
 
-    pdflatex --shell-escape specification.tex
+    xelatex --shell-escape specification.tex
 
 Then open the file named `specification.pdf`.
