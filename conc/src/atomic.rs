@@ -16,7 +16,6 @@ use guard::Guard;
 /// or any variant thereof.
 ///
 /// It conveniently wraps this crates API in a seemless manner.
-#[derive(Default)]
 pub struct Atomic<T> {
     /// The inner atomic pointer.
     inner: AtomicPtr<T>,
@@ -31,6 +30,28 @@ impl<T> Atomic<T> {
         }
     }
 
+    /// Load the container's current pointer.
+    ///
+    /// This gets the current pointer stored in `self`. If `self` is `None`, the null pointer is
+    /// returned.
+    ///
+    /// The `ordering` defines what constraints the atomic operation has. Refer to the LLVM
+    /// documentation for more information.
+    ///
+    /// # Safety
+    ///
+    /// As this returns a raw pointer, which does not have to abide by any rules, this is
+    /// completely safe, however you got to be careful.
+    ///
+    /// You may not dereference the returned pointer, as it can have been deallocated in the
+    /// meantime. You must thus be very careful with what you do.
+    ///
+    /// You cannot assume any validity of the address. The only assumptions, you can safely make,
+    /// is that this has been the pointer in `self` at some point.
+    pub fn load_raw(&self, ordering: atomic::Ordering) -> *mut T {
+        self.inner.load(ordering)
+    }
+
     /// Get a reference to the current content of the option.
     ///
     /// This returns a `Guard<T>`, which "protects" the inner value such that it is not dropped
@@ -41,7 +62,7 @@ impl<T> Atomic<T> {
     pub fn load(&self, ordering: atomic::Ordering) -> Option<Guard<T>> {
         // Load the inner and wrap it in a guard.
         Guard::maybe_new(|| unsafe {
-            self.inner.load(ordering).as_ref()
+            self.load_raw(ordering).as_ref()
         })
     }
 
@@ -236,6 +257,13 @@ impl<T> Atomic<T> {
             // Hand back the box too.
             Err(guard) => Err((guard, new))
         }
+    }
+}
+
+// TODO: This isn't possibile to do with `derive(Default)` yet as it adds a hidden `T: Default`.
+impl<T> Default for Atomic<T> {
+    fn default() -> Atomic<T> {
+        Atomic::new(None)
     }
 }
 
