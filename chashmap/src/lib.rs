@@ -962,7 +962,7 @@ impl<K: Clone, V: Clone> Clone for CHashMap<K, V> {
 
 impl<K: fmt::Debug, V: fmt::Debug> fmt::Debug for CHashMap<K, V> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", *self.table.read())
+        (*self.table.read()).fmt(f)
     }
 }
 
