@@ -190,7 +190,13 @@ impl<T> Atomic<T> {
     /// # Safety
     ///
     /// As this accepts a raw pointer, it is necessary to mark it as `unsafe`. To uphold the
-    /// invariants, ensure that `new` isn't used after this function has been called.
+    /// invariants, ensure that `new` isn't used after this function has been called, if it
+    /// succeeds (returns `Ok`).
+    ///
+    /// # Memory leak
+    ///
+    /// If it fails (returns `Err`), this function won't drop `new` at any point. The handling of
+    /// its destructor lies solely on the caller of the function.
     pub unsafe fn compare_and_swap_raw(
         &self,
         old: *const T,
