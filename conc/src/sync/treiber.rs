@@ -5,12 +5,23 @@ use std::{mem, ptr};
 use {Atomic, Guard};
 
 /// A Treiber stack.
+///
+/// Treiber stacks are one way to implement concurrent LIFO stack.
+///
+/// Treiber stacks builds on linked lists. They are lock-free and non-blocking. It can be compared
+/// to transactional memory in that it repeats operations, if another thread changes it while.
+///
+/// The ABA problem is of course addressed through the API of this crate.
 pub struct Treiber<T> {
+    /// The head node.
     head: Atomic<Node<T>>,
 }
 
+/// A node in the stack.
 struct Node<T> {
+    /// The data this node holds.
     data: T,
+    /// The next node.
     next: *const Node<T>,
 }
 
