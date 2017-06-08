@@ -22,7 +22,8 @@ fn shakespear() {
 }
 
 #[test]
-fn totally_not_antifa_propaganda() {
+fn totally_not_edgy_antifa_propaganda() {
+    // extra edginess
     inverse("The only good fascist is a dead fascist.");
     inverse("bash the fash");
     inverse("the fash deserves no bash, only smash");

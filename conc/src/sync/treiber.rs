@@ -1,7 +1,7 @@
 //! Treiber stacks.
 
 use std::sync::atomic;
-use std::{mem, ptr};
+use std::ptr;
 use {Atomic, Guard};
 
 /// A Treiber stack.
@@ -154,5 +154,75 @@ mod tests {
         for i in j {
             i.join().unwrap();
         }
+    }
+
+    #[test]
+    fn increment() {
+        let stack = Arc::new(Treiber::<u64>::new());
+        let mut j = Vec::new();
+
+        // 16 times, we add the numbers from 0 to 1000 to the only element in the stack.
+        for _ in 0..16 {
+            let s = stack.clone();
+            j.push(thread::spawn(move || {
+                for n in 0..1000 {
+                    loop {
+                        if let Some(x) = s.pop() {
+                            s.push(*x + n);
+                            break;
+                        }
+                    }
+                }
+            }));
+        }
+
+        for i in j {
+            i.join().unwrap();
+        }
+
+        assert!(*stack.pop().unwrap() == 16 * 1000 * 1001 / 2);
+    }
+
+    #[test]
+    fn sum() {
+        let stack = Arc::new(Treiber::<i64>::new());
+        let mut j = Vec::new();
+
+        for _ in 0..1000 {
+            stack.push(10);
+        }
+
+        // We preserve the sum of the stack's elements.
+        for _ in 0..16 {
+            let s = stack.clone();
+            j.push(thread::spawn(move || {
+                for _ in 0..100000 {
+                    loop {
+                        if let Some(a) = s.pop() {
+                            loop {
+                                if let Some(b) = s.pop() {
+                                    s.push(*a + 1);
+                                    s.push(*b - 1);
+
+                                    break;
+                                }
+                            }
+
+                            break;
+                        }
+                    }
+                }
+            }));
+        }
+
+        for i in j {
+            i.join().unwrap();
+        }
+
+        let mut sum = 0;
+        while let Some(x) = stack.pop() {
+            sum += *x;
+        }
+        assert_eq!(sum, 10000);
     }
 }
