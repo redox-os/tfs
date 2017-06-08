@@ -25,14 +25,14 @@ impl<T> Treiber<T> {
     /// Pop an item from the stack.
     pub fn pop(&self) -> Option<Guard<T>> {
         // TODO: Use `catch {}` here when it lands.
-        // Read the current head.
-        let mut current = self.head.load(atomic::Ordering::Acquire);
+        // Read the head snapshot.
+        let mut snapshot = self.head.load(atomic::Ordering::Acquire);
 
-        // Unless the current head snapshot is `None`, try to replace it with the tail.
-        while let Some(node) = current {
+        // Unless the head snapshot is `None`, try to replace it with the tail.
+        while let Some(node) = snapshot {
             // Attempt to replace the head with the tail of the head.
             match unsafe {
-                self.current.compare_and_swap_raw(
+                self.head.compare_and_swap_raw(
                     &*node,
                     node.next as *mut Node<T>,
                     atomic::Ordering::Release,
@@ -40,8 +40,8 @@ impl<T> Treiber<T> {
             } {
                 // It succeeded; return the item.
                 Ok(_) => return Some(node.map(|x| &x.data)),
-                // It failed, update the current head and continue.
-                Err(new) => current = new,
+                // It failed, update the head snapshot and continue.
+                Err(new) => snapshot = new,
             }
         }
 
@@ -52,9 +52,9 @@ impl<T> Treiber<T> {
     /// Push an item to the stack.
     pub fn push(&self, item: T)
     where T: 'static {
-        // Load the current head.
-        let mut current = self.head.load(atomic::Ordering::Acquire);
-        let mut current_ptr: Option<*const Node<T>>;
+        // Load the head snapshot.
+        let mut snapshot = self.head.load(atomic::Ordering::Acquire);
+        let mut snapshot_ptr: Option<*const Node<T>>;
 
         // TODO: Use `catch {}` here when it lands.
         // Construct a node, which will be the new head.
@@ -65,10 +65,10 @@ impl<T> Treiber<T> {
         });
 
         loop {
-            // Derive the nullable current pointer from the current head.
-            current_ptr = current.as_ref().map(Guard::as_raw);
-            // Construct the next-pointer of the new node from the current head.
-            node.next = current_ptr.unwrap_or(ptr::null());
+            // Derive the nullable snapshot pointer from the head snapshot.
+            snapshot_ptr = snapshot.as_ref().map(Guard::as_raw);
+            // Construct the next-pointer of the new node from the head snapshot.
+            node.next = snapshot_ptr.unwrap_or(ptr::null());
 
             // TODO: This should be something that ignores the guard creation when the CAS
             //       succeeds, because it's expensive to do and not used anyway. It should be easy
@@ -76,13 +76,13 @@ impl<T> Treiber<T> {
             //       method.
 
             // CAS from the read pointer to the new head.
-            match self.head.compare_and_swap(current_ptr, Some(node), atomic::Ordering::Release) {
+            match self.head.compare_and_swap(snapshot_ptr, Some(node), atomic::Ordering::Release) {
                 // If it succeeds, the item has been pushed.
                 Ok(_) => break,
                 // If it fails, we will retry the CAS with updated values.
                 Err((new_head, Some(node2))) => {
-                    // Update the current head.
-                    current = new_head;
+                    // Update the head snapshot.
+                    snapshot = new_head;
                     // Put the box we gave back to the variable where it belongs.
                     node = node2;
                 },
@@ -103,6 +103,14 @@ mod tests {
     #[test]
     fn single_thread() {
         let stack = Treiber::new();
+
+        for i in 0..10000 {
+            stack.push(i);
+        }
+
+        for i in (0..10000).rev() {
+            assert_eq!(*stack.pop().unwrap(), i);
+        }
 
         for i in 0..10000 {
             stack.push(i);
