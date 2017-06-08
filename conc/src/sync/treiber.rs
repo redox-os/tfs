@@ -1,7 +1,10 @@
+//! Treiber stacks.
+
 use std::sync::atomic;
 use std::{mem, ptr};
 use {Atomic, Guard};
 
+/// A Treiber stack.
 pub struct Treiber<T> {
     head: Atomic<Node<T>>,
 }
@@ -12,35 +15,41 @@ struct Node<T> {
 }
 
 impl<T> Treiber<T> {
+    /// Create a new, empty Treiber stack.
     pub fn new() -> Treiber<T> {
         Treiber {
             head: Atomic::default(),
         }
     }
 
-    pub fn pop(&self, item: T) -> Option<Guard<T>> {
+    /// Pop an item from the stack.
+    pub fn pop(&self) -> Option<Guard<T>> {
         // TODO: Use `catch {}` here when it lands.
-        let mut head = self.head.load(atomic::Ordering::Acquire);
-        while let Some(node) = head {
-            // TODO: This should be something that ignores the guard creation when the CAS
-            //       fails, because it's expensive to do and not used anyway. It should be easy
-            //       enough to implement, but I am struggling to come up with a good name for
-            //       the method.
+        // Read the current head.
+        let mut current = self.head.load(atomic::Ordering::Acquire);
+
+        // Unless the current head snapshot is `None`, try to replace it with the tail.
+        while let Some(node) = current {
+            // Attempt to replace the head with the tail of the head.
             match unsafe {
-                self.head.compare_and_swap_raw(
+                self.current.compare_and_swap_raw(
                     &*node,
                     node.next as *mut Node<T>,
-                    atomic::Ordering::Release
+                    atomic::Ordering::Release,
                 )
             } {
+                // It succeeded; return the item.
                 Ok(_) => return Some(node.map(|x| &x.data)),
-                Err(new_head) => head = new_head,
+                // It failed, update the current head and continue.
+                Err(new) => current = new,
             }
         }
 
+        // As the head was empty, there is nothing to pop.
         None
     }
 
+    /// Push an item to the stack.
     pub fn push(&self, item: T)
     where T: 'static {
         // Load the current head.
@@ -81,6 +90,50 @@ impl<T> Treiber<T> {
                 // `Some`.
                 _ => unreachable!(),
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread;
+    use std::sync::Arc;
+
+    #[test]
+    fn single_thread() {
+        let stack = Treiber::new();
+
+        for i in 0..10000 {
+            stack.push(i);
+        }
+
+        for i in (0..10000).rev() {
+            assert_eq!(*stack.pop().unwrap(), i);
+        }
+
+        assert!(stack.pop().is_none());
+        assert!(stack.pop().is_none());
+        assert!(stack.pop().is_none());
+        assert!(stack.pop().is_none());
+    }
+
+    #[test]
+    fn push_pop() {
+        let stack = Arc::new(Treiber::new());
+        let mut j = Vec::new();
+        for _ in 0..16 {
+            let s = stack.clone();
+            j.push(thread::spawn(move || {
+                for _ in 0..10_000_000 {
+                    s.push(23);
+                    assert_eq!(*s.pop().unwrap(), 23);
+                }
+            }));
+        }
+
+        for i in j {
+            i.join().unwrap();
         }
     }
 }
