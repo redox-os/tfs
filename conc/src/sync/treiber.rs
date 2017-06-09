@@ -112,6 +112,19 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    fn simple() {
+        let stack = Treiber::new();
+        stack.push(1);
+        stack.push(200);
+        stack.push(44);
+
+        assert_eq!(*stack.pop().unwrap(), 44);
+        assert_eq!(*stack.pop().unwrap(), 200);
+        assert_eq!(*stack.pop().unwrap(), 1);
+        assert!(stack.pop().is_none());
+    }
+
+    #[test]
     fn single_thread() {
         let stack = Treiber::new();
 
