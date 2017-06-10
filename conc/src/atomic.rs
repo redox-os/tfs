@@ -312,6 +312,17 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::{thread, ptr};
 
+    #[derive(Clone)]
+    struct Dropper {
+        d: Arc<AtomicUsize>,
+    }
+
+    impl Drop for Dropper {
+        fn drop(&mut self) {
+            self.d.fetch_add(1, atomic::Ordering::Relaxed);
+        }
+    }
+
     struct Basic;
 
     impl Drop for Basic {
@@ -461,18 +472,7 @@ mod tests {
     }
 
     #[test]
-    fn drop() {
-        #[derive(Clone)]
-        struct Dropper {
-            d: Arc<AtomicUsize>,
-        }
-
-        impl Drop for Dropper {
-            fn drop(&mut self) {
-                self.d.fetch_add(1, atomic::Ordering::Relaxed);
-            }
-        }
-
+    fn drop1() {
         let drops = Arc::new(AtomicUsize::default());
         let opt = Arc::new(Atomic::new(None));
 
@@ -497,6 +497,36 @@ mod tests {
         }
 
         opt.store(None, atomic::Ordering::Relaxed);
+
+        ::gc();
+
+        // The 16 are for the `d` variable in the loop above.
+        assert_eq!(drops.load(atomic::Ordering::Relaxed), 16_000_000 + 16);
+    }
+
+    #[test]
+    fn drop2() {
+        let drops = Arc::new(AtomicUsize::default());
+
+        let d = Dropper {
+            d: drops.clone(),
+        };
+
+        let mut j = Vec::new();
+        for _ in 0..16 {
+            let d = d.clone();
+            let opt = opt.clone();
+
+            j.push(thread::spawn(move || {
+                for _ in 0..1_000_000 {
+                    Atomic::new(Some(Box::new(d.clone())));
+                }
+            }))
+        }
+
+        for i in j {
+            i.join().unwrap();
+        }
 
         ::gc();
 
