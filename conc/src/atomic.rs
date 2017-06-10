@@ -30,15 +30,14 @@ impl<T> Atomic<T> {
         }
     }
 
-    /// Get a mutable reference to the underlying pointer.
-    ///
-    /// # Safety
-    ///
-    /// This is safe because the mutable reference guarantees that no other threads are concurrently accessing the atomic data.
-    pub fn get_mut(&mut self) -> Option<&mut T> {
-        unsafe {
-            self.inner.get_mut().as_mut()
-        }
+    /// Get a mutable reference to the underlying `std::sync::AtomicPtr`.
+    pub unsafe fn get_inner(&self) {
+        &self.inner
+    }
+
+    /// Get an immutable reference to the underlying `std::sync::AtomicPtr`
+    pub unsafe fn get_inner_mut(&mut self) {
+        &mut self.inner
     }
 
     /// Load the container's current pointer.
@@ -339,24 +338,15 @@ mod tests {
         let mut opt = Atomic::default();
 
         assert!(opt.load(atomic::Ordering::Relaxed).is_none());
-        assert!(opt.get_mut().is_none());
 
         assert!(opt.swap(None, atomic::Ordering::Relaxed).is_none());
         assert!(opt.load(atomic::Ordering::Relaxed).is_none());
-        assert!(opt.get_mut().is_none());
 
         assert!(opt.swap(Some(Box::new(42)), atomic::Ordering::Relaxed).is_none());
         assert_eq!(*opt.load(atomic::Ordering::Relaxed).unwrap(), 42);
-        assert_eq!(*opt.get_mut().unwrap(), 42);
 
         assert_eq!(*opt.swap(Some(Box::new(43)), atomic::Ordering::Relaxed).unwrap(), 42);
         assert_eq!(*opt.load(atomic::Ordering::Relaxed).unwrap(), 43);
-        assert_eq!(*opt.get_mut().unwrap(), 43);
-
-        *opt.get_mut().unwrap() = 2;
-
-        assert_eq!(*opt.load(atomic::Ordering::Relaxed).unwrap(), 2);
-        assert_eq!(*opt.get_mut().unwrap(), 2);
     }
 
     #[test]
