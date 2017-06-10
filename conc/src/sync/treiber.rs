@@ -123,6 +123,8 @@ mod tests {
         assert_eq!(*stack.pop().unwrap(), 200);
         assert_eq!(*stack.pop().unwrap(), 1);
         assert!(stack.pop().is_none());
+
+        ::gc();
     }
 
     #[test]
@@ -146,6 +148,8 @@ mod tests {
             assert!(stack.pop().is_none());
             assert!(stack.pop().is_none());
         }
+
+        ::gc();
     }
 
     #[test]

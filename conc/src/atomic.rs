@@ -279,6 +279,20 @@ impl<T> Default for Atomic<T> {
     }
 }
 
+impl<T> Drop for Atomic<T> {
+    fn drop(&mut self) {
+        // We use the neat `get_mut` to get around the overhead of atomics.
+        let ptr = self.inner.get_mut();
+
+        if !ptr.is_null() {
+            // As the read pointer was not null, we can safely call its destructor.
+            unsafe {
+                drop(Box::from_raw(ptr));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
