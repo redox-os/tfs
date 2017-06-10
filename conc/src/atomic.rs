@@ -31,11 +31,27 @@ impl<T> Atomic<T> {
     }
 
     /// Get a mutable reference to the underlying `std::sync::AtomicPtr`.
+    ///
+    /// There is no overhead in this.
+    ///
+    /// # Safety
+    ///
+    /// This is unsafe as you can easily invalidate the invariants. When using, you must ensure
+    /// that, if you drop, there are no existing readers/hazards of the `Atomic` and that, if you
+    /// mutate, the value, you change to is valid.
     pub unsafe fn get_inner(&self) -> &AtomicPtr<T> {
         &self.inner
     }
 
     /// Get an immutable reference to the underlying `std::sync::AtomicPtr`
+    ///
+    /// There is no overhead in this.
+    ///
+    /// # Safety
+    ///
+    /// This is unsafe as you can easily invalidate the invariants. When using, you must ensure
+    /// that, if you drop, there are no existing readers/hazards of the `Atomic` and that, if you
+    /// mutate, the value, you change to is valid.
     pub unsafe fn get_inner_mut(&mut self) -> &mut AtomicPtr<T> {
         &mut self.inner
     }

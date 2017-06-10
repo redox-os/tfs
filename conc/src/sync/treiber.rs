@@ -17,14 +17,6 @@ pub struct Treiber<T> {
     head: Atomic<Node<T>>,
 }
 
-/// A node in the stack.
-struct Node<T> {
-    /// The data this node holds.
-    data: T,
-    /// The next node.
-    next: *const Node<T>,
-}
-
 impl<T> Treiber<T> {
     /// Create a new, empty Treiber stack.
     pub fn new() -> Treiber<T> {
@@ -34,6 +26,7 @@ impl<T> Treiber<T> {
     }
 
     /// Pop an item from the stack.
+    // TODO: Change this return type.
     pub fn pop(&self) -> Option<Guard<T>> {
         // TODO: Use `catch {}` here when it lands.
         // Read the head snapshot.
@@ -105,9 +98,26 @@ impl<T> Treiber<T> {
     }
 }
 
-impl<T> Drop for Treiber<T> {
-    fn drop(&mut self) {
+/// A node in the stack.
+struct Node<T> {
+    /// The data this node holds.
+    data: T,
+    /// The next node.
+    next: *const Node<T>,
+}
 
+impl<T> Drop for Node<T> {
+    fn drop(&mut self) {
+        // FIXME: Since this is recursive (and although it is likely optimized out), there might be
+        //        cases where this leads to stack overflow, given correct compilation flags and
+        //        sufficiently many elements.
+
+        // Recursively drop the next node, if it exists.
+        if !self.next.is_null() {
+            unsafe {
+                drop(Box::from_raw(self.next as *mut Node<T>));
+            }
+        }
     }
 }
 
@@ -116,6 +126,18 @@ mod tests {
     use super::*;
     use std::thread;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
+
+    #[derive(Clone)]
+    struct Dropper {
+        d: Arc<AtomicUsize>,
+    }
+
+    impl Drop for Dropper {
+        fn drop(&mut self) {
+            self.d.fetch_add(1, atomic::Ordering::Relaxed);
+        }
+    }
 
     #[test]
     fn simple1() {
@@ -271,5 +293,44 @@ mod tests {
             sum += *x;
         }
         assert_eq!(sum, 10000);
+    }
+
+    #[test]
+    fn drop() {
+        let drops = Arc::new(AtomicUsize::default());
+        let stack = Arc::new(Treiber::new());
+
+        let d = Dropper {
+            d: drops.clone(),
+        };
+
+        let mut j = Vec::new();
+        for _ in 0..16 {
+            let d = d.clone();
+            let stack = stack.clone();
+
+            j.push(thread::spawn(move || {
+                for _ in 0..20 {
+                    stack.push(d.clone());
+                }
+
+                stack.pop();
+                stack.pop();
+            }))
+        }
+
+        for i in j {
+            i.join().unwrap();
+        }
+
+        ::gc();
+        // The 16 are for the `d` variable in the loop above.
+        assert_eq!(drops.load(atomic::Ordering::Relaxed), 32 + 16);
+
+        // Drop the last arc.
+        drop(stack);
+        ::gc();
+
+        assert_eq!(drops.load(atomic::Ordering::Relaxed), 200 + 16);
     }
 }
