@@ -30,6 +30,17 @@ impl<T> Atomic<T> {
         }
     }
 
+    /// Get a mutable reference to the underlying pointer.
+    ///
+    /// # Safety
+    ///
+    /// This is safe because the mutable reference guarantees that no other threads are concurrently accessing the atomic data.
+    pub fn get_mut(&mut self) -> Option<&mut T> {
+        unsafe {
+            self.inner.get_mut().as_mut()
+        }
+    }
+
     /// Load the container's current pointer.
     ///
     /// This gets the current pointer stored in `self`. If `self` is `None`, the null pointer is
@@ -314,19 +325,47 @@ mod tests {
     }
 
     fn basic() {
-        let opt = Atomic::default();
+        let mut opt = Atomic::default();
+
         assert!(opt.load(atomic::Ordering::Relaxed).is_none());
+        assert!(opt.get_mut().is_none());
+
         assert!(opt.swap(None, atomic::Ordering::Relaxed).is_none());
         assert!(opt.load(atomic::Ordering::Relaxed).is_none());
+        assert!(opt.get_mut().is_none());
+
         assert!(opt.swap(Some(Box::new(42)), atomic::Ordering::Relaxed).is_none());
         assert_eq!(*opt.load(atomic::Ordering::Relaxed).unwrap(), 42);
+        assert_eq!(*opt.get_mut().unwrap(), 42);
+
         assert_eq!(*opt.swap(Some(Box::new(43)), atomic::Ordering::Relaxed).unwrap(), 42);
         assert_eq!(*opt.load(atomic::Ordering::Relaxed).unwrap(), 43);
+        assert_eq!(*opt.get_mut().unwrap(), 43);
+
+        *opt.get_mut().unwrap() = 2;
+
+        assert_eq!(*opt.load(atomic::Ordering::Relaxed).unwrap(), 2);
+        assert_eq!(*opt.get_mut().unwrap(), 2);
     }
 
     #[test]
     fn basic_properties() {
         basic()
+    }
+
+    #[test]
+    fn basic_properties_parallel() {
+        let mut j = Vec::new();
+
+        for _ in 0..16 {
+            j.push(thread::spawn(|| for _ in 0..1000 {
+                basic()
+            }));
+        }
+
+        for i in j {
+            i.join().unwrap();
+        }
     }
 
     #[test]
