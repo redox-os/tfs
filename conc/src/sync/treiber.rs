@@ -105,6 +105,12 @@ impl<T> Treiber<T> {
     }
 }
 
+impl<T> Drop for Treiber<T> {
+    fn drop(&mut self) {
+
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

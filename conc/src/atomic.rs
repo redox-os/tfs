@@ -31,12 +31,12 @@ impl<T> Atomic<T> {
     }
 
     /// Get a mutable reference to the underlying `std::sync::AtomicPtr`.
-    pub unsafe fn get_inner(&self) {
+    pub unsafe fn get_inner(&self) -> &AtomicPtr<T> {
         &self.inner
     }
 
     /// Get an immutable reference to the underlying `std::sync::AtomicPtr`
-    pub unsafe fn get_inner_mut(&mut self) {
+    pub unsafe fn get_inner_mut(&mut self) -> &mut AtomicPtr<T> {
         &mut self.inner
     }
 
@@ -297,7 +297,7 @@ impl<T> Drop for Atomic<T> {
         if !ptr.is_null() {
             // As the read pointer was not null, we can safely call its destructor.
             unsafe {
-                drop(Box::from_raw(ptr));
+                local::add_garbage(Garbage::new_box(ptr));
             }
         }
     }
@@ -335,7 +335,7 @@ mod tests {
     }
 
     fn basic() {
-        let mut opt = Atomic::default();
+        let opt = Atomic::default();
 
         assert!(opt.load(atomic::Ordering::Relaxed).is_none());
 
@@ -505,7 +505,6 @@ mod tests {
         let mut j = Vec::new();
         for _ in 0..16 {
             let d = d.clone();
-            let opt = opt.clone();
 
             j.push(thread::spawn(move || {
                 for _ in 0..1_000_000 {
@@ -522,6 +521,25 @@ mod tests {
 
         // The 16 are for the `d` variable in the loop above.
         assert_eq!(drops.load(atomic::Ordering::Relaxed), 16_000_000 + 16);
+    }
+
+    #[test]
+    fn drop3() {
+        for i in 0..256 {
+            let opt = Arc::new(Atomic::new(Some(Box::new(i))));
+            let g = opt.load(atomic::Ordering::Relaxed);
+
+            // This is supposed to scramble the allocator state so it overwrites the existing
+            // allocation.
+            let mut vec = Vec::new();
+            for _ in 0..1000 {
+                vec.push(String::from("blah"));
+            }
+            drop(vec);
+
+            drop(opt);
+            assert_eq!(*g.unwrap(), i);
+        }
     }
 
     #[test]
