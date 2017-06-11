@@ -43,7 +43,7 @@ impl<T> Treiber<T> {
                 )
             } {
                 // It succeeded; return the item.
-                Ok(_) => return Some(node.map(|x| &x.data)),
+                Ok(_) => return Some(node.map(|x| &x.item)),
                 // It failed, update the head snapshot and continue.
                 Err(new) => snapshot = new,
             }
@@ -63,7 +63,7 @@ impl<T> Treiber<T> {
         // TODO: Use `catch {}` here when it lands.
         // Construct a node, which will be the new head.
         let mut node = Box::new(Node {
-            data: item,
+            item: item,
             // Placeholder; we will replace it with an actual value in the loop.
             next: ptr::null(),
         });
@@ -101,7 +101,7 @@ impl<T> Treiber<T> {
 /// A node in the stack.
 struct Node<T> {
     /// The data this node holds.
-    data: T,
+    item: T,
     /// The next node.
     next: *const Node<T>,
 }

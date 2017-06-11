@@ -15,6 +15,9 @@ thread_local! {
 /// This garbage is pushed to a thread-local queue. When enough garbage is accumulated in the
 /// thread, it is exported to the global state.
 pub fn add_garbage(garbage: Garbage) {
+    debug_assert!(!garbage.ptr().is_null(), "Garbage is a null pointer. If this is intentional, \
+        consider running the destructor directly instead.");
+
     if STATE.state() == thread::LocalKeyState::Destroyed {
         // The state was deinitialized, so we must rely on the global state for queueing garbage.
         global::export_garbage(vec![garbage]);
