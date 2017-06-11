@@ -328,7 +328,7 @@ mod tests {
         assert_eq!(drops.load(atomic::Ordering::Relaxed), 32 + 16);
 
         // Drop the last arc.
-        drop(stack);
+        let _ = stack;
         ::gc();
 
         assert_eq!(drops.load(atomic::Ordering::Relaxed), 200 + 16);
