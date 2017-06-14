@@ -46,6 +46,8 @@ pub trait Disk: slog::Drain {
     type ReadFuture: Future<Item = Box<SectorBuf>, Error = Error>;
     /// The future returned from write operations.
     type WriteFuture: Future<Item = (), Error = Error>;
+    /// The future returned from the trim operations.
+    type TrimFuture: Future<Item = (), Error = Error>;
 
     /// The number of sectors on this disk.
     fn number_of_sectors(&self) -> Sector;
@@ -59,6 +61,11 @@ pub trait Disk: slog::Drain {
     /// This returns a future, which carries the operation writing `buf` into sector `sector`.
     /// First when the future has completed, the operation has been executed.
     fn write(&self, sector: Sector, buf: &SectorBuf) -> Self::WriteFuture;
+    /// Inform the disk that a sector is no longer in use.
+    ///
+    /// This returns a future, which carries the operation trimming sector `sector`. First when the
+    /// future has completed, the operation has been executed.
+    fn trim(&self, sector: Sector) -> Self::TrimFuture;
 
     /// Create a cached version of the disk.
     fn cached(self) -> cache::Cached<Self> {

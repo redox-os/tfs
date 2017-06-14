@@ -134,6 +134,7 @@ delegate_log!(Driver.disk);
 impl<D: Disk> Disk for Driver<D> {
     type ReadFuture  = D::ReadFuture;
     type WriteFuture = D::WriteFuture;
+    type TrimFuture  = D::TrimFuture;
 
     fn number_of_sectors(&self) -> disk::Sector {
         // Start out with the raw number of sectors. We subtract one to cut of the disk header.
@@ -174,14 +175,10 @@ impl<D: Disk> Disk for Driver<D> {
         // Go over the vdev stack.
         for vdev in self.header.vdev_stack {
             match vdev {
-                header::Vdev::Mirror => {
-                    let prev_writes = mem::replace(writes, Vec::with_capacity(writes.len() * 2));
-                    for (sector, buf) in prev_writes {
-                        // Write the lower half.
-                        writes.push((sector, buf));
-                        // Write the upper half.
-                        writes.push((2 * sector, buf));
-                    }
+                // Mirror the higher and lower half.
+                header::Vdev::Mirror => for i in 0..writes.len() {
+                    // Write the higher half.
+                    writes.push((writes[i].0 * 2, writes[i].1));
                 },
                 // TODO
                 header::Vdev::Speck => unimplemented!(),
@@ -191,6 +188,29 @@ impl<D: Disk> Disk for Driver<D> {
         // Execute all the writes, we've buffered.
         future::join_all(writes.into_iter().map(|(sector, buf)| {
             self.disk.write(sector, buf)
+        }))
+    }
+
+    fn trim(&self, sector: disk::Sector) -> D::TrimFuture {
+        // Start a vector to track what sectors to trim.
+        let mut trims = vec![sector];
+
+        // Go over the vdev stack.
+        for vdev in self.header.vdev_stack {
+            match vdev {
+                // Mirror the higher and lower half.
+                header::Vdev::Mirror => for i in 0..writes.len() {
+                    // Trim the higher half's sector.
+                    trims.push(trims[i]);
+                },
+                // Encryption doesn't matter for trimming.
+                header::Vdev::Speck => (),
+            }
+        }
+
+        // Execute all the trims, we've buffered.
+        future::join_all(trims.into_iter().map(|sector| {
+            self.disk.trim(sector)
         }))
     }
 }

@@ -50,14 +50,21 @@ impl<D: Disk> Cached<D> {
         self.disk.write(sector, &buf)
     }
 
-    /// Drop a sector from the cache.
-    fn forget(&self, sector: disk::Sector) {
-        debug!(self, "removing sector from cache"; "sector" => sector);
+    /// Drop a sector from the cache and trim it.
+    ///
+    /// After this has been completed, the data of the sector shall not be read, until some other
+    /// data has been written to the sector.
+    ///
+    /// Note that it doesn't necessarily "wipe" the data.
+    fn trim(&self, sector: disk::Sector) -> future!(()) {
+        debug!(self, "wiping sector"; "sector" => sector);
 
         // Update the cache tracker.
         self.tracker.remove(sector);
         // Update the sector map.
         self.sectors.remove(sector);
+        // Finally, trim the sector.
+        self.disk.trim(sector)
     }
 
     /// Read a sector.
@@ -95,11 +102,11 @@ impl<D: Disk> Cached<D> {
         }
     }
 
-    /// Trim the cache.
+    /// Reduce the cache.
     ///
     /// This reduces the cache to exactly `to` blocks.
-    fn trim(&self, to: usize) {
-        info!(self, "trimming cache"; "to" => to);
+    fn reduce(&self, to: usize) {
+        info!(self, "reducing cache"; "to" => to);
 
         // Lock the cache tracker.
         let tracker = self.tracker.lock();

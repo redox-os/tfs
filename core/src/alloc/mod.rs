@@ -348,13 +348,6 @@ impl<D: Disk> Allocator<D> {
         })
     }
 
-    /// Drop a sector from the cache.
-    pub fn forget(&self, page: page::Pointer) {
-        // TODO: This potentially forgets more than one pages (the whole cluster). Someone should
-        //       do something about it.
-        self.cache.forget(page.cluster)
-    }
-
     /// Calculate the checksum of some buffer, based on the user choice.
     fn checksum(&self, buf: &disk::SectorBuf) -> u64 {
         trace!(self, "calculating checksum");
@@ -506,10 +499,8 @@ impl<D: Disk> Allocator<D> {
                         // Finally we push the old head to the vector, as it is free now.
                         free.push(old_head);
 
-                        // Drop the old metacluster from the cache.
-                        self.cache.forget(old_head)?;
-
-                        free
+                        // Trim the old metacluster.
+                        self.cache.trim(old_head).map(|_| free)
                     })
                 }).and_then(|free| {
                     // Finally, we must flush the state block before we can add the found clutters
@@ -537,10 +528,14 @@ impl<D: Disk> Allocator<D> {
     fn freelist_push(&mut self, cluster: cluster::Pointer) {
         trace!(self, "pushing to freelist"; "cluster" => cluster);
 
+        // Push the cluster to the freelist.
         self.free.push(cluster);
     }
 
     pub fn flush_free(&self) {
+        // TODO: Important!! Remember to trim the sectors which gets dealloc'd. This can be done
+        //       through `self.cache.trim`
+
         /* TODO (buggy and incomplete)
         let state = self.state.lock();
         let mut (cluster, cksum) = state.freelist_head.map_or(|x| (x.cluster, x.checksum), (0, 0));
