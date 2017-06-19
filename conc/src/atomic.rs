@@ -102,7 +102,7 @@ impl<T> Atomic<T> {
     pub fn store(&self, new: Option<Box<T>>, ordering: atomic::Ordering) {
         // Transform the optional box to a (possibly null) pointer.
         // TODO: Use coercions.
-        let new = new.map_or(ptr::null_mut(), |new| Box::into_raw(new));
+        let new = new.map_or(ptr::null_mut(), Box::into_raw);
         // Swap the contents with the new value.
         let ptr = self.inner.swap(new, ordering);
         if !ptr.is_null() {
@@ -153,8 +153,8 @@ impl<T> Atomic<T> {
     /// # Safety
     ///
     /// As this accepts a raw pointer, it is necessary to mark it as `unsafe`. To uphold the
-    /// invariants, ensure that `new` isn't used after this function has been called, if it
-    /// succeeds (returns `Ok`).
+    /// invariants, ensure that `new` isn't used (hereunder dropped) after this function has been
+    /// called, if it succeeds (returns `Ok`).
     ///
     /// # Memory leak
     ///
@@ -222,8 +222,8 @@ impl<T> Atomic<T> {
     /// # Safety
     ///
     /// As this accepts a raw pointer, it is necessary to mark it as `unsafe`. To uphold the
-    /// invariants, ensure that `new` isn't used after this function has been called, if it
-    /// succeeds (returns `Ok`).
+    /// invariants, ensure that `new` isn't used (hereunder dropped) after this function has been
+    /// called, if it succeeds (returns `Ok`).
     ///
     /// # Memory leak
     ///
