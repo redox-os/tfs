@@ -313,7 +313,7 @@ impl<T> Drop for Atomic<T> {
         if !ptr.is_null() {
             // As the read pointer was not null, we can safely call its destructor.
             unsafe {
-                local::add_garbage(Garbage::new_box(ptr));
+                local::add_garbage(Garbage::new_box(*ptr));
             }
         }
     }
