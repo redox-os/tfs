@@ -100,14 +100,18 @@ pub use guard::Guard;
 use std::mem;
 use garbage::Garbage;
 
-/// Collect garbage.
+/// Attempt to collect garbage.
 ///
 /// This function does two things:
 ///
 /// 1. Export garbage from current thread to the global queue.
 /// 2. Collect all the garbage and run destructors on the unused items.
 ///
-/// If another thread is currently doing 2., it will be skipped.
+/// If another thread is currently doing 2., it will be skipped. This makes it different from
+/// `conc::gc()`, which will block.
+///
+/// If 2. fails (that is, another thread is garbage collecting), `Err(())` is returned. Otherwise
+/// `Ok(())` is returned.
 ///
 /// # Use case
 ///
@@ -121,11 +125,41 @@ use garbage::Garbage;
 ///
 /// This cannot collect un-propagated garbage accumulated locally in other threads. This will only
 /// attempt to collect the accumulated local and global (propagated) garbage.
-pub fn gc() {
+pub fn try_gc() -> Result<(), ()> {
     // Export the local garbage to ensure that the garbage of the current thread gets collected.
     local::export_garbage();
     // Run the global GC.
-    global::gc();
+    global::try_gc()
+}
+
+/// Collect garbage.
+///
+/// This function does two things:
+///
+/// 1. Export garbage from current thread to the global queue.
+/// 2. Collect all the garbage and run destructors on the unused items.
+///
+/// If another thread is currently doing 2., it will block until it can be done. This makes it
+/// different from `conc::try_gc()`, which will skip the step.
+///
+/// # Use case
+///
+/// This is really only neccesary in one case: If you want to ensure that all the destructors of
+/// inactive hazards in the current thread are run. If the destructors hold some special logic, you
+/// want to execute, this will force the (inactive) ones to run these destructors and thus execute
+/// the logic.
+///
+/// If you just want to reduce memory usage, you will probably be better off with `conc::try_gc()`.
+///
+/// # Other threads
+///
+/// This cannot collect un-propagated garbage accumulated locally in other threads. This will only
+/// collect the accumulated local and global (propagated) garbage.
+pub fn gc() {
+    // Export the local garbage to ensure that the garbage of the current thread gets collected.
+    local::export_garbage();
+    // Try to garbage collect until it succeeds.
+    while let Err(()) = global::try_gc() {}
 }
 
 /// Declare a pointer unreachable garbage to be deleted eventually.

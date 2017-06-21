@@ -37,9 +37,10 @@ pub fn export_garbage(garbage: Vec<Garbage>) {
 
 /// Attempt to garbage collect.
 ///
-/// If another garbage collection is currently running, nothing will happen.
-pub fn gc() {
-    STATE.try_gc();
+/// If another garbage collection is currently running, the thread will do nothing, and `Err(())`
+/// will be returned. Otherwise, it returns `Ok(())`.
+pub fn try_gc() -> Result<(), ()> {
+    STATE.try_gc()
 }
 
 /// Tick the clock.
@@ -101,17 +102,23 @@ impl State {
     /// Try to collect the garbage.
     ///
     /// This will handle all of the messages in the channel and then attempt at collect the
-    /// garbage. If another thread is currently collecting garbage, it will be equivalent to NOP.
+    /// garbage. If another thread is currently collecting garbage, `Err(())` is returned,
+    /// otherwise it returns `Ok(())`.
     ///
     /// Garbage collection works by scanning the hazards and dropping all the garbage which is not
     /// currently active in the hazards.
-    fn try_gc(&self) {
+    fn try_gc(&self) -> Result<(), ()> {
         // Lock the "garbo" (the part of the state needed to GC).
         if let Ok(mut garbo) = self.garbo.try_lock() {
             // Handle all the messages sent.
             garbo.handle_all();
             // Collect the garbage.
             garbo.gc();
+
+            Ok(())
+        } else {
+            // Another thread is collecting.
+            Err(())
         }
     }
 }

@@ -411,10 +411,11 @@ mod tests {
         assert!(opt.load(atomic::Ordering::Relaxed).is_none());
 
         // To check that GC doesn't segfault or something.
-        ::gc();
-        ::gc();
-        ::gc();
-        ::gc();
+        let _ = ::try_gc();
+        let _ = ::try_gc();
+        let _ = ::try_gc();
+        let _ = ::try_gc();
+        let _ = ::try_gc();
     }
 
     #[test]
@@ -444,10 +445,11 @@ mod tests {
             assert!(opt.load(atomic::Ordering::Relaxed).is_none());
 
             // To check that GC doesn't segfault or something.
-            ::gc();
-            ::gc();
-            ::gc();
-            ::gc();
+            let _ = ::try_gc();
+            let _ = ::try_gc();
+            let _ = ::try_gc();
+            let _ = ::try_gc();
+            let _ = ::try_gc();
         }
     }
 
