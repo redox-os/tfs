@@ -54,8 +54,8 @@ pub fn tick() {
 
     // Generate a random number and compare it against the probability.
     if rand::random::<usize>() <= GC_PROBABILITY {
-        // The outfall was to GC.
-        gc();
+        // The outfall was to (attempt at) GC.
+        let _ = try_gc();
     }
 }
 
