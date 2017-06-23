@@ -77,11 +77,12 @@
 //! instruction, this means that if you are traversing a list or something like that, this library
 //! might not be for you.
 
-#![feature(thread_local_state)]
+#![feature(alloc_system, thread_local_state)]
 #![deny(missing_docs)]
 
 #[macro_use]
 extern crate lazy_static;
+extern crate alloc_system;
 extern crate parking_lot;
 extern crate rand;
 
