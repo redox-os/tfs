@@ -37,7 +37,7 @@ impl<T> Treiber<T> {
             // Attempt to replace the head with the tail of the head.
             match unsafe {
                 self.head.compare_and_swap_raw(
-                    &*node,
+                    node.as_raw(),
                     node.next as *mut Node<T>,
                     atomic::Ordering::Release,
                 )
@@ -57,7 +57,7 @@ impl<T> Treiber<T> {
     pub fn push(&self, item: T)
     where T: 'static {
         // Load the head snapshot.
-        let mut snapshot = self.head.load(atomic::Ordering::Acquire);
+        let mut snapshot = self.head.load(atomic::Ordering::Relaxed);
         let mut snapshot_ptr: Option<*const Node<T>>;
 
         // TODO: Use `catch {}` here when it lands.
@@ -228,13 +228,14 @@ mod tests {
     #[test]
     fn increment() {
         let stack = Arc::new(Treiber::<u64>::new());
+        stack.push(0);
         let mut j = Vec::new();
 
         // 16 times, we add the numbers from 0 to 1000 to the only element in the stack.
         for _ in 0..16 {
             let s = stack.clone();
             j.push(thread::spawn(move || {
-                for n in 0..1000 {
+                for n in 0..1001 {
                     loop {
                         if let Some(x) = s.pop() {
                             s.push(*x + n);
@@ -249,7 +250,7 @@ mod tests {
             i.join().unwrap();
         }
 
-        assert!(*stack.pop().unwrap() == 16 * 1000 * 1001 / 2);
+        assert_eq!(*stack.pop().unwrap(), 16 * 1000 * 1001 / 2);
     }
 
     #[test]
