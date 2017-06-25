@@ -567,4 +567,12 @@ mod tests {
         thread::spawn(|| BASIC.with(|_| {})).join().unwrap();
         thread::spawn(|| BASIC.with(|_| {})).join().unwrap();
     }
+
+    #[test]
+    fn nested() {
+        let a: Atomic<Atomic<Atomic<u8>>> = Atomic::new(Some(Box::new(Atomic::new(Some(Box::new(Atomic::new(None)))))));
+        a.store(None, atomic::Ordering::Relaxed);
+        ::gc();
+        assert!(a.load(atomic::Ordering::Relaxed).is_none());
+    }
 }
