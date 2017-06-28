@@ -23,12 +23,14 @@ impl<T> Drop for Treiber<T> {
         // structure. They're all gone, thus we can safely mess with the inner structure.
 
         unsafe {
-            // Call destructors on the stack.
-            (**self.head.get_inner_mut().get_mut()).destroy();
+            let ptr = *self.head.get_inner_mut().get_mut();
 
-            // To avoid an atomic load etc., we shortcut by calling the destructor us self. We can do
-            // this without overhead, as we positively know that no guard into the structure exists.
-            self.head.destroy_no_guards();
+            if !ptr.is_null() {
+                // Call destructors on the stack.
+                (*ptr).destroy();
+                // Finally deallocate the pointer itself.
+                drop(Box::from_raw(ptr));
+            }
         }
     }
 }
