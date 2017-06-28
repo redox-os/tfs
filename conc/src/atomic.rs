@@ -56,6 +56,28 @@ impl<T> Atomic<T> {
         &mut self.inner
     }
 
+    /// Call destructor on the underlying object.
+    ///
+    /// There is no additional or unexpected overhead in this. It only calls the destructor; it
+    /// doesn't even make an atomic load.
+    ///
+    /// When it has been called, the content of the container is `None`.
+    ///
+    /// # Safety
+    ///
+    /// This assumes that no guards to the inner object exist. If this is not ensured, you might
+    /// get use-after-free.
+    ///
+    /// These invariants must be ensured by the caller.
+    pub unsafe fn destroy_no_guards(&mut self) {
+        // Take out the contents and leave null in its place.
+        let ptr = mem::replace(self.get_inner_mut().get_mut(), ptr::null_mut());
+        // Call the destructor on the old content.
+        if !ptr.is_null() {
+            drop(Box::from_raw(ptr));
+        }
+    }
+
     /// Load the container's current pointer.
     ///
     /// This gets the current pointer stored in `self`. If `self` is `None`, the null pointer is
@@ -574,5 +596,29 @@ mod tests {
         a.store(None, atomic::Ordering::Relaxed);
         ::gc();
         assert!(a.load(atomic::Ordering::Relaxed).is_none());
+    }
+
+    #[test]
+    fn destroy_no_guards() {
+        let drops = Arc::new(AtomicUsize::default());
+
+        let mut opt = Atomic::new(None);
+
+        for _ in 0..1001 {
+            let d = Dropper {
+                d: drops.clone(),
+            };
+
+            let mut vec = Vec::new();
+            for _ in 0..1000 {
+                vec.push(String::from("blah"));
+            }
+
+            unsafe { opt.destroy_no_guards(); }
+            assert!(opt.load(atomic::Ordering::Relaxed).is_none());
+            opt.store(Some(Box::new(d)), atomic::Ordering::Relaxed);
+        }
+
+        assert_eq!(drops.load(atomic::Ordering::Relaxed), 1000);
     }
 }
