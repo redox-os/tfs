@@ -17,6 +17,22 @@ pub struct Treiber<T> {
     head: Atomic<Node<T>>,
 }
 
+impl<T> Drop for Treiber<T> {
+    fn drop(&mut self) {
+        // Due to the nature of Treiber stacks, there are no active guards of things within the
+        // structure. They're all gone, thus we can safely mess with the inner structure.
+
+        unsafe {
+            // Call destructors on the stack.
+            (**self.head.get_inner_mut().get_mut()).destroy();
+
+            // To avoid an atomic load etc., we shortcut by calling the destructor us self. We can do
+            // this without overhead, as we positively know that no guard into the structure exists.
+            self.head.destroy_no_guards();
+        }
+    }
+}
+
 impl<T> Treiber<T> {
     /// Create a new, empty Treiber stack.
     pub fn new() -> Treiber<T> {
@@ -106,17 +122,20 @@ struct Node<T> {
     next: *const Node<T>,
 }
 
-impl<T> Drop for Node<T> {
-    fn drop(&mut self) {
+impl<T> Node<T> {
+    /// Destroy the node and its precessors.
+    ///
+    /// # Safety
+    ///
+    /// As this can be called multiple times, it is marked unsafe.
+    unsafe fn destroy(&mut self) {
         // FIXME: Since this is recursive (and although it is likely optimized out), there might be
         //        cases where this leads to stack overflow, given correct compilation flags and
         //        sufficiently many elements.
 
         // Recursively drop the next node, if it exists.
         if !self.next.is_null() {
-            unsafe {
-                drop(Box::from_raw(self.next as *mut Node<T>));
-            }
+            drop(Box::from_raw(self.next as *mut Node<T>));
         }
     }
 }
