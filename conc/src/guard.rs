@@ -9,7 +9,9 @@ use {hazard, local};
 /// This "guards" the held pointer against garbage collection. First when all guards of said
 /// pointer is gone (the data is unreachable), it can be collected.
 // TODO: Remove this `'static` bound.
-#[must_use]
+#[must_use = "You are getting a `conc::Guard<T>` without using it, which means it is potentially \
+              unnecessary overhead. Consider replacing the method with something that doesn't \
+              return a guard."]
 #[derive(Debug)]
 pub struct Guard<T: 'static> {
     /// The inner hazard.
