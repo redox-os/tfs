@@ -579,7 +579,7 @@ mod tests {
     #[test]
     fn null_tuple() {
         let a = Atomic::new(Some(Box::new(())));
-        for i in 0..1000 {
+        for _ in 0..1000 {
             let _ = a.swap(Some(Box::new(())), atomic::Ordering::Relaxed).unwrap();
         }
     }
