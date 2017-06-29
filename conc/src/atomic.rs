@@ -575,4 +575,12 @@ mod tests {
         ::gc();
         assert!(a.load(atomic::Ordering::Relaxed).is_none());
     }
+
+    #[test]
+    fn null_tuple() {
+        let a = Atomic::new(Some(Box::new(())));
+        for i in 0..1000 {
+            let _ = a.swap(Some(Box::new(())), atomic::Ordering::Relaxed).unwrap();
+        }
+    }
 }
