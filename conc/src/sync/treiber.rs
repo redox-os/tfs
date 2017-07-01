@@ -129,6 +129,8 @@ struct Node<T> {
 impl<T> Node<T> {
     /// Destroy the node and its precessors.
     ///
+    /// This doesn't call the destructor on `T`.
+    ///
     /// # Safety
     ///
     /// As this can be called multiple times, it is marked unsafe.

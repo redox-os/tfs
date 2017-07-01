@@ -684,8 +684,9 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
     /// is held.
     pub fn get(&self, key: &K) -> Option<ReadGuard<K, V>> {
         // Acquire the read lock and lookup in the table.
-        if let Ok(inner) = OwningRef::new(OwningHandle::new(self.table.read(), |x| unsafe { &*x }.lookup(key)))
-            .try_map(|x| x.value_ref()) {
+        if let Ok(inner) = OwningRef::new(
+            OwningHandle::new_with_fn(self.table.read(), |x| unsafe { &*x }.lookup(key))
+        ).try_map(|x| x.value_ref()) {
             // The bucket contains data.
             Some(ReadGuard {
                 inner: inner,
@@ -703,13 +704,21 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
     /// is held.
     pub fn get_mut(&self, key: &K) -> Option<WriteGuard<K, V>> {
         // Acquire the write lock and lookup in the table.
-        if let Ok(inner) = OwningHandle::try_new(OwningHandle::new(self.table.read(), |x| unsafe { &*x }.lookup_mut(key)), |x| if let &mut Bucket::Contains(_, ref mut val) = unsafe { &mut *(x as *mut Bucket<K, V>) } {
-            // The bucket contains data.
-            Ok(val)
-        } else {
-            // The bucket is empty/removed.
-            Err(())
-        }) {
+        if let Ok(inner) = OwningHandle::try_new(OwningHandle::new_with_fn(
+            self.table.read(),
+            |x| unsafe { &*x }.lookup_mut(key)),
+            |x| {
+                if let &mut Bucket::Contains(_, ref mut val) = unsafe {
+                    &mut *(x as *mut Bucket<K, V>)
+                } {
+                    // The bucket contains data.
+                    Ok(val)
+                } else {
+                    // The bucket is empty/removed.
+                    Err(())
+                }
+            }
+        ) {
             Some(WriteGuard {
                 inner: inner,
             })
