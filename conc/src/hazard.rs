@@ -78,7 +78,13 @@ impl Hazard {
         self.ptr.store(match new {
             State::Free => 1,
             State::Dead => 2,
-            State::Protect(ptr) => ptr as usize,
+            State::Protect(ptr) => {
+                debug_assert!(ptr as usize > 2, "Protecting an invalid pointer, colliding with a \
+                              trap value of the hazard. This likely happens because you have stored \
+                              or corrupted the pointer in a container. Ensure that you only store \
+                              valid values in hazards.");
+                ptr as usize
+            }
         }, atomic::Ordering::Release);
     }
 
