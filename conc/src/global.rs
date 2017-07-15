@@ -19,11 +19,11 @@ lazy_static! {
 /// returned.
 pub fn create_hazard() -> hazard::Writer {
     // Create the hazard.
-    let (write, read) = hazard::create();
+    let (writer, reader) = hazard::create();
     // Communicate the new hazard to the global state through the channel.
-    STATE.chan.send(Message::NewHazard(read));
+    STATE.chan.send(Message::NewHazard(reader));
     // Return the other half of the hazard.
-    write
+    writer
 }
 
 /// Export garbage into the global state.

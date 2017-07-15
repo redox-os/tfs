@@ -22,7 +22,7 @@ use local;
 ///
 /// Note that this `enum` excludes the blocked state, because it is semantically different from the
 /// other states.
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 pub enum State {
     /// The hazard does not currently protect any object.
     Free,
@@ -32,6 +32,9 @@ pub enum State {
     ///
     /// "Protecting" means that the pointer it holds is not deleted while the hazard is in this
     /// state.
+    ///
+    /// The inner pointer is restricted to values not overlapping with the trap value,
+    /// corresponding to one of the other states.
     Protect(*const u8),
 }
 
@@ -225,4 +228,59 @@ impl Drop for Writer {
             });
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ptr;
+
+    #[test]
+    fn hazard_set_get() {
+        let h = Hazard::blocked();
+        h.set(State::Free);
+        assert_eq!(h.get(), State::Free);
+        h.set(State::Dead);
+        assert_eq!(h.get(), State::Dead);
+
+        let x = 2;
+
+        h.set(State::Protect(&x));
+        assert_eq!(h.get(), State::Protect(&x));
+
+        h.set(State::Protect(ptr::null()));
+        assert_eq!(h.get(), State::Protect(ptr::null()));
+        h.set(State::Protect(0x1 as *const u8));
+        assert_eq!(h.get(), State::Protect(0x1 as *const u8));
+    }
+
+    #[test]
+    fn hazard_pair() {
+        let (writer, reader) = create();
+        let x = 2;
+
+        writer.set(State::Free);
+        assert_eq!(reader.get(), State::Free);
+        writer.set(State::Protect(&x));
+        assert_eq!(reader.get(), State::Protect(&x));
+        writer.kill();
+        assert_eq!(reader.get(), State::Free);
+
+        unsafe {
+            reader.destroy();
+        }
+    }
+
+    #[test]
+    fn drop() {
+        for _ in 0..9000 {
+            let (writer, reader) = create();
+            writer.set(State::Free);
+            unsafe {
+                reader.destroy();
+            }
+        }
+    }
+
+    // TODO: More tests here.
 }
