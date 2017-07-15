@@ -13,7 +13,7 @@
 //! The asymmetry of a hazard pair is strictly speaking not necessary, but it allows to enforce
 //! rules (e.g. only the reader/global part may deallocate the hazard box).
 
-use std::sync::atomic::{self, AtomicUsize};
+use std::sync::atomic::{self, AtomicIsize};
 use std::{ops, mem, thread};
 
 use local;
@@ -49,24 +49,24 @@ pub struct Hazard {
     ///
     /// This takes following forms:
     ///
-    /// - 0: blocked.
-    /// - 1: free.
-    /// - 2: dead
+    /// - -1: blocked.
+    /// - -2: free.
+    /// - -3: dead
     /// - otherwise: protecting the address represented by the `usize`.
-    ptr: AtomicUsize,
+    ptr: AtomicIsize,
 }
 
 impl Hazard {
     /// Create a new hazard in blocked state.
     pub fn blocked() -> Hazard {
         Hazard {
-            ptr: AtomicUsize::new(0),
+            ptr: AtomicIsize::new(-1),
         }
     }
 
     /// Block the hazard.
     pub fn block(&self) {
-        self.ptr.store(0, atomic::Ordering::Release);
+        self.ptr.store(-1, atomic::Ordering::Release);
     }
 
     /// Set the hazard to a new state.
@@ -76,14 +76,14 @@ impl Hazard {
     pub fn set(&self, new: State) {
         // Simply encode and store.
         self.ptr.store(match new {
-            State::Free => 1,
-            State::Dead => 2,
+            State::Free => -2,
+            State::Dead => -3,
             State::Protect(ptr) => {
-                debug_assert!(ptr as usize > 2, "Protecting an invalid pointer, colliding with a \
-                              trap value of the hazard. This likely happens because you have stored \
-                              or corrupted the pointer in a container. Ensure that you only store \
-                              valid values in hazards.");
-                ptr as usize
+                debug_assert!(!(-3..0).contains(ptr as isize), "Protecting an invalid pointer, \
+                colliding with a trap value of the hazard. This likely happens because you have \
+                stored or corrupted the pointer in a container. Ensure that you only store valid \
+                values in hazards.");
+                ptr as isize
             }
         }, atomic::Ordering::Release);
     }
@@ -95,11 +95,11 @@ impl Hazard {
         // Spin until not blocked.
         loop {
             return match self.ptr.load(atomic::Ordering::Acquire) {
-                // 0 means that the hazard is blocked by another thread, and we must loop until it
+                // -1 means that the hazard is blocked by another thread, and we must loop until it
                 // assumes another state.
-                0 => continue,
-                1 => State::Free,
-                2 => State::Dead,
+                -1 => continue,
+                -2 => State::Free,
+                -3 => State::Dead,
                 ptr => State::Protect(ptr as *const u8)
             };
         }
