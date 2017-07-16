@@ -272,14 +272,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn kill_panick() {
-        let (writer, _reader) = create();
-        writer.kill();
-        panic!();
-    }
-
-    #[test]
     fn drop() {
         for _ in 0..9000 {
             let (writer, reader) = create();
