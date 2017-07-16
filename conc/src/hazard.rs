@@ -236,7 +236,7 @@ mod tests {
     use std::ptr;
 
     #[test]
-    fn hazard_set_get() {
+    fn set_get() {
         let h = Hazard::blocked();
         h.set(State::Free);
         assert_eq!(h.get(), State::Free);
@@ -264,11 +264,19 @@ mod tests {
         writer.set(State::Protect(&x));
         assert_eq!(reader.get(), State::Protect(&x));
         writer.kill();
-        assert_eq!(reader.get(), State::Free);
+        assert_eq!(reader.get(), State::Dead);
 
         unsafe {
             reader.destroy();
         }
+    }
+
+    #[test]
+    #[should_panic]
+    fn kill_panick() {
+        let (writer, _reader) = create();
+        writer.kill();
+        panic!();
     }
 
     #[test]
