@@ -45,8 +45,20 @@ impl<T> Treiber<T> {
         }
     }
 
+    /// Get the top item of the stack without popping it.
+    ///
+    /// This is several times faster than `pop`.
+    ///
+    /// # Memory usage
+    ///
+    /// This keeps alive what corresponds to the whole stack at the time of the call, such that it
+    /// won't be dropped until the guard is dead.
+    pub fn top(&self) -> Option<Guard<T>> {
+        // Just load the head and map it.
+        self.head.load(atomic::Ordering::Acquire).map(|guard| guard.map(|node| &node.item))
+    }
+
     /// Pop an item from the stack.
-    // TODO: Change this return type.
     pub fn pop(&self) -> Option<Guard<T>> {
         // TODO: Use `catch {}` here when it lands.
         // Read the head snapshot.
@@ -131,6 +143,10 @@ impl<T> Node<T> {
     ///
     /// This doesn't call the destructor on `T`.
     ///
+    /// The reason this isn't replaced by a recursive destructor through `Drop` is that such thing
+    /// would cause double drop, as the earlier top element getting dropped would cause the whole
+    /// list to be dropped.
+    ///
     /// # Safety
     ///
     /// As this can be called multiple times, it is marked unsafe.
@@ -167,10 +183,14 @@ mod tests {
     #[test]
     fn simple1() {
         let stack = Treiber::new();
+        assert!(stack.top().is_none());
 
         stack.push(1);
+        assert_eq!(*stack.top().unwrap(), 1);
         stack.push(200);
+        assert_eq!(*stack.top().unwrap(), 200);
         stack.push(44);
+        assert_eq!(*stack.top().unwrap(), 44);
 
         assert_eq!(*stack.pop().unwrap(), 44);
         assert_eq!(*stack.pop().unwrap(), 200);
@@ -183,18 +203,26 @@ mod tests {
     #[test]
     fn simple2() {
         let stack = Treiber::new();
+        assert!(stack.top().is_none());
 
         for _ in 0..16 {
             stack.push(1);
             stack.push(200);
             stack.push(44);
 
+            assert_eq!(*stack.top().unwrap(), 44);
             assert_eq!(*stack.pop().unwrap(), 44);
+            assert_eq!(*stack.top().unwrap(), 200);
             assert_eq!(*stack.pop().unwrap(), 200);
+            assert_eq!(*stack.top().unwrap(), 44);
             stack.push(20000);
 
+            assert_eq!(*stack.top().unwrap(), 20000);
             assert_eq!(*stack.pop().unwrap(), 20000);
+            assert_eq!(*stack.top().unwrap(), 1);
             assert_eq!(*stack.pop().unwrap(), 1);
+
+            assert!(stack.top().is_none());
 
             assert!(stack.pop().is_none());
             assert!(stack.pop().is_none());
@@ -208,12 +236,14 @@ mod tests {
     #[test]
     fn simple3() {
         let stack = Treiber::new();
+        assert!(stack.top().is_none());
 
         for i in 0..10000 {
             stack.push(i);
         }
 
         for i in (0..10000).rev() {
+            assert_eq!(*stack.top().unwrap(), i);
             assert_eq!(*stack.pop().unwrap(), i);
         }
 
@@ -222,9 +252,11 @@ mod tests {
         }
 
         for i in (0..10000).rev() {
+            assert_eq!(*stack.top().unwrap(), i);
             assert_eq!(*stack.pop().unwrap(), i);
         }
 
+        assert!(stack.top().is_none());
         assert!(stack.pop().is_none());
         assert!(stack.pop().is_none());
         assert!(stack.pop().is_none());
@@ -240,6 +272,7 @@ mod tests {
             j.push(thread::spawn(move || {
                 for _ in 0..10_000_000 {
                     s.push(23);
+                    assert_eq!(*s.top().unwrap(), 23);
                     assert_eq!(*s.pop().unwrap(), 23);
                 }
             }));
