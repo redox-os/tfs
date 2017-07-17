@@ -22,7 +22,12 @@ pub fn add_garbage(garbage: Garbage) {
         // The state was deinitialized, so we must rely on the global state for queueing garbage.
         global::export_garbage(vec![garbage]);
     } else {
-        STATE.with(|s| s.borrow_mut().add_garbage(garbage));
+        // Add the garbage.
+        if STATE.with(|s| s.borrow_mut().add_garbage(garbage)) {
+            // The local state exported garbage to the global state, hence we must tick in order to
+            // ensure that the garbage is periodically collected.
+            global::tick();
+        }
     }
 }
 
@@ -66,7 +71,10 @@ pub fn export_garbage() {
     // We can only export when the TLS variable isn't destroyed. Otherwise, there would be nothing
     // to export!
     if STATE.state() != thread::LocalKeyState::Destroyed {
-        STATE.with(|s| s.borrow_mut().export_garbage_and_tick());
+        STATE.with(|s| s.borrow_mut().export_garbage());
+        // We tick after the state is no longer reserved, as the tick could potentially call
+        // destructor that access the TLS variable.
+        global::tick();
     }
 }
 
@@ -137,8 +145,14 @@ impl State {
         }
     }
 
-    /// See `add_garbage()`.
-    fn add_garbage(&mut self, garbage: Garbage) {
+    /// Queues garbage to destroy.
+    ///
+    /// Eventually the added garbage will be exported to the global state through
+    /// `global::add_garbage()`.
+    ///
+    /// When this happens (i.e. the global state gets the garbage), it returns `true`. Otherwise,
+    /// it returns `false`.
+    fn add_garbage(&mut self, garbage: Garbage) -> bool {
         /// The maximal amount of garbage before exportation to the global state.
         const MAX_GARBAGE: usize = 128;
 
@@ -148,20 +162,17 @@ impl State {
         // Export the garbage if it exceeds the limit.
         // TODO: use memory instead of items as a metric.
         if self.garbage.len() > MAX_GARBAGE {
-            self.export_garbage_and_tick();
-        }
+            self.export_garbage();
+            true
+        } else { false }
     }
 
-    /// See `export_garbage()`.
+    /// Export the garbage this state holds into the global state.
+    ///
+    /// See `global::export_garbage()` for more information.
     fn export_garbage(&mut self) {
         // Clear the vector and export the garbage.
         global::export_garbage(mem::replace(&mut self.garbage, Vec::new()));
-    }
-
-    /// Export garbage (see `export_garbage()`), then tick.
-    fn export_garbage_and_tick(&mut self) {
-        self.export_garbage();
-        global::tick();
     }
 }
 

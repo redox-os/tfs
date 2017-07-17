@@ -386,6 +386,13 @@ mod tests {
     }
 
     #[test]
+    fn basic_properties_nested() {
+        for _ in 0..1000 {
+            Atomic::new(Some(Box::new(Basic)));
+        }
+    }
+
+    #[test]
     fn cas() {
         let bx1 = Box::new(1);
         let ptr1 = &*bx1 as *const usize;
