@@ -13,14 +13,14 @@ use {hazard, local};
               unnecessary overhead. Consider replacing the method with something that doesn't \
               return a guard."]
 #[derive(Debug)]
-pub struct Guard<T: 'static> {
+pub struct Guard<T: 'static + ?Sized> {
     /// The inner hazard.
     hazard: hazard::Writer,
     /// The pointer to the protected object.
     pointer: &'static T,
 }
 
-impl<T> Guard<T> {
+impl<T: ?Sized> Guard<T> {
     /// (Failably) create a new guard.
     ///
     /// This has all the same restrictions and properties as `Guard::new()` (please read its
@@ -123,5 +123,15 @@ mod tests {
     #[should_panic]
     fn panic_during_guard_creation() {
         let _ = Guard::new(|| -> &'static u8 { panic!() });
+    }
+
+    #[test]
+    fn nested_guard_creation() {
+        for i in 0..100 {
+            Guard::new(|| {
+                Guard::new(|| "blah");
+                "blah"
+            });
+        }
     }
 }
