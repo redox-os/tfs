@@ -2,7 +2,26 @@
 
 use std::ops;
 use std::sync::atomic;
+use std::cell::Cell;
 use {hazard, local};
+
+#[cfg(debug_assertions)]
+thread_local! {
+    /// Number of guards the current thread is creating.
+    static CURRENT_CREATING: Cell<usize> = Cell::new(0);
+}
+
+/// Assert (in debug mode) that no guards are currently being created in this thread.
+///
+/// This shall be used when you want to ensure, that a function called within the guard constructor
+/// doesn't cause endless looping, due to the blocked hazard.
+///
+/// In particular, it should be called in functions that could trigger a garbage collection, thus
+/// requiring that hazards are eventually unblocked.
+pub fn debug_assert_no_create() {
+    #[cfg(debug_assertions)]
+    CURRENT_CREATING.with(|x| assert_eq!(x.get(), 0));
+}
 
 /// A RAII guard protecting from garbage collection.
 ///
@@ -29,6 +48,10 @@ impl<T: ?Sized> Guard<T> {
     /// This means that the closure can return and error and abort the creation of the guard.
     pub fn try_new<F, E>(ptr: F) -> Result<Guard<T>, E>
     where F: FnOnce() -> Result<&'static T, E> {
+        // Increment the number of guards currently being created.
+        #[cfg(debug_assertions)]
+        CURRENT_CREATING.with(|x| x.set(x.get() + 1));
+
         // Get a hazard in blocked state.
         let hazard = local::get_hazard();
 
@@ -42,7 +65,13 @@ impl<T: ?Sized> Guard<T> {
         // will be no premature free.
 
         // Evaluate the pointer through the closure.
-        match ptr() {
+        let res = ptr();
+
+        // Decrement the number of guards currently being created.
+        #[cfg(debug_assertions)]
+        CURRENT_CREATING.with(|x| x.set(x.get() - 1));
+
+        match res {
             Ok(ptr) => {
                 // Now that we have the pointer, we can protect it by the hazard, unblocking a pending
                 // garbage collection if it exists.
@@ -118,6 +147,7 @@ impl<T> ops::Deref for Guard<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::mem;
 
     #[test]
     #[should_panic]
@@ -127,9 +157,9 @@ mod tests {
 
     #[test]
     fn nested_guard_creation() {
-        for i in 0..100 {
-            Guard::new(|| {
-                Guard::new(|| "blah");
+        for _ in 0..100 {
+            let _ = Guard::new(|| {
+                mem::forget(Guard::new(|| "blah"));
                 "blah"
             });
         }

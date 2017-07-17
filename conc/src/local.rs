@@ -2,7 +2,7 @@
 
 use std::{mem, thread};
 use std::cell::RefCell;
-use {global, hazard};
+use {global, hazard, guard};
 use garbage::Garbage;
 
 thread_local! {
@@ -54,6 +54,9 @@ pub fn get_hazard() -> hazard::Writer {
 ///
 /// This frees a hazard to the thread-local cache of hazards.
 pub fn free_hazard(hazard: hazard::Writer) {
+    // Since this function can trigger a GC, it must not be called inside a guard constructor.
+    guard::debug_assert_no_create();
+
     if STATE.state() == thread::LocalKeyState::Destroyed {
         // Since the state was deinitialized, we cannot store it for later reuse, so we are forced
         // to simply kill the hazard.
@@ -68,6 +71,9 @@ pub fn free_hazard(hazard: hazard::Writer) {
 /// This is useful for propagating accumulated garbage such that it can be destroyed by the next
 /// garbage collection.
 pub fn export_garbage() {
+    // Since this function can trigger a GC, it must not be called inside a guard constructor.
+    guard::debug_assert_no_create();
+
     // We can only export when the TLS variable isn't destroyed. Otherwise, there would be nothing
     // to export!
     if STATE.state() != thread::LocalKeyState::Destroyed {
