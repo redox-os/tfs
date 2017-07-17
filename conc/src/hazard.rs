@@ -18,6 +18,17 @@ use std::{ops, mem, thread};
 
 use local;
 
+/// The integer representing blocked state.
+const BLOCKED: isize = -1;
+/// The integer representing free state.
+const FREE: isize = -2;
+/// The integer representing dead state.
+const DEAD: isize = -3;
+/// The first invalid/trap value.
+const TRAP_START: isize = DEAD;
+/// The last (exclusive) invalid/trap value.
+const TRAP_END: isize = 0;
+
 /// The state of a hazard.
 ///
 /// Note that this `enum` excludes the blocked state, because it is semantically different from the
@@ -50,12 +61,8 @@ pub enum State {
 pub struct Hazard {
     /// The inner atomic value.
     ///
-    /// This takes following forms:
-    ///
-    /// - -1: blocked.
-    /// - -2: free.
-    /// - -3: dead
-    /// - otherwise: protecting the address represented by the `usize`.
+    /// `BLOCKED`, `FREE`, and `DEAD` defines what state it is in. If none of these, it is
+    /// protecting the pointer represented by the `isize`.
     ptr: AtomicIsize,
 }
 
@@ -63,13 +70,13 @@ impl Hazard {
     /// Create a new hazard in blocked state.
     pub fn blocked() -> Hazard {
         Hazard {
-            ptr: AtomicIsize::new(-1),
+            ptr: AtomicIsize::new(BLOCKED),
         }
     }
 
     /// Block the hazard.
     pub fn block(&self) {
-        self.ptr.store(-1, atomic::Ordering::Release);
+        self.ptr.store(BLOCKED, atomic::Ordering::Release);
     }
 
     /// Set the hazard to a new state.
@@ -79,13 +86,13 @@ impl Hazard {
     pub fn set(&self, new: State) {
         // Simply encode and store.
         self.ptr.store(match new {
-            State::Free => -2,
-            State::Dead => -3,
+            State::Free => FREE,
+            State::Dead => DEAD,
             State::Protect(ptr) => {
-                debug_assert!(!(-3..0).contains(ptr as isize), "Protecting an invalid pointer, \
-                colliding with a trap value of the hazard. This likely happens because you have \
-                stored or corrupted the pointer in a container. Ensure that you only store valid \
-                values in hazards.");
+                debug_assert!(!(TRAP_START..TRAP_END).contains(ptr as isize), "Protecting an \
+                invalid pointer, colliding with a trap value of the hazard. This likely happens \
+                because you have stored or corrupted the pointer in a container. Ensure that you \
+                only store valid values in hazards.");
                 ptr as isize
             }
         }, atomic::Ordering::Release);
@@ -93,7 +100,8 @@ impl Hazard {
 
     /// Get the state of the hazard.
     ///
-    /// It will spin until the hazard is no longer in a blocked state.
+    /// It will spin until the hazard is no longer in a blocked state, unless it is in debug mode,
+    /// where it will panic given enough spins.
     pub fn get(&self) -> State {
         // In debug mode, we count the number of spins. In release mode, this should be trivially
         // optimized out.
@@ -102,9 +110,9 @@ impl Hazard {
         // Spin until not blocked.
         loop {
             return match self.ptr.load(atomic::Ordering::Acquire) {
-                // -1 means that the hazard is blocked by another thread, and we must loop until it
-                // assumes another state.
-                -1 => {
+                // Blocked means that the hazard is blocked by another thread, and we must loop
+                // until it assumes another state.
+                BLOCKED => {
                     // Increment the number of spins.
                     spins += 1;
                     debug_assert!(spins < 100_000, "Hazard blocked for 100,000 rounds. Panicking \
@@ -112,8 +120,8 @@ impl Hazard {
 
                     continue;
                 },
-                -2 => State::Free,
-                -3 => State::Dead,
+                FREE => State::Free,
+                DEAD => State::Dead,
                 ptr => State::Protect(ptr as *const u8)
             };
         }
