@@ -53,9 +53,18 @@ pub fn get_hazard() -> hazard::Writer {
 /// Free a hazard.
 ///
 /// This frees a hazard to the thread-local cache of hazards.
+///
+/// It is important that the hazard is **not** in blocked state, as such thing can cause infinite
+/// looping.
+///
+/// # Panics
+///
+/// This might panic in debug mode if the hazard given is in blocked state.
 pub fn free_hazard(hazard: hazard::Writer) {
     // Since this function can trigger a GC, it must not be called inside a guard constructor.
     guard::debug_assert_no_create();
+
+    debug_assert!(!hazard.is_blocked(), "Freeing a blocked hazards. See docs.");
 
     if STATE.state() == thread::LocalKeyState::Destroyed {
         // Since the state was deinitialized, we cannot store it for later reuse, so we are forced
@@ -156,6 +165,8 @@ impl State {
     /// Eventually the added garbage will be exported to the global state through
     /// `global::add_garbage()`.
     ///
+    /// See `add_garbage` for more information.
+    ///
     /// When this happens (i.e. the global state gets the garbage), it returns `true`. Otherwise,
     /// it returns `false`.
     fn add_garbage(&mut self, garbage: Garbage) -> bool {
@@ -173,9 +184,7 @@ impl State {
         } else { false }
     }
 
-    /// Export the garbage this state holds into the global state.
-    ///
-    /// See `global::export_garbage()` for more information.
+    /// See `export_garbage()` for more information.
     fn export_garbage(&mut self) {
         // Clear the vector and export the garbage.
         global::export_garbage(mem::replace(&mut self.garbage, Vec::new()));

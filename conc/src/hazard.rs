@@ -79,6 +79,11 @@ impl Hazard {
         self.ptr.store(BLOCKED, atomic::Ordering::Release);
     }
 
+    /// Is the hazard blocked?
+    pub fn is_blocked(&self) -> bool {
+        self.ptr.load(atomic::Ordering::Acquire) == BLOCKED
+    }
+
     /// Set the hazard to a new state.
     ///
     /// Whether or not it is blocked has no effect on this. To get it back to the blocked state,
@@ -257,6 +262,8 @@ mod tests {
     #[test]
     fn set_get() {
         let h = Hazard::blocked();
+        assert!(h.is_blocked());
+
         h.set(State::Free);
         assert_eq!(h.get(), State::Free);
         h.set(State::Dead);
