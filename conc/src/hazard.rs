@@ -34,6 +34,7 @@ const TRAP_END: isize = 0;
 /// Note that this `enum` excludes the blocked state, because it is semantically different from the
 /// other states.
 #[derive(PartialEq, Debug)]
+#[must_use = "Hazard states are expensive to fetch and have no value unless used."]
 pub enum State {
     /// The hazard does not currently protect any object.
     Free,
@@ -301,12 +302,56 @@ mod tests {
     fn drop() {
         for _ in 0..9000 {
             let (writer, reader) = create();
-            writer.set(State::Free);
+            writer.set(State::Dead);
             unsafe {
                 reader.destroy();
             }
         }
     }
 
-    // TODO: More tests here.
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    #[test]
+    fn debug_protect_trap_1() {
+        let h = Hazard::blocked();
+        h.set(State::Protect(BLOCKED as *const u8));
+    }
+
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    #[test]
+    fn debug_protect_trap_2() {
+        let h = Hazard::blocked();
+        h.set(State::Protect(FREE as *const u8));
+    }
+
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    #[test]
+    fn debug_protect_trap_3() {
+        let h = Hazard::blocked();
+        h.set(State::Protect(DEAD as *const u8));
+    }
+
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    #[test]
+    fn debug_infinite_blockage() {
+        let h = Hazard::blocked();
+        let _ = h.get();
+    }
+
+    /* FIXME: This test is broken as the unwinding calls dtor of `Writer`, which double panics.
+        #[cfg(debug_assertions)]
+        #[should_panic]
+        #[test]
+        fn debug_premature_free() {
+            let (writer, reader) = create();
+            writer.set(State::Free);
+            mem::forget(reader);
+            unsafe {
+                reader.destroy();
+            }
+        }
+    */
 }

@@ -164,4 +164,14 @@ mod tests {
             });
         }
     }
+
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    #[test]
+    fn debug_catch_infinite_blockage() {
+        let _ = Guard::new(|| {
+            local::export_garbage();
+            "blah"
+        });
+    }
 }

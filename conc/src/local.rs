@@ -15,6 +15,9 @@ thread_local! {
 /// This garbage is pushed to a thread-local queue. When enough garbage is accumulated in the
 /// thread, it is exported to the global state.
 pub fn add_garbage(garbage: Garbage) {
+    // Since this function can trigger a GC, it must not be called inside a guard constructor.
+    guard::debug_assert_no_create();
+
     debug_assert!(!garbage.ptr().is_null(), "Garbage is a null pointer. If this is intentional, \
         consider running the destructor directly instead.");
 
@@ -203,5 +206,29 @@ impl Drop for State {
         for hazard in self.available_hazards.drain(..) {
             hazard.kill();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use garbage;
+    use std::{mem, ptr};
+
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    #[test]
+    fn debug_free_blocked() {
+        let (writer, reader) = hazard::create();
+        mem::forget(reader);
+
+        free_hazard(writer);
+    }
+
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    #[test]
+    fn debug_add_null_garbage() {
+        add_garbage(unsafe { garbage::Garbage::new_box(ptr::null::<u8>()) });
     }
 }
