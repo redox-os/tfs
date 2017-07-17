@@ -95,12 +95,23 @@ impl Hazard {
     ///
     /// It will spin until the hazard is no longer in a blocked state.
     pub fn get(&self) -> State {
+        // In debug mode, we count the number of spins. In release mode, this should be trivially
+        // optimized out.
+        let mut spins = 0;
+
         // Spin until not blocked.
         loop {
             return match self.ptr.load(atomic::Ordering::Acquire) {
                 // -1 means that the hazard is blocked by another thread, and we must loop until it
                 // assumes another state.
-                -1 => continue,
+                -1 => {
+                    // Increment the number of spins.
+                    spins += 1;
+                    debug_assert!(spins < 100_000, "Hazard blocked for 100,000 rounds. Panicking \
+                    as chances are that it will never get unblocked.");
+
+                    continue;
+                },
                 -2 => State::Free,
                 -3 => State::Dead,
                 ptr => State::Protect(ptr as *const u8)
