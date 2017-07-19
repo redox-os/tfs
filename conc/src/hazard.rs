@@ -121,8 +121,8 @@ impl Hazard {
                 BLOCKED => {
                     // Increment the number of spins.
                     spins += 1;
-                    debug_assert!(spins < 100_000, "Hazard blocked for 100,000 rounds. Panicking \
-                    as chances are that it will never get unblocked.");
+                    debug_assert!(spins < 100_000_000, "Hazard blocked for 100 millions rounds. \
+                    Panicking as chances are that it will never get unblocked.");
 
                     continue;
                 },
