@@ -212,8 +212,31 @@ impl Drop for State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use garbage;
+    use garbage::Garbage;
+    use hazard;
     use std::{mem, ptr};
+
+    #[test]
+    fn dtor_runs() {
+        fn dtor(x: *const u8) {
+            unsafe {
+                *(x as *mut u8) = 1;
+            }
+        }
+
+        for _ in 0..1000 {
+            let b = Box::new(0);
+            let h = get_hazard();
+            h.set(hazard::State::Protect(&*b));
+            add_garbage(Garbage::new(&*b, dtor));
+            ::gc();
+            assert_eq!(*b, 0);
+            ::gc();
+            h.set(hazard::State::Free);
+            ::gc();
+            assert_eq!(*b, 1);
+        }
+    }
 
     #[cfg(debug_assertions)]
     #[should_panic]
@@ -229,6 +252,6 @@ mod tests {
     #[should_panic]
     #[test]
     fn debug_add_null_garbage() {
-        add_garbage(unsafe { garbage::Garbage::new_box(ptr::null::<u8>()) });
+        add_garbage(unsafe { Garbage::new_box(ptr::null::<u8>()) });
     }
 }
