@@ -7,6 +7,7 @@
 #![feature(i128_type)]
 
 #![no_std]
+#[forbid(unsafe_code)]
 
 /// The number of rounds.
 const ROUNDS: u64 = 32;
