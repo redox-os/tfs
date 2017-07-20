@@ -1,9 +1,13 @@
 //! Literal garbage.
 
+use std::mem;
+
 /// An object to be deleted eventually.
 ///
 /// Garbage refers to objects which are waiting to be destroyed, at some point after all references
 /// to them are gone.
+///
+/// Refer to `Garbage::destroy()` for details on destruction.
 ///
 /// See also: ideology.
 pub struct Garbage {
@@ -21,6 +25,8 @@ impl Garbage {
     /// This takes the pointer and destructor (which takes pointer as argument) and construct the
     /// corresponding garbage item.
     pub fn new(ptr: *const u8, dtor: fn(*const u8)) -> Garbage {
+        // TODO: Add assertion against null pointers.
+
         Garbage {
             ptr: ptr,
             dtor: dtor,
@@ -59,9 +65,35 @@ impl Garbage {
 
     /// Destroy the garbage.
     ///
-    /// This runs the destructor associated with the data.
+    /// This runs the destructor associated with the data. That is, it runs the destructor function
+    /// pointer with the provided data pointer as argument.
+    ///
+    /// # Panic
+    ///
+    /// This function should never unwind, even if the destructor does. In particular, any
+    /// unwinding causes a safe crash, equivalent to double-panicking (i.e. SIGILL). This ought to
+    /// avoid spurious unwinding through unrelated stacks and messing with the environment within
+    /// the system.
     pub fn destroy(self) {
+        // TODO: Let this unwind by fixing the bugs in `global`.
+
+        /// Stop any unwinding.
+        ///
+        /// This struct stops unwinding through it by double-panicking in its destructor, thus
+        /// safely SIGILL-ing the program. It is meant to avoid unwinding.
+        struct StopUnwind;
+
+        impl Drop for StopUnwind {
+            fn drop(&mut self) {
+                panic!("Panicking during unwinding to stop unwinding.");
+            }
+        }
+
+        let guard = StopUnwind;
+        // Run, but catch any panicks that the dtor might cause.
         unsafe { (self.dtor)(self.ptr); }
+        // Prevent the guard's destructor from running.
+        mem::forget(guard);
     }
 }
 

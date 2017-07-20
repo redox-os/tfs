@@ -178,6 +178,11 @@ pub fn gc() {
 /// reachable from any data structure: It should be impossible to create _new_ guard representing
 /// `ptr` from now on, as such thing can mean that new guards can be created after it is dropped
 /// causing use-after-free.
+///
+/// # Destruction
+///
+/// Under garbage collection of the garbage, the `Garbage::destroy()` method will be called. Refer
+/// to the respective API documentation for the behavior in details.
 pub fn add_garbage<T>(ptr: &'static T, dtor: fn(&'static T)) {
     local::add_garbage(unsafe {
         Garbage::new(ptr as *const T as *const u8 as *mut u8, mem::transmute(dtor))

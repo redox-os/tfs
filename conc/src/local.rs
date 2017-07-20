@@ -14,12 +14,12 @@ thread_local! {
 ///
 /// This garbage is pushed to a thread-local queue. When enough garbage is accumulated in the
 /// thread, it is exported to the global state.
+///
+/// Under garbage collection of the garbage, the `Garbage::destroy()` method will be called. Refer
+/// to the respective API documentation for the behavior in details.
 pub fn add_garbage(garbage: Garbage) {
     // Since this function can trigger a GC, it must not be called inside a guard constructor.
     guard::debug_assert_no_create();
-
-    debug_assert!(!garbage.ptr().is_null(), "Garbage is a null pointer. If this is intentional, \
-        consider running the destructor directly instead.");
 
     if STATE.state() == thread::LocalKeyState::Destroyed {
         // The state was deinitialized, so we must rely on the global state for queueing garbage.
@@ -246,12 +246,5 @@ mod tests {
         mem::forget(reader);
 
         free_hazard(writer);
-    }
-
-    #[cfg(debug_assertions)]
-    #[should_panic]
-    #[test]
-    fn debug_add_null_garbage() {
-        add_garbage(unsafe { Garbage::new_box(ptr::null::<u8>()) });
     }
 }
