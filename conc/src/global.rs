@@ -204,3 +204,32 @@ impl Drop for Garbo {
         self.gc();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use garbage::Garbage;
+    use hazard;
+
+    #[test]
+    fn dtor_runs() {
+        fn dtor(x: *const u8) {
+            unsafe {
+                *(x as *mut u8) = 1;
+            }
+        }
+
+        for _ in 0..1000 {
+            let b = Box::new(0);
+            let h = create_hazard();
+            h.set(hazard::State::Protect(&*b));
+            export_garbage(vec![Garbage::new(&*b, dtor)]);
+            while try_gc().is_err() {}
+            assert_eq!(*b, 0);
+            while try_gc().is_err() {}
+            h.set(hazard::State::Free);
+            while try_gc().is_err() {}
+            assert_eq!(*b, 1);
+        }
+    }
+}
