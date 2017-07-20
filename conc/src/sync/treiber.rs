@@ -29,6 +29,7 @@ impl<T> Drop for Treiber<T> {
                 // Call destructors on the stack.
                 (**ptr).destroy();
                 // Finally deallocate the pointer itself.
+                // TODO: Figure out if it is sound if this destructor panics.
                 drop(Box::from_raw(*ptr));
                 // Set it to null to prevent `Atomic`'s destructor from running.
                 *ptr = ptr::null_mut();
@@ -161,6 +162,15 @@ mod tests {
     impl Drop for Dropper {
         fn drop(&mut self) {
             self.d.fetch_add(1, atomic::Ordering::Relaxed);
+        }
+    }
+
+    #[test]
+    fn empty() {
+        for _ in 0..1000 {
+            let b = Box::new(20);
+            Treiber::<u8>::new();
+            assert_eq!(*b, 20);
         }
     }
 
@@ -358,5 +368,21 @@ mod tests {
         ::gc();
 
         assert_eq!(drops.load(atomic::Ordering::Relaxed), 200 + 16);
+    }
+
+    #[test]
+    #[should_panic]
+    fn panic_in_dtor() {
+        struct A;
+        impl Drop for A {
+            fn drop(&mut self) {
+                panic!();
+            }
+        }
+
+        let stack = Treiber::new();
+        stack.push(Box::new(A));
+        stack.push(Box::new(A));
+        stack.push(Box::new(A));
     }
 }
