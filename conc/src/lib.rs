@@ -82,8 +82,8 @@
 
 #[macro_use]
 extern crate lazy_static;
-extern crate parking_lot;
 extern crate rand;
+extern crate spin;
 
 mod atomic;
 mod garbage;

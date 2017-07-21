@@ -11,5 +11,5 @@ exclude = ["target", "Cargo.lock"]
 
 [dependencies]
 lazy_static = "0.2"
-parking_lot = "0.4"
 rand = "0.3"
+spin = "0.4"
