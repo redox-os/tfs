@@ -6,6 +6,9 @@
 
 #![feature(i128_type)]
 
+#![no_std]
+#![forbid(unsafe_code)]
+
 /// The number of rounds.
 const ROUNDS: u64 = 32;
 
@@ -62,7 +65,8 @@ pub fn encrypt_block(m: u128, k: u128) -> u128 {
 
 /// A precomputed key.
 ///
-/// This precomputes a key schedule, which can then be used for both encrypting and decrypting messages.
+/// This precomputes a key schedule, which can then be used for both encrypting and decrypting
+/// messages.
 pub struct Key {
     /// The computed schedule.
     ///
@@ -145,6 +149,12 @@ mod tests {
     #[test]
     fn test_vectors() {
         // These test vectors are taken from the SPECK paper.
-        assert_eq!(encrypt_block(0x6c617669757165207469206564616d20, 0x0f0e0d0c0b0a09080706050403020100), 0xa65d9851797832657860fedf5c570d18);
+        assert_eq!(
+            encrypt_block(
+                0x6c617669757165207469206564616d20,
+                0x0f0e0d0c0b0a09080706050403020100
+            ),
+            0xa65d9851797832657860fedf5c570d18
+        );
     }
 }
