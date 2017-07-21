@@ -212,9 +212,7 @@ mod tests {
     use super::*;
     use garbage::Garbage;
     use hazard;
-    use std::mem;
-
-    // TODO: Add cross thread test
+    use std::{mem, thread};
 
     #[test]
     fn dtor_runs() {
@@ -233,6 +231,55 @@ mod tests {
             assert_eq!(*b, 0);
             ::gc();
             h.set(hazard::State::Free);
+            ::gc();
+            assert_eq!(*b, 1);
+        }
+    }
+
+    #[test]
+    fn dtor_runs_cross_thread() {
+        fn dtor(x: *const u8) {
+            unsafe {
+                *(x as *mut u8) = 1;
+            }
+        }
+
+        for _ in 0..1000 {
+            let b = Box::new(0);
+            let bptr = &*b as *const _ as usize;
+            let h = thread::spawn(move || {
+                let h = get_hazard();
+                h.set(hazard::State::Protect(bptr as *const u8));
+                h
+            }).join().unwrap();
+            add_garbage(Garbage::new(&*b, dtor));
+            ::gc();
+            assert_eq!(*b, 0);
+            ::gc();
+            h.set(hazard::State::Free);
+            ::gc();
+            assert_eq!(*b, 1);
+        }
+    }
+
+    #[test]
+    fn kill_hazards() {
+        fn dtor(x: *const u8) {
+            unsafe {
+                *(x as *mut u8) = 1;
+            }
+        }
+
+        for _ in 0..1000 {
+            let b = thread::spawn(move || {
+                let b = Box::new(0);
+                let h = get_hazard();
+                h.set(hazard::State::Protect(&*b));
+                add_garbage(Garbage::new(&*b, dtor));
+                ::gc();
+                assert_eq!(*b, 0);
+                b
+            }).join().unwrap();
             ::gc();
             assert_eq!(*b, 1);
         }

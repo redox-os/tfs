@@ -262,9 +262,7 @@ impl Drop for Writer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::ptr;
-
-    // TODO: Add cross thread test
+    use std::{ptr, thread};
 
     #[test]
     fn set_get() {
@@ -301,6 +299,20 @@ mod tests {
 
         unsafe {
             reader.destroy();
+        }
+    }
+
+    #[test]
+    fn cross_thread() {
+        for _ in 0..64 {
+            let (writer, reader) = create();
+
+            thread::spawn(move || {
+                writer.set(State::Dead);
+            }).join().unwrap();
+
+            assert_eq!(reader.get(), State::Dead);
+            unsafe { reader.destroy(); }
         }
     }
 
