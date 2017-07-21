@@ -23,7 +23,7 @@ impl Garbage {
     /// This takes the pointer and destructor (which takes pointer as argument) and construct the
     /// corresponding garbage item.
     pub fn new(ptr: *const u8, dtor: fn(*const u8)) -> Garbage {
-        // TODO: Add assertion against null pointers.
+        debug_assert!(ptr as usize > 1, "Creating garbage with invalid pointer.");
 
         Garbage {
             ptr: ptr,
@@ -70,3 +70,38 @@ impl Drop for Garbage {
 
 // We must do this manually due to the raw pointer.
 unsafe impl Send for Garbage {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ptr;
+
+    fn nop(_: *const u8) {}
+
+    #[test]
+    fn ptr() {
+        let g = Garbage::new(0x2 as *const u8, nop);
+        assert_eq!(g.ptr() as usize, 2);
+    }
+
+    #[test]
+    fn new_box() {
+        for _ in 0..1000 {
+            unsafe { Garbage::new_box(Box::into_raw(Box::new(2))); }
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    #[test]
+    fn debug_invalid_pointer_1() {
+        Garbage::new(ptr::null(), nop);
+    }
+
+    #[cfg(debug_assertions)]
+    #[should_panic]
+    #[test]
+    fn debug_invalid_pointer_2() {
+        Garbage::new(0x1 as *const u8, nop);
+    }
+}

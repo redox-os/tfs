@@ -247,7 +247,7 @@ mod tests {
         let b = Box::new(0);
         let h = create_hazard();
         h.set(hazard::State::Protect(&*b));
-        export_garbage(vec![Garbage::new(&*b, dtor), Garbage::new(ptr::null(), panic)]);
+        export_garbage(vec![Garbage::new(&*b, dtor), Garbage::new(0x2 as *const u8, panic)]);
         let _ = panic::catch_unwind(|| {
             while try_gc().is_err() {}
         });
