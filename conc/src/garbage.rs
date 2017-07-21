@@ -1,13 +1,11 @@
 //! Literal garbage.
 
-use std::mem;
-
 /// An object to be deleted eventually.
 ///
 /// Garbage refers to objects which are waiting to be destroyed, at some point after all references
 /// to them are gone.
 ///
-/// Refer to `Garbage::destroy()` for details on destruction.
+/// When it's dropped, the destructor of the garbage runs.
 ///
 /// See also: ideology.
 pub struct Garbage {
@@ -62,38 +60,11 @@ impl Garbage {
     pub fn ptr(&self) -> *const u8 {
         self.ptr
     }
+}
 
-    /// Destroy the garbage.
-    ///
-    /// This runs the destructor associated with the data. That is, it runs the destructor function
-    /// pointer with the provided data pointer as argument.
-    ///
-    /// # Panic
-    ///
-    /// This function should never unwind, even if the destructor does. In particular, any
-    /// unwinding causes a safe crash, equivalent to double-panicking (i.e. SIGILL). This ought to
-    /// avoid spurious unwinding through unrelated stacks and messing with the environment within
-    /// the system.
-    pub fn destroy(self) {
-        // TODO: Let this unwind by fixing the bugs in `global`.
-
-        /// Stop any unwinding.
-        ///
-        /// This struct stops unwinding through it by double-panicking in its destructor, thus
-        /// safely SIGILL-ing the program. It is meant to avoid unwinding.
-        struct StopUnwind;
-
-        impl Drop for StopUnwind {
-            fn drop(&mut self) {
-                panic!("Panicking during unwinding to stop unwinding.");
-            }
-        }
-
-        let guard = StopUnwind;
-        // Run, but catch any panicks that the dtor might cause.
+impl Drop for Garbage {
+    fn drop(&mut self) {
         unsafe { (self.dtor)(self.ptr); }
-        // Prevent the guard's destructor from running.
-        mem::forget(guard);
     }
 }
 

@@ -14,9 +14,6 @@ thread_local! {
 ///
 /// This garbage is pushed to a thread-local queue. When enough garbage is accumulated in the
 /// thread, it is exported to the global state.
-///
-/// Under garbage collection of the garbage, the `Garbage::destroy()` method will be called. Refer
-/// to the respective API documentation for the behavior in details.
 pub fn add_garbage(garbage: Garbage) {
     // Since this function can trigger a GC, it must not be called inside a guard constructor.
     guard::debug_assert_no_create();
@@ -196,16 +193,17 @@ impl State {
 
 impl Drop for State {
     fn drop(&mut self) {
-        // The thread is exiting, thus we must export the garbage to the global state to avoid
-        // memory leaks. It is very important that this does indeed not tick, as causing garbage
-        // collection means accessing RNG state, a TLS variable, which cannot be done when, we are
-        // here, after it has deinitialized.
-        self.export_garbage();
-
         // Clear every hazard to "dead" state.
         for hazard in self.available_hazards.drain(..) {
             hazard.kill();
         }
+
+        // The thread is exiting, thus we must export the garbage to the global state to avoid
+        // memory leaks. It is very important that this does indeed not tick, as causing garbage
+        // collection means accessing RNG state, a TLS variable, which cannot be done when, we are
+        // here, after it has deinitialized.
+        // TODO: Figure out a way we can tick anyway.
+        self.export_garbage();
     }
 }
 
@@ -214,7 +212,9 @@ mod tests {
     use super::*;
     use garbage::Garbage;
     use hazard;
-    use std::{mem, ptr};
+    use std::mem;
+
+    // TODO: Add cross thread test
 
     #[test]
     fn dtor_runs() {

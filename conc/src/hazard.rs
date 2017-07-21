@@ -188,9 +188,13 @@ impl Reader {
     }
 }
 
+/// Panic when it is dropped outside `Reader::destroy()`.
+///
+/// This ought to catch e.g. unwinding.
 impl Drop for Reader {
     fn drop(&mut self) {
-        panic!("Hazard readers ought to be destroyed manually through the `destroy` method.");
+        panic!("Hazard readers ought to be destroyed manually through the `Reader::destroy()` \
+        method.");
     }
 }
 
@@ -259,6 +263,8 @@ impl Drop for Writer {
 mod tests {
     use super::*;
     use std::ptr;
+
+    // TODO: Add cross thread test
 
     #[test]
     fn set_get() {

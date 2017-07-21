@@ -125,6 +125,10 @@ use garbage::Garbage;
 ///
 /// This cannot collect un-propagated garbage accumulated locally in other threads. This will only
 /// attempt to collect the accumulated local and global (propagated) garbage.
+///
+/// # Panic
+///
+/// If a destructor panics during the garbage collection, theis function will panic aswell.
 pub fn try_gc() -> Result<(), ()> {
     // Export the local garbage to ensure that the garbage of the current thread gets collected.
     local::export_garbage();
@@ -155,6 +159,10 @@ pub fn try_gc() -> Result<(), ()> {
 ///
 /// This cannot collect un-propagated garbage accumulated locally in other threads. This will only
 /// collect the accumulated local and global (propagated) garbage.
+///
+/// # Panic
+///
+/// If a destructor panics during the garbage collection, theis function will panic aswell.
 pub fn gc() {
     // Export the local garbage to ensure that the garbage of the current thread gets collected.
     local::export_garbage();
@@ -181,8 +189,8 @@ pub fn gc() {
 ///
 /// # Destruction
 ///
-/// Under garbage collection of the garbage, the `Garbage::destroy()` method will be called. Refer
-/// to the respective API documentation for the behavior in details.
+/// If the destructor provided panics under execution, it will cause panic in the garbage
+/// collection, and the destructor won't run again.
 pub fn add_garbage<T>(ptr: &'static T, dtor: fn(&'static T)) {
     local::add_garbage(unsafe {
         Garbage::new(ptr as *const T as *const u8 as *mut u8, mem::transmute(dtor))

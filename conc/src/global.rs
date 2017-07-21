@@ -1,6 +1,6 @@
 //! The global state.
 
-use std::sync::Mutex; // TODO: Use custom option-like thing.
+use parking_lot::Mutex;
 use std::collections::HashSet;
 use std::mem;
 use {rand, hazard, mpsc};
@@ -39,6 +39,10 @@ pub fn export_garbage(garbage: Vec<Garbage>) {
 ///
 /// If another garbage collection is currently running, the thread will do nothing, and `Err(())`
 /// will be returned. Otherwise, it returns `Ok(())`.
+///
+/// # Panic
+///
+/// If a destructor panics, this will panic as well.
 pub fn try_gc() -> Result<(), ()> {
     STATE.try_gc()
 }
@@ -109,7 +113,7 @@ impl State {
     /// currently active in the hazards.
     fn try_gc(&self) -> Result<(), ()> {
         // Lock the "garbo" (the part of the state needed to GC).
-        if let Ok(mut garbo) = self.garbo.try_lock() {
+        if let Some(mut garbo) = self.garbo.try_lock() {
             // Handle all the messages sent.
             garbo.handle_all();
             // Collect the garbage.
@@ -159,6 +163,10 @@ impl Garbo {
     }
 
     /// Garbage collect all unused garbage.
+    ///
+    /// # Panic
+    ///
+    /// If a destructor panics, this will panic as well.
     fn gc(&mut self) {
         // Create the set which will keep the _active_ hazards.
         let mut active = HashSet::with_capacity(self.hazards.len());
@@ -183,18 +191,8 @@ impl Garbo {
             }
         }
 
-        // Take the garbage and scan it for unused garbage.
-        for garbage in mem::replace(&mut self.garbage, Vec::new()) {
-            if active.contains(&garbage.ptr()) {
-                // If the garbage is in the set of active pointers, it will be put back to the
-                // garbage list.
-                self.garbage.push(garbage);
-            } else {
-                // The garbage is unused and not referenced by any hazard, hence we can safely
-                // destroy it.
-                garbage.destroy();
-            }
-        }
+        // Scan the garbage for unused objects.
+        self.garbage.retain(|garbage| active.contains(&garbage.ptr()))
     }
 }
 
@@ -210,6 +208,7 @@ mod tests {
     use super::*;
     use garbage::Garbage;
     use hazard;
+    use std::{panic, ptr};
 
     #[test]
     fn dtor_runs() {
@@ -231,5 +230,41 @@ mod tests {
             while try_gc().is_err() {}
             assert_eq!(*b, 1);
         }
+    }
+
+    #[test]
+    fn panic_invalidate_state() {
+        fn panic(_: *const u8) {
+            panic!();
+        }
+
+        fn dtor(x: *const u8) {
+            unsafe {
+                *(x as *mut u8) = 1;
+            }
+        }
+
+        let b = Box::new(0);
+        let h = create_hazard();
+        h.set(hazard::State::Protect(&*b));
+        export_garbage(vec![Garbage::new(&*b, dtor), Garbage::new(ptr::null(), panic)]);
+        let _ = panic::catch_unwind(|| {
+            while try_gc().is_err() {}
+        });
+        assert_eq!(*b, 0);
+        h.set(hazard::State::Free);
+        while try_gc().is_err() {}
+        assert_eq!(*b, 1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn panic_in_dtor() {
+        fn dtor(_: *const u8) {
+            panic!();
+        }
+
+        export_garbage(vec![Garbage::new(ptr::null(), dtor)]);
+        while try_gc().is_err() {}
     }
 }
