@@ -77,7 +77,7 @@
 //! instruction, this means that if you are traversing a list or something like that, this library
 //! might not be for you.
 
-#![feature(thread_local_state, range_contains)]
+#![feature(thread_local_state)]
 #![deny(missing_docs)]
 
 #[macro_use]

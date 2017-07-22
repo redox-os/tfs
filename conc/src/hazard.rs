@@ -13,21 +13,17 @@
 //! The asymmetry of a hazard pair is strictly speaking not necessary, but it allows to enforce
 //! rules (e.g. only the reader/global part may deallocate the hazard box).
 
-use std::sync::atomic::{self, AtomicIsize};
+use std::sync::atomic::{self, AtomicPtr};
 use std::{ops, mem, thread};
 
 use local;
 
-/// The integer representing blocked state.
-const BLOCKED: isize = -1;
-/// The integer representing free state.
-const FREE: isize = -2;
-/// The integer representing dead state.
-const DEAD: isize = -3;
-/// The first invalid/trap value.
-const TRAP_START: isize = DEAD;
-/// The last (exclusive) invalid/trap value.
-const TRAP_END: isize = 0;
+/// Pointers to this represents the blocked state.
+static BLOCKED: u8 = 0;
+/// Pointers to this represents the free state.
+static FREE: u8 = 0;
+/// Pointers to this represents the dead state.
+static DEAD: u8 = 0;
 
 /// The state of a hazard.
 ///
@@ -60,29 +56,28 @@ pub enum State {
 /// is being read (avoiding the ABA problem).
 #[derive(Debug)]
 pub struct Hazard {
-    /// The inner atomic value.
+    /// The object it protects.
     ///
-    /// `BLOCKED`, `FREE`, and `DEAD` defines what state it is in. If none of these, it is
-    /// protecting the pointer represented by the `isize`.
-    ptr: AtomicIsize,
+    /// If this is a pointer to `BLOCKED`, `FREE`, `DEAD`, it represents the respectiive state.
+    ptr: AtomicPtr<u8>,
 }
 
 impl Hazard {
     /// Create a new hazard in blocked state.
     pub fn blocked() -> Hazard {
         Hazard {
-            ptr: AtomicIsize::new(BLOCKED),
+            ptr: AtomicPtr::new(&BLOCKED as *const u8 as *mut u8),
         }
     }
 
     /// Block the hazard.
     pub fn block(&self) {
-        self.ptr.store(BLOCKED, atomic::Ordering::Release);
+        self.ptr.store(&BLOCKED as *const u8 as *mut u8, atomic::Ordering::Release);
     }
 
     /// Is the hazard blocked?
     pub fn is_blocked(&self) -> bool {
-        self.ptr.load(atomic::Ordering::Acquire) == BLOCKED
+        self.ptr.load(atomic::Ordering::Acquire) as *const u8 == &BLOCKED
     }
 
     /// Set the hazard to a new state.
@@ -92,16 +87,10 @@ impl Hazard {
     pub fn set(&self, new: State) {
         // Simply encode and store.
         self.ptr.store(match new {
-            State::Free => FREE,
-            State::Dead => DEAD,
-            State::Protect(ptr) => {
-                debug_assert!(!(TRAP_START..TRAP_END).contains(ptr as isize), "Protecting an \
-                invalid pointer, colliding with a trap value of the hazard. This likely happens \
-                because you have stored or corrupted the pointer in a container. Ensure that you \
-                only store valid values in hazards.");
-                ptr as isize
-            }
-        }, atomic::Ordering::Release);
+            State::Free => &FREE,
+            State::Dead => &DEAD,
+            State::Protect(ptr) => ptr,
+        } as *mut u8, atomic::Ordering::Release);
     }
 
     /// Get the state of the hazard.
@@ -115,21 +104,26 @@ impl Hazard {
 
         // Spin until not blocked.
         loop {
-            return match self.ptr.load(atomic::Ordering::Acquire) {
-                // Blocked means that the hazard is blocked by another thread, and we must loop
-                // until it assumes another state.
-                BLOCKED => {
-                    // Increment the number of spins.
-                    spins += 1;
-                    debug_assert!(spins < 100_000_000, "Hazard blocked for 100 millions rounds. \
-                    Panicking as chances are that it will never get unblocked.");
+            let ptr = self.ptr.load(atomic::Ordering::Acquire) as *const u8;
 
-                    continue;
-                },
-                FREE => State::Free,
-                DEAD => State::Dead,
-                ptr => State::Protect(ptr as *const u8)
-            };
+            // Blocked means that the hazard is blocked by another thread, and we must loop until
+            // it assumes another state.
+            if ptr == &BLOCKED {
+                // Increment the number of spins.
+                spins += 1;
+                debug_assert!(spins < 100_000_000, "\
+                    Hazard blocked for 100 millions rounds. Panicking as chances are that it will \
+                    never get unblocked.\
+                ");
+
+                continue;
+            } else if ptr == &FREE {
+                return State::Free;
+            } else if ptr == &DEAD {
+                return State::Dead;
+            } else {
+                return State::Protect(ptr);
+            }
         }
     }
 }
@@ -325,30 +319,6 @@ mod tests {
                 reader.destroy();
             }
         }
-    }
-
-    #[cfg(debug_assertions)]
-    #[should_panic]
-    #[test]
-    fn debug_protect_trap_1() {
-        let h = Hazard::blocked();
-        h.set(State::Protect(BLOCKED as *const u8));
-    }
-
-    #[cfg(debug_assertions)]
-    #[should_panic]
-    #[test]
-    fn debug_protect_trap_2() {
-        let h = Hazard::blocked();
-        h.set(State::Protect(FREE as *const u8));
-    }
-
-    #[cfg(debug_assertions)]
-    #[should_panic]
-    #[test]
-    fn debug_protect_trap_3() {
-        let h = Hazard::blocked();
-        h.set(State::Protect(DEAD as *const u8));
     }
 
     #[cfg(debug_assertions)]
