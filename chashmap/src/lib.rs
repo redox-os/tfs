@@ -430,17 +430,19 @@ impl<K: Clone, V: Clone> Clone for Table<K, V> {
 
 impl<K: fmt::Debug, V: fmt::Debug> fmt::Debug for Table<K, V> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // create a debug map and fill with entries
+        let mut map = f.debug_map();
         // We'll just run over all buckets and output one after one.
         for i in &self.buckets {
             // Acquire the lock.
             let lock = i.read();
             // Check if the bucket actually contains anything.
             if let Bucket::Contains(ref key, ref val) = *lock {
-                // Write it to the output stream in a nice format.
-                write!(f, "{:?} => {:?}; ", key, val)?;
+                // add this entry to the map
+                map.entry(key, val);
             }
         }
-        Ok(())
+        map.finish()
     }
 }
 
@@ -969,7 +971,7 @@ impl<K: Clone, V: Clone> Clone for CHashMap<K, V> {
 
 impl<K: fmt::Debug, V: fmt::Debug> fmt::Debug for CHashMap<K, V> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", *self.table.read())
+        (*self.table.read()).fmt(f)
     }
 }
 
