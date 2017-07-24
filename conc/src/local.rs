@@ -212,7 +212,7 @@ mod tests {
     use super::*;
     use garbage::Garbage;
     use hazard;
-    use std::{mem, thread};
+    use std::thread;
 
     #[test]
     fn dtor_runs() {
@@ -289,6 +289,8 @@ mod tests {
     #[should_panic]
     #[test]
     fn debug_free_blocked() {
+        use std::mem;
+
         let (writer, reader) = hazard::create();
         mem::forget(reader);
 

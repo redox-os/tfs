@@ -2,9 +2,10 @@
 
 use std::ops;
 use std::sync::atomic;
-use std::cell::Cell;
 use {hazard, local};
 
+#[cfg(debug_assertions)]
+use std::cell::Cell;
 #[cfg(debug_assertions)]
 thread_local! {
     /// Number of guards the current thread is creating.
