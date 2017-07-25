@@ -2,7 +2,7 @@
 
 use spin::Mutex;
 use std::collections::HashSet;
-use std::mem;
+use std::{mem, panic};
 use {rand, hazard, mpsc};
 use garbage::Garbage;
 
@@ -18,12 +18,7 @@ lazy_static! {
 /// This creates a new hazard and registers it in the global state. It's secondary, writer part is
 /// returned.
 pub fn create_hazard() -> hazard::Writer {
-    // Create the hazard.
-    let (writer, reader) = hazard::create();
-    // Communicate the new hazard to the global state through the channel.
-    STATE.chan.send(Message::NewHazard(reader));
-    // Return the other half of the hazard.
-    writer
+    STATE.create_hazard()
 }
 
 /// Export garbage into the global state.
@@ -31,8 +26,7 @@ pub fn create_hazard() -> hazard::Writer {
 /// This adds the garbage, which will eventually be destroyed, to the global state. Note that this
 /// does not tick, and thus cannot cause garbage collection.
 pub fn export_garbage(garbage: Vec<Garbage>) {
-    // Send the garbage to the message-passing channel of the state.
-    STATE.chan.send(Message::Garbage(garbage));
+    STATE.export_garbage(garbage)
 }
 
 /// Attempt to garbage collect.
@@ -103,6 +97,27 @@ impl State {
         }
     }
 
+    /// Create a new hazard.
+    ///
+    /// This creates a new hazard and registers it in the global state. It's secondary, writer part
+    /// is returned.
+    fn create_hazard(&self) -> hazard::Writer {
+        // Create the hazard.
+        let (writer, reader) = hazard::create();
+        // Communicate the new hazard to the global state through the channel.
+        self.chan.send(Message::NewHazard(reader));
+        // Return the other half of the hazard.
+        writer
+    }
+
+    /// Export garbage into the global state.
+    ///
+    /// This adds the garbage, which will eventually be destroyed, to the global state.
+    fn export_garbage(&self, garbage: Vec<Garbage>) {
+        // Send the garbage to the message-passing channel of the state.
+        self.chan.send(Message::Garbage(garbage));
+    }
+
     /// Try to collect the garbage.
     ///
     /// This will handle all of the messages in the channel and then attempt at collect the
@@ -114,8 +129,6 @@ impl State {
     fn try_gc(&self) -> Result<(), ()> {
         // Lock the "garbo" (the part of the state needed to GC).
         if let Some(mut garbo) = self.garbo.try_lock() {
-            // Handle all the messages sent.
-            garbo.handle_all();
             // Collect the garbage.
             garbo.gc();
 
@@ -126,6 +139,8 @@ impl State {
         }
     }
 }
+
+impl panic::RefUnwindSafe for State {}
 
 /// The garbo part of the state.
 ///
@@ -154,20 +169,17 @@ impl Garbo {
         }
     }
 
-    /// Receive and handle all the messages.
-    fn handle_all(&mut self) {
-        // Go over every message.
-        for msg in self.chan.recv_all() {
-            self.handle(msg);
-        }
-    }
-
-    /// Garbage collect all unused garbage.
+    /// Handle all the messages and garbage collect all unused garbage.
     ///
     /// # Panic
     ///
     /// If a destructor panics, this will panic as well.
     fn gc(&mut self) {
+        // Handle all the messages sent.
+        for msg in self.chan.recv_all() {
+            self.handle(msg);
+        }
+
         // Create the set which will keep the _active_ hazards.
         let mut active = HashSet::with_capacity(self.hazards.len());
 
@@ -218,18 +230,29 @@ mod tests {
             }
         }
 
+        let s = State::new();
         for _ in 0..1000 {
             let b = Box::new(0);
-            let h = create_hazard();
+            let h = s.create_hazard();
             h.set(hazard::State::Protect(&*b));
-            export_garbage(vec![Garbage::new(&*b, dtor)]);
-            while try_gc().is_err() {}
+            s.export_garbage(vec![Garbage::new(&*b, dtor)]);
+            while s.try_gc().is_err() {}
             assert_eq!(*b, 0);
-            while try_gc().is_err() {}
+            while s.try_gc().is_err() {}
             h.set(hazard::State::Free);
-            while try_gc().is_err() {}
+            while s.try_gc().is_err() {}
             assert_eq!(*b, 1);
+            h.kill();
         }
+    }
+
+    #[test]
+    fn clean_up_state() {
+        fn dtor(_: *const u8) {}
+
+        let s = State::new();
+        let b = Box::new(0);
+        s.export_garbage(vec![Garbage::new(&*b, dtor)]);
     }
 
     #[test]
@@ -244,16 +267,17 @@ mod tests {
             }
         }
 
+        let s = State::new();
         let b = Box::new(0);
         let h = create_hazard();
         h.set(hazard::State::Protect(&*b));
-        export_garbage(vec![Garbage::new(&*b, dtor), Garbage::new(0x2 as *const u8, panic)]);
+        s.export_garbage(vec![Garbage::new(&*b, dtor), Garbage::new(0x2 as *const u8, panic)]);
         let _ = panic::catch_unwind(|| {
-            while try_gc().is_err() {}
+            while s.try_gc().is_err() {}
         });
         assert_eq!(*b, 0);
         h.set(hazard::State::Free);
-        while try_gc().is_err() {}
+        while s.try_gc().is_err() {}
         assert_eq!(*b, 1);
     }
 
@@ -264,7 +288,18 @@ mod tests {
             panic!();
         }
 
-        export_garbage(vec![Garbage::new(ptr::null(), dtor)]);
-        while try_gc().is_err() {}
+        let s = State::new();
+        s.export_garbage(vec![Garbage::new(ptr::null(), dtor)]);
+        while s.try_gc().is_err() {}
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic]
+    fn debug_more_hazards() {
+        let s = State::new();
+        let h = s.create_hazard();
+        h.set(hazard::State::Free);
+        mem::forget(h);
     }
 }

@@ -286,8 +286,8 @@ mod tests {
     }
 
     #[cfg(debug_assertions)]
-    #[should_panic]
     #[test]
+    #[should_panic]
     fn debug_free_blocked() {
         use std::mem;
 

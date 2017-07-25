@@ -92,15 +92,15 @@ mod tests {
     }
 
     #[cfg(debug_assertions)]
-    #[should_panic]
     #[test]
+    #[should_panic]
     fn debug_invalid_pointer_1() {
         Garbage::new(ptr::null(), nop);
     }
 
     #[cfg(debug_assertions)]
-    #[should_panic]
     #[test]
+    #[should_panic]
     fn debug_invalid_pointer_2() {
         Garbage::new(0x1 as *const u8, nop);
     }

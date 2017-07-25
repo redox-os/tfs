@@ -187,8 +187,9 @@ impl Reader {
 /// This ought to catch e.g. unwinding.
 impl Drop for Reader {
     fn drop(&mut self) {
-        panic!("Hazard readers ought to be destroyed manually through the `Reader::destroy()` \
-        method.");
+        panic!("\
+            Hazard readers ought to be destroyed manually through the `Reader::destroy()` method.\
+        ");
     }
 }
 
@@ -322,8 +323,8 @@ mod tests {
     }
 
     #[cfg(debug_assertions)]
-    #[should_panic]
     #[test]
+    #[should_panic]
     fn debug_infinite_blockage() {
         let h = Hazard::blocked();
         let _ = h.get();
@@ -331,8 +332,8 @@ mod tests {
 
     /* FIXME: This test is broken as the unwinding calls dtor of `Writer`, which double panics.
         #[cfg(debug_assertions)]
-        #[should_panic]
         #[test]
+        #[should_panic]
         fn debug_premature_free() {
             let (writer, reader) = create();
             writer.set(State::Free);
