@@ -143,7 +143,7 @@ impl State {
         ///
         /// With "cleaning up" we mean setting the state of the hazards to "free" in order to allow
         /// garbage collection of the object it is currently protecting.
-        const MAX_NON_FREE_HAZARDS: usize = 128;
+        const MAX_NON_FREE_HAZARDS: usize = 16;
 
         // Push the given hazard to the cache.
         self.available_hazards.push(hazard);
