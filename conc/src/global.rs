@@ -248,11 +248,21 @@ mod tests {
 
     #[test]
     fn clean_up_state() {
-        fn dtor(_: *const u8) {}
+        fn dtor(x: *const u8) {
+            unsafe {
+                *(x as *mut u8) = 1;
+            }
+        }
 
-        let s = State::new();
-        let b = Box::new(0);
-        s.export_garbage(vec![Garbage::new(&*b, dtor)]);
+        for _ in 0..1000 {
+            let b = Box::new(0);
+            {
+                let s = State::new();
+                s.export_garbage(vec![Garbage::new(&*b, dtor)]);
+            }
+
+            assert_eq!(*b, 1);
+        }
     }
 
     #[test]
