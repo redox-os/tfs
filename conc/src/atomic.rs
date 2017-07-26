@@ -331,7 +331,7 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::{thread, ptr};
 
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     struct Dropper {
         d: Arc<AtomicUsize>,
     }
@@ -421,12 +421,7 @@ mod tests {
 
         assert!(opt.load(atomic::Ordering::Relaxed).is_none());
 
-        // To check that GC doesn't segfault or something.
-        let _ = ::try_gc();
-        let _ = ::try_gc();
-        let _ = ::try_gc();
-        let _ = ::try_gc();
-        let _ = ::try_gc();
+        while ::try_gc().is_err() {}
     }
 
     #[test]
@@ -455,12 +450,7 @@ mod tests {
 
             assert!(opt.load(atomic::Ordering::Relaxed).is_none());
 
-            // To check that GC doesn't segfault or something.
-            let _ = ::try_gc();
-            let _ = ::try_gc();
-            let _ = ::try_gc();
-            let _ = ::try_gc();
-            let _ = ::try_gc();
+            while ::try_gc().is_err() {}
         }
     }
 
@@ -554,6 +544,59 @@ mod tests {
 
     #[test]
     fn drop3() {
+        let drops = Arc::new(AtomicUsize::default());
+
+        let d = Dropper {
+            d: drops.clone(),
+        };
+
+        for _ in 0..16 {
+            let atomic = Atomic::new(Some(Box::new(d.clone())));
+            atomic.store(Some(Box::new(d.clone())), atomic::Ordering::Relaxed);
+            let b = Box::new(d.clone());
+            let bptr = &*b as *const Dropper;
+            atomic.swap(Some(b), atomic::Ordering::Relaxed);
+            atomic.compare_and_swap(
+                Some(bptr),
+                Some(Box::new(d.clone())),
+                atomic::Ordering::Relaxed
+            ).unwrap();
+            for _ in 0..10 {
+                atomic.compare_and_swap(
+                    Some(bptr),
+                    None,
+                    atomic::Ordering::Relaxed
+                ).unwrap_err();
+                unsafe {
+                    atomic.compare_and_swap_raw(
+                        bptr,
+                        ptr::null_mut(),
+                        atomic::Ordering::Relaxed
+                    ).unwrap_err();
+                }
+            }
+            let b = Box::new(d.clone());
+            let bptr = &*b as *const Dropper;
+            atomic.swap(Some(b), atomic::Ordering::Relaxed);
+            unsafe {
+                atomic.compare_and_swap_raw(
+                    bptr,
+                    Box::into_raw(Box::new(d.clone())),
+                    atomic::Ordering::Relaxed
+                ).unwrap();
+            }
+
+            atomic.store(None, atomic::Ordering::Relaxed);
+        }
+
+        drop(d);
+        while ::try_gc().is_err() {}
+
+        assert_eq!(drops.load(atomic::Ordering::Relaxed), 16 * 6);
+    }
+
+    #[test]
+    fn drop4() {
         for i in 0..256 {
             let opt = Arc::new(Atomic::new(Some(Box::new(i))));
             let g = opt.load(atomic::Ordering::Relaxed);
