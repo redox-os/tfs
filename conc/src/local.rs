@@ -145,6 +145,9 @@ impl State {
         /// garbage collection of the object it is currently protecting.
         const MAX_NON_FREE_HAZARDS: usize = 16;
 
+        // FIXME: This can lead to some subtle bugs, since the dtor is unpredictable as there is no
+        //        way of predicting when the hazard is cleared.
+
         // Push the given hazard to the cache.
         self.available_hazards.push(hazard);
 
@@ -260,6 +263,24 @@ mod tests {
             ::gc();
             assert_eq!(*b, 1);
         }
+    }
+
+    #[test]
+    fn clear_hazards() {
+        let mut s = State::default();
+        let mut v = Vec::new();
+        for _ in 0..100 {
+            let (w, r) = hazard::create();
+            w.set(hazard::State::Protect(0x1 as *const u8));
+            v.push(r);
+            s.free_hazard(w);
+        }
+
+        for i in &v[0..16] {
+            assert_eq!(i.get(), hazard::State::Free);
+        }
+
+        mem::forget(v);
     }
 
     #[test]
