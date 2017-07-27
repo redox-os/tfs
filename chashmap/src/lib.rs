@@ -232,7 +232,7 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
 
         // Start at the first priority bucket, and then move upwards, searching for the matching
         // bucket.
-        for i in 0.. {
+        for i in 0..self.buckets.len() {
             // Get the lock of the `i`'th bucket after the first priority bucket (wrap on end).
             let lock = self.buckets[(hash + i) % self.buckets.len()].read();
 
@@ -242,9 +242,7 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
                 return lock;
             }
         }
-
-        // TODO
-        unreachable!();
+	panic!("scan failed! no entry found");
     }
 
     /// Scan from the first priority of a key until a match is found (mutable guard).
