@@ -219,7 +219,6 @@ impl Drop for Garbo {
 mod tests {
     use super::*;
     use garbage::Garbage;
-    use hazard;
     use std::{panic, ptr};
 
     #[test]
@@ -234,12 +233,12 @@ mod tests {
         for _ in 0..1000 {
             let b = Box::new(0);
             let h = s.create_hazard();
-            h.set(hazard::State::Protect(&*b));
+            h.protect(&*b);
             s.export_garbage(vec![Garbage::new(&*b, dtor)]);
             while s.try_gc().is_err() {}
             assert_eq!(*b, 0);
             while s.try_gc().is_err() {}
-            h.set(hazard::State::Free);
+            h.free();
             while s.try_gc().is_err() {}
             assert_eq!(*b, 1);
             h.kill();
@@ -280,13 +279,13 @@ mod tests {
         let s = State::new();
         let b = Box::new(0);
         let h = create_hazard();
-        h.set(hazard::State::Protect(&*b));
+        h.protect(&*b);
         s.export_garbage(vec![Garbage::new(&*b, dtor), Garbage::new(0x2 as *const u8, panic)]);
         let _ = panic::catch_unwind(|| {
             while s.try_gc().is_err() {}
         });
         assert_eq!(*b, 0);
-        h.set(hazard::State::Free);
+        h.free();
         while s.try_gc().is_err() {}
         assert_eq!(*b, 1);
     }
@@ -309,7 +308,7 @@ mod tests {
     fn debug_more_hazards() {
         let s = State::new();
         let h = s.create_hazard();
-        h.set(hazard::State::Free);
+        h.free();
         mem::forget(h);
     }
 }

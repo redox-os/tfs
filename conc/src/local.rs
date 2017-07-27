@@ -59,12 +59,14 @@ pub fn get_hazard() -> hazard::Writer {
 ///
 /// # Panics
 ///
-/// This might panic in debug mode if the hazard given is in blocked state.
+/// This might panic in debug mode if the hazard given is in blocked state, as such thing can cause
+/// infinite garbage collection cycle, or if the hazard is in dead state, as that means that it may
+/// not be reusable (it could be destroyed).
 pub fn free_hazard(hazard: hazard::Writer) {
     // Since this function can trigger a GC, it must not be called inside a guard constructor.
     guard::debug_assert_no_create();
 
-    debug_assert!(!hazard.is_blocked(), "Freeing a blocked hazards. See docs.");
+    debug_assert!(!hazard.is_blocked(), "Illegally freeing a blocked hazards.");
 
     if STATE.state() == thread::LocalKeyState::Destroyed {
         // Since the state was deinitialized, we cannot store it for later reuse, so we are forced
@@ -155,7 +157,7 @@ impl State {
         if self.non_free_hazards() > MAX_NON_FREE_HAZARDS {
             // We did; we must now set the non-free hazards to "free".
             for i in &self.available_hazards[self.available_hazards_free_before..] {
-                i.set(hazard::State::Free);
+                i.free();
             }
 
             // Update the counter such that we mark the new hazards set to "free".
@@ -228,12 +230,12 @@ mod tests {
         for _ in 0..1000 {
             let b = Box::new(0);
             let h = get_hazard();
-            h.set(hazard::State::Protect(&*b));
+            h.protect(&*b);
             add_garbage(Garbage::new(&*b, dtor));
             ::gc();
             assert_eq!(*b, 0);
             ::gc();
-            h.set(hazard::State::Free);
+            h.free();
             ::gc();
             assert_eq!(*b, 1);
         }
@@ -252,14 +254,14 @@ mod tests {
             let bptr = &*b as *const _ as usize;
             let h = thread::spawn(move || {
                 let h = get_hazard();
-                h.set(hazard::State::Protect(bptr as *const u8));
+                h.protect(bptr as *const u8);
                 h
             }).join().unwrap();
             add_garbage(Garbage::new(&*b, dtor));
             ::gc();
             assert_eq!(*b, 0);
             ::gc();
-            h.set(hazard::State::Free);
+            h.free();
             ::gc();
             assert_eq!(*b, 1);
         }
@@ -271,7 +273,7 @@ mod tests {
         let mut v = Vec::new();
         for _ in 0..100 {
             let (w, r) = hazard::create();
-            w.set(hazard::State::Protect(0x1 as *const u8));
+            w.protect(0x1 as *const u8);
             v.push(r);
             s.free_hazard(w);
         }
@@ -295,7 +297,7 @@ mod tests {
             let b = thread::spawn(move || {
                 let b = Box::new(0);
                 let h = get_hazard();
-                h.set(hazard::State::Protect(&*b));
+                h.protect(&*b);
                 add_garbage(Garbage::new(&*b, dtor));
                 ::gc();
                 assert_eq!(*b, 0);

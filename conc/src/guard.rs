@@ -78,7 +78,7 @@ impl<T: ?Sized> Guard<T> {
             Ok(ptr) => {
                 // Now that we have the pointer, we can protect it by the hazard, unblocking a pending
                 // garbage collection if it exists.
-                hazard.set(hazard::State::Protect(ptr as *const T as *const u8));
+                hazard.protect(ptr as *const T as *const u8);
 
                 Ok(Guard {
                     hazard: hazard,
@@ -87,7 +87,7 @@ impl<T: ?Sized> Guard<T> {
             },
             Err(err) => {
                 // Set the hazard to free to ensure that the hazard doesn't remain blocking.
-                hazard.set(hazard::State::Free);
+                hazard.free();
 
                 Err(err)
             }

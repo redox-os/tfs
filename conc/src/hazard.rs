@@ -14,7 +14,7 @@
 //! rules (e.g. only the reader/global part may deallocate the hazard box).
 
 use std::sync::atomic::{self, AtomicPtr};
-use std::{ops, mem, thread};
+use std::{mem, thread};
 
 use local;
 
@@ -35,6 +35,10 @@ pub enum State {
     /// The hazard does not currently protect any object.
     Free,
     /// The hazard is dead and may be deallocated when necessary.
+    ///
+    /// When a hazard has enetered this state, it shouldn't be used further. For example, you
+    /// shouldn't change the state or alike, as that is not necessarily defined behavior as it can
+    /// have been deallocated.
     Dead,
     /// The hazard is protecting an object.
     ///
@@ -46,53 +50,43 @@ pub enum State {
     Protect(*const u8),
 }
 
-/// A hazard.
+/// Create a new hazard reader-writer pair.
 ///
-/// This type holds an atomic pointer with the state of the hazard. It represents the same as
-/// `State` but is encoded such that it is atomically accessible.
+/// This creates a new hazard pair in blocked state.
+///
+/// Both ends of the hazards holds a shared reference to the state of the hazard. It represents the
+/// same as `State` but is encoded such that it is atomically accessible.
 ///
 /// Furthermore, there is an additional state: Blocked. If the hazard is in this state, reading it
 /// will block until it no longer is. This is useful for blocking garbage collection while a value
 /// is being read (avoiding the ABA problem).
-#[derive(Debug)]
-pub struct Hazard {
-    /// The object it protects.
-    ///
-    /// If this is a pointer to `BLOCKED`, `FREE`, `DEAD`, it represents the respectiive state.
-    ptr: AtomicPtr<u8>,
+pub fn create() -> (Writer, Reader) {
+    // Allocate the hazard on the heap.
+    let ptr = unsafe {
+        &*Box::into_raw(Box::new(AtomicPtr::new(&BLOCKED as *const u8 as *mut u8)))
+    };
+
+    // Construct the values.
+    (Writer {
+        ptr: ptr,
+    }, Reader {
+        ptr: ptr,
+    })
 }
 
-impl Hazard {
-    /// Create a new hazard in blocked state.
-    pub fn blocked() -> Hazard {
-        Hazard {
-            ptr: AtomicPtr::new(&BLOCKED as *const u8 as *mut u8),
-        }
-    }
+/// An hazard reader.
+///
+/// This wraps a hazard and provides only ability to read and deallocate it. It is created through
+/// the `create()` function.
+///
+/// The destructor will, for the sake of safety, panic. To deallocate, use `self.destroy()`
+/// instead.
+pub struct Reader {
+    /// The pointer to the heap-allocated hazard.
+    ptr: &'static AtomicPtr<u8>,
+}
 
-    /// Block the hazard.
-    pub fn block(&self) {
-        self.ptr.store(&BLOCKED as *const u8 as *mut u8, atomic::Ordering::Release);
-    }
-
-    /// Is the hazard blocked?
-    pub fn is_blocked(&self) -> bool {
-        self.ptr.load(atomic::Ordering::Acquire) as *const u8 == &BLOCKED
-    }
-
-    /// Set the hazard to a new state.
-    ///
-    /// Whether or not it is blocked has no effect on this. To get it back to the blocked state,
-    /// use `self.block()`.
-    pub fn set(&self, new: State) {
-        // Simply encode and store.
-        self.ptr.store(match new {
-            State::Free => &FREE,
-            State::Dead => &DEAD,
-            State::Protect(ptr) => ptr,
-        } as *mut u8, atomic::Ordering::Release);
-    }
-
+impl Reader {
     /// Get the state of the hazard.
     ///
     /// It will spin until the hazard is no longer in a blocked state, unless it is in debug mode,
@@ -126,40 +120,6 @@ impl Hazard {
             }
         }
     }
-}
-
-/// Create a new hazard reader-writer pair.
-///
-/// This creates a new hazard pair in blocked state.
-pub fn create() -> (Writer, Reader) {
-    // Allocate the hazard on the heap.
-    let ptr: &'static Hazard = unsafe { &*Box::into_raw(Box::new(Hazard::blocked())) };
-
-    // Construct the values.
-    (Writer {
-        ptr: ptr,
-    }, Reader {
-        ptr: ptr,
-    })
-}
-
-/// An hazard reader.
-///
-/// This wraps a hazard and provides only ability to read and deallocate it. It is created through
-/// the `create()` function.
-///
-/// The destructor will, for the sake of safety, panic. To deallocate, use `self.destroy()`
-/// instead.
-pub struct Reader {
-    /// The pointer to the heap-allocated hazard.
-    ptr: &'static Hazard,
-}
-
-impl Reader {
-    /// Get the state of the hazard.
-    pub fn get(&self) -> State {
-        self.ptr.get()
-    }
 
     /// Destroy the hazard.
     ///
@@ -176,7 +136,7 @@ impl Reader {
         debug_assert!(self.get() == State::Dead, "Prematurely freeing an active hazard.");
 
         // Load the pointer and deallocate it.
-        Box::from_raw(self.ptr as *const Hazard as *mut Hazard);
+        Box::from_raw(self.ptr as *const AtomicPtr<u8> as *mut AtomicPtr<u8>);
         // Ensure that the RAII destructor doesn't kick in and crashes the program.
         mem::forget(self);
     }
@@ -202,29 +162,59 @@ impl Drop for Reader {
 #[derive(Debug)]
 pub struct Writer {
     /// The pointer to the heap-allocated hazard.
-    ptr: &'static Hazard,
+    ptr: &'static AtomicPtr<u8>,
 }
 
 impl Writer {
-    /// Set the state of this hazard to "dead".
+    /// Is the hazard blocked?
+    pub fn is_blocked(&self) -> bool {
+        self.ptr.load(atomic::Ordering::Acquire) as *const u8 == &BLOCKED
+    }
+
+    /// Block the hazard.
+    pub fn block(&self) {
+        self.ptr.store(&BLOCKED as *const u8 as *mut u8, atomic::Ordering::Release);
+    }
+
+    /// Set the hazard to "free".
     ///
-    /// This will ensure that the hazard won't end up in the thread-local cache, by (eventually)
-    /// deleting it globally.
+    /// This sets the state to `State::Free`.
+    pub fn free(&self) {
+        self.ptr.store(&FREE as *const u8 as *mut u8, atomic::Ordering::Release);
+    }
+
+    /// Protect a pointer with the hazard.
     ///
-    /// Generally, this is not recommended, as it means that your hazard cannot be reused.
+    /// This sets the state to `State::Protect(ptr)` where `ptr` is the provided argument. Note
+    /// that `ptr` can't be any of the internal reserved special-state pointer.
+    pub fn protect(&self, ptr: *const u8) {
+        self.ptr.store(ptr as *mut u8, atomic::Ordering::Release);
+    }
+
+    /// Set the hazard to "dead".
+    ///
+    /// This sets the state to `State::Dead`.
+    ///
+    /// # Safety
+    ///
+    /// This is unsafe as usage after this has been called is breaking invariants. Use
+    /// `Writer::kill()` to ensure safety through the type system.
+    unsafe fn dead(&self) {
+        self.ptr.store(&DEAD as *const u8 as *mut u8, atomic::Ordering::Release);
+    }
+
+    /// Set the hazard to "dead".
+    ///
+    /// This sets the state to `State::Dead`.
+    ///
+    /// It is consuming to ensure that the caller doesn't accidentally use the hazard reader
+    /// afterwards, causing undefined behavior.
     pub fn kill(self) {
-        // Set the state to dead.
-        self.set(State::Dead);
+        // Set the state to dead (this is safe as we ensure, by move, that it is not used
+        // afterwards).
+        unsafe { self.dead(); }
         // Avoid the RAII destructor.
         mem::forget(self);
-    }
-}
-
-impl ops::Deref for Writer {
-    type Target = Hazard;
-
-    fn deref(&self) -> &Hazard {
-        self.ptr
     }
 }
 
@@ -242,8 +232,9 @@ impl Drop for Writer {
             // If the thread is unwinding, there is no point in putting it back in the thread-local
             // cache. In fact, it might cause problems, if the unwinding tries to garbage collect
             // and the hazard is in blocked state. For this reason, we simply set the state to
-            // "dead" and move on.
-            self.ptr.set(State::Dead);
+            // "dead" and move on. Setting it to dead is safe, as Rust ensures that it is not used
+            // after the destructor (i.e. this function).
+            unsafe { self.dead(); }
         } else {
             // Free the hazard to the thread-local cache. We have to clone the hazard to get around the
             // fact that `drop` takes `&mut self`.
@@ -261,76 +252,86 @@ mod tests {
 
     #[test]
     fn set_get() {
-        let h = Hazard::blocked();
-        assert!(h.is_blocked());
+        let (w, r) = create();
+        assert!(w.is_blocked());
 
-        h.set(State::Free);
-        assert_eq!(h.get(), State::Free);
-        h.set(State::Dead);
-        assert_eq!(h.get(), State::Dead);
+        w.free();
+        assert!(!w.is_blocked());
+        assert_eq!(r.get(), State::Free);
+        w.free();
+        assert!(!w.is_blocked());
+        assert_eq!(r.get(), State::Free);
 
         let x = 2;
 
-        h.set(State::Protect(&x));
-        assert_eq!(h.get(), State::Protect(&x));
+        w.protect(&x);
+        assert_eq!(r.get(), State::Protect(&x));
 
-        h.set(State::Protect(ptr::null()));
-        assert_eq!(h.get(), State::Protect(ptr::null()));
-        h.set(State::Protect(0x1 as *const u8));
-        assert_eq!(h.get(), State::Protect(0x1 as *const u8));
+        w.protect(ptr::null());
+        assert_eq!(r.get(), State::Protect(ptr::null()));
+        w.protect(0x1 as *const u8);
+        assert_eq!(r.get(), State::Protect(0x1 as *const u8));
+
+        w.kill();
+        unsafe {
+            r.destroy();
+        }
     }
 
     #[test]
     fn hazard_pair() {
-        let (writer, reader) = create();
+        let (w, r) = create();
         let x = 2;
 
-        writer.set(State::Free);
-        assert_eq!(reader.get(), State::Free);
-        writer.set(State::Protect(&x));
-        assert_eq!(reader.get(), State::Protect(&x));
-        writer.kill();
-        assert_eq!(reader.get(), State::Dead);
+        w.free();
+        assert_eq!(r.get(), State::Free);
+        w.protect(&x);
+        assert_eq!(r.get(), State::Protect(&x));
+        w.kill();
+        assert_eq!(r.get(), State::Dead);
 
         unsafe {
-            reader.destroy();
+            r.destroy();
         }
     }
 
     #[test]
     fn cross_thread() {
         for _ in 0..64 {
-            let (writer, reader) = create();
+            let (w, r) = create();
 
             thread::spawn(move || {
-                writer.set(State::Dead);
+                w.kill();
             }).join().unwrap();
 
-            assert_eq!(reader.get(), State::Dead);
-            unsafe { reader.destroy(); }
+            assert_eq!(r.get(), State::Dead);
+            unsafe { r.destroy(); }
         }
     }
 
     #[test]
     fn drop() {
         for _ in 0..9000 {
-            let (writer, reader) = create();
-            writer.set(State::Dead);
+            let (w, r) = create();
+            w.kill();
             unsafe {
-                reader.destroy();
+                r.destroy();
             }
         }
     }
 
-    #[cfg(debug_assertions)]
-    #[test]
-    #[should_panic]
-    fn debug_infinite_blockage() {
-        let h = Hazard::blocked();
-        let _ = h.get();
-    }
+    /* FIXME: These tests are broken as the unwinding calls dtor of `Writer`, which double panics.
+        #[cfg(debug_assertions)]
+        #[test]
+        #[should_panic]
+        fn debug_infinite_blockage() {
+            let (w, r) = create();
+            let _ = r.get();
 
-    /* FIXME: This test is broken as the unwinding calls dtor of `Writer`, which double panics.
+            w.kill();
+            unsafe { r.destroy(); }
+        }
+
         #[cfg(debug_assertions)]
         #[test]
         #[should_panic]
