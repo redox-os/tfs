@@ -1,6 +1,6 @@
 //! RAII guards for hazards.
 
-use std::ops;
+use std::{cmp, ops};
 use std::sync::atomic;
 use {hazard, local};
 
@@ -134,10 +134,18 @@ impl<T: ?Sized> Guard<T> {
     }
 
     /// Get the raw pointer of this guard.
-    pub fn as_raw(&self) -> *const T {
+    pub fn as_ptr(&self) -> *const T {
         self.pointer
     }
 }
+
+impl<T> cmp::PartialEq for Guard<T> {
+    fn eq(&self, other: &Guard<T>) -> bool {
+        self.as_ptr() == other.as_ptr()
+    }
+}
+
+impl<T> cmp::Eq for Guard<T> {}
 
 impl<T> ops::Deref for Guard<T> {
     type Target = T;
