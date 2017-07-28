@@ -3,9 +3,7 @@
 //! SPECK is a really simple block cipher designed by the NSA. It is famous for its simple
 //! structure and code size, which can fit in just a couple of lines, while still preserving
 //! security.
-
 #![feature(i128_type)]
-
 #![no_std]
 #![forbid(unsafe_code)]
 
@@ -67,6 +65,7 @@ pub fn encrypt_block(m: u128, k: u128) -> u128 {
 ///
 /// This precomputes a key schedule, which can then be used for both encrypting and decrypting
 /// messages.
+#[derive(Debug, Copy, Clone)]
 pub struct Key {
     /// The computed schedule.
     ///
