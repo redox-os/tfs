@@ -65,7 +65,7 @@ pub fn encrypt_block(m: u128, k: u128) -> u128 {
 ///
 /// This precomputes a key schedule, which can then be used for both encrypting and decrypting
 /// messages.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Key {
     /// The computed schedule.
     ///
