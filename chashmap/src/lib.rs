@@ -232,7 +232,7 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
 
         // Start at the first priority bucket, and then move upwards, searching for the matching
         // bucket.
-        for i in 0.. {
+        for i in 0..self.buckets.len() {
             // Get the lock of the `i`'th bucket after the first priority bucket (wrap on end).
             let lock = self.buckets[(hash + i) % self.buckets.len()].read();
 
@@ -242,9 +242,7 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
                 return lock;
             }
         }
-
-        // TODO
-        unreachable!();
+        panic!("`CHashMap` scan failed! No entry found.");
     }
 
     /// Scan from the first priority of a key until a match is found (mutable guard).
@@ -258,7 +256,7 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
 
         // Start at the first priority bucket, and then move upwards, searching for the matching
         // bucket.
-        for i in 0.. {
+        for i in 0..self.buckets.len() {
             // Get the lock of the `i`'th bucket after the first priority bucket (wrap on end).
             let lock = self.buckets[(hash + i) % self.buckets.len()].write();
 
@@ -268,9 +266,7 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
                 return lock;
             }
         }
-
-        // TODO
-        unreachable!();
+        panic!("`CHashMap` scan_mut failed! No entry found.");
     }
 
     /// Scan from the first priority of a key until a match is found (bypass locks).
@@ -286,7 +282,7 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
 
         // Start at the first priority bucket, and then move upwards, searching for the matching
         // bucket.
-        for i in 0.. {
+        for i in 0..self.buckets.len() {
             // TODO: hacky hacky
             let idx = (hash + i) % len;
 
@@ -301,9 +297,7 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
                 return self.buckets[idx].get_mut();
             }
         }
-
-        // TODO
-        unreachable!();
+        panic!("`CHashMap` scan_mut_no_lock failed! No entry found.");
     }
 
     /// Find a bucket with some key, or a free bucket in same cluster.
