@@ -8,24 +8,26 @@ extern crate speck;
 
 use rand::Rng;
 
+use rand::OsRng;
+
+use speck::Key;
+
 #[bench]
 fn encrypt(mut bencher: &mut Bencher) {
-    let mut rng = rand::OsRng::new().unwrap();
-
-    let key = speck::Key::new(rng.gen());
-
-    let block: u128 = rng.gen();
+    let (key, block) = gen_test();
 
     bencher.iter(|| test::black_box(key.encrypt_block(block)));
 }
 
 #[bench]
 fn decrypt(mut bencher: &mut Bencher) {
-    let mut rng = rand::OsRng::new().unwrap();
-
-    let key = speck::Key::new(rng.gen());
-
-    let block: u128 = rng.gen();
+    let (key, block) = gen_test();
 
     bencher.iter(|| test::black_box(key.decrypt_block(block)));
+}
+
+fn gen_test() -> (Key, u128) {
+    let mut rng = OsRng::new().unwrap();
+
+    (Key::new(rng.gen()), rng.gen())
 }
