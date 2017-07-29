@@ -12,6 +12,15 @@ use rand::OsRng;
 use speck::Key;
 
 #[bench]
+fn generate_key(mut bencher: &mut Bencher) {
+    let mut rng = OsRng::new().unwrap();
+
+    let key_input = rng.gen();
+
+    bencher.iter(|| test::black_box(Key::new(key_input)));
+}
+
+#[bench]
 fn encrypt(mut bencher: &mut Bencher) {
     let (key, block) = gen_test();
 
