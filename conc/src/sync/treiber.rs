@@ -1,8 +1,8 @@
 //! Treiber stacks.
 
-use std::sync::atomic;
+use std::sync::atomic::{self, AtomicPtr};
 use std::ptr;
-use {Atomic, Guard};
+use Guard;
 
 /// A Treiber stack.
 ///
@@ -14,7 +14,7 @@ use {Atomic, Guard};
 /// The ABA problem is of course addressed through the API of this crate.
 pub struct Treiber<T> {
     /// The head node.
-    head: Atomic<Node<T>>,
+    head: AtomicPtr<Node<T>>,
 }
 
 impl<T> Drop for Treiber<T> {
@@ -23,7 +23,7 @@ impl<T> Drop for Treiber<T> {
         // structure. They're all gone, thus we can safely mess with the inner structure.
 
         unsafe {
-            let ptr = self.head.get_inner_mut().get_mut();
+            let ptr = self.head.get_mut();
 
             if !ptr.is_null() {
                 // Call destructors on the stack.
@@ -31,8 +31,6 @@ impl<T> Drop for Treiber<T> {
                 // Finally deallocate the pointer itself.
                 // TODO: Figure out if it is sound if this destructor panics.
                 drop(Box::from_raw(*ptr));
-                // Set it to null to prevent `Atomic`'s destructor from running.
-                *ptr = ptr::null_mut();
             }
         }
     }
@@ -42,7 +40,7 @@ impl<T> Treiber<T> {
     /// Create a new, empty Treiber stack.
     pub fn new() -> Treiber<T> {
         Treiber {
-            head: Atomic::default(),
+            head: AtomicPtr::default(),
         }
     }
 
@@ -51,22 +49,31 @@ impl<T> Treiber<T> {
     pub fn pop(&self) -> Option<Guard<T>> {
         // TODO: Use `catch {}` here when it lands.
         // Read the head snapshot.
-        let mut snapshot = self.head.load(atomic::Ordering::Acquire);
+        let mut snapshot = Guard::maybe_new(|| unsafe {
+            self.head.load(atomic::Ordering::Acquire).as_ref()
+        });
 
         // Unless the head snapshot is `None`, try to replace it with the tail.
-        while let Some(node) = snapshot {
+        while let Some(old) = snapshot {
             // Attempt to replace the head with the tail of the head.
-            match unsafe {
-                self.head.compare_and_swap_raw(
-                    node.as_raw(),
-                    node.next as *mut Node<T>,
+            snapshot = Guard::maybe_new(|| unsafe {
+                self.head.compare_and_swap(
+                    old.as_ptr() as *mut _,
+                    old.next as *mut Node<T>,
                     atomic::Ordering::Release,
-                )
-            } {
-                // It succeeded; return the item.
-                Ok(_) => return Some(node.map(|x| &x.item)),
-                // It failed, update the head snapshot and continue.
-                Err(new) => snapshot = new,
+                ).as_ref()
+            });
+
+            // If it match, we are done as the previous head node was replaced by the tail, popping
+            // the top element. The element we return is the one carried by the previous head.
+            if let Some(ref new) = snapshot {
+                if new == &old {
+                    // As we overwrote the old head (the CAS was successful), we must queue its
+                    // deletion.
+                    ::add_garbage_box(old.as_ptr());
+                    // Map the guard to refer the item.
+                    return Some(old.map(|x| &x.item));
+                }
             }
         }
 
@@ -78,42 +85,36 @@ impl<T> Treiber<T> {
     pub fn push(&self, item: T)
     where T: 'static {
         // Load the head snapshot.
-        let mut snapshot = self.head.load(atomic::Ordering::Relaxed);
-        let mut snapshot_ptr: Option<*const Node<T>>;
+        let mut snapshot = Guard::maybe_new(|| unsafe {
+            self.head.load(atomic::Ordering::Relaxed).as_ref()
+        });
 
         // TODO: Use `catch {}` here when it lands.
         // Construct a node, which will be the new head.
-        let mut node = Box::new(Node {
+        let mut node = Box::into_raw(Box::new(Node {
             item: item,
             // Placeholder; we will replace it with an actual value in the loop.
-            next: ptr::null(),
-        });
+            next: ptr::null_mut(),
+        }));
 
         loop {
-            // Derive the nullable snapshot pointer from the head snapshot.
-            snapshot_ptr = snapshot.as_ref().map(Guard::as_raw);
             // Construct the next-pointer of the new node from the head snapshot.
-            node.next = snapshot_ptr.unwrap_or(ptr::null());
+            let next = snapshot.map_or(ptr::null_mut(), |x| x.as_ptr() as *mut _);
+            unsafe { (*node).next = next; }
 
-            // TODO: This should be something that ignores the guard creation when the CAS
-            //       succeeds, because it's expensive to do and not used anyway. It should be easy
-            //       enough to implement, but I am struggling to come up with a good name for the
-            //       method.
-
-            // CAS from the read pointer to the new head.
-            match self.head.compare_and_swap(snapshot_ptr, Some(node), atomic::Ordering::Release) {
+            // CAS from the read pointer (that is, the one we placed as `node.next`) to the new
+            // head.
+            match Guard::maybe_new(|| unsafe {
+                // TODO: This should be something that ignores the guard creation when the CAS
+                // succeeds, because it's expensive to do and not used anyway. It should be easy
+                // enough to implement, but I am struggling to come up with a good name for the
+                // method.
+                self.head.compare_and_swap(next, node, atomic::Ordering::Release).as_ref()
+            }) {
                 // If it succeeds, the item has been pushed.
-                Ok(_) => break,
+                Some(ref new) if new.as_ptr() == next => break,
                 // If it fails, we will retry the CAS with updated values.
-                Err((new_head, Some(node2))) => {
-                    // Update the head snapshot.
-                    snapshot = new_head;
-                    // Put the box we gave back to the variable where it belongs.
-                    node = node2;
-                },
-                // This should never be reached as we gave an argument which was unconditionally
-                // `Some`.
-                _ => unreachable!(),
+                new => snapshot = new,
             }
         }
     }
@@ -124,7 +125,7 @@ struct Node<T> {
     /// The data this node holds.
     item: T,
     /// The next node.
-    next: *const Node<T>,
+    next: *mut Node<T>,
 }
 
 impl<T> Node<T> {
@@ -172,6 +173,15 @@ mod tests {
             Treiber::<u8>::new();
             assert_eq!(*b, 20);
         }
+    }
+
+    #[test]
+    fn just_push() {
+        let stack = Treiber::new();
+        stack.push(1);
+        stack.push(2);
+        stack.push(3);
+        drop(stack);
     }
 
     #[test]
@@ -332,7 +342,7 @@ mod tests {
     }
 
     #[test]
-    fn drop() {
+    fn drop1() {
         let drops = Arc::new(AtomicUsize::default());
         let stack = Arc::new(Treiber::new());
 

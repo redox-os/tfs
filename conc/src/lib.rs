@@ -196,3 +196,20 @@ pub fn add_garbage<T>(ptr: &'static T, dtor: fn(&'static T)) {
         Garbage::new(ptr as *const T as *const u8 as *mut u8, mem::transmute(dtor))
     });
 }
+
+/// Add a heap-allocated `Box<T>` as garbage.
+///
+/// This adds a `Box<T>` represented by pointer `ptr` to the to-be-destroyed garbage queue.
+///
+/// For more details, see `add_garbage`, which this method is a specialization of.
+///
+/// # Safety
+///
+/// This is unsafe as the pointer could be aliased or invalid. To satisfy invariants, the pointer
+/// shall be a valid object, allocated through `Box::new(x)` or alike, and shall only be used as
+/// long as there are hazard protecting it.
+pub fn add_garbage_box<T>(ptr: *const T) {
+    local::add_garbage(unsafe {
+        Garbage::new_box(ptr as *mut u8)
+    });
+}

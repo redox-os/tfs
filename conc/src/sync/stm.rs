@@ -1,6 +1,6 @@
 //! Software transactional memory.
 
-use Atomic;
+use {Atomic, Guard};
 use std::sync::atomic;
 
 /// A software transactional memory container.
@@ -23,14 +23,14 @@ impl<T> Stm<T> {
     /// the change will applied. Otherwise, the closure is reevaluated.
     pub fn update<F>(&self, f: F)
     where
-        F: Fn(Option<::Guard<T>>) -> Option<Box<T>>,
+        F: Fn(Option<Guard<T>>) -> Option<Box<T>>,
         T: 'static,
     {
         loop {
             // Read a snapshot of the current data.
             let snapshot = self.inner.load(atomic::Ordering::Relaxed);
             // Construct a pointer from this guard.
-            let snapshot_ptr = snapshot.as_ref().map(::Guard::as_raw);
+            let snapshot_ptr = snapshot.as_ref().map(Guard::as_ptr);
             // Evaluate the closure on the snapshot.
             let ret = f(snapshot);
 
@@ -42,7 +42,7 @@ impl<T> Stm<T> {
     }
 
     /// Read the container.
-    pub fn load(&self) -> Option<::Guard<T>> {
+    pub fn load(&self) -> Option<Guard<T>> {
         self.inner.load(atomic::Ordering::Relaxed)
     }
 }

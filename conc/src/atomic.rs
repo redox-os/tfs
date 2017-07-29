@@ -420,8 +420,6 @@ mod tests {
         opt.compare_and_store(Some(Box::into_raw(Box::new(2))), None, atomic::Ordering::Relaxed).unwrap_err();
 
         assert!(opt.load(atomic::Ordering::Relaxed).is_none());
-
-        while ::try_gc().is_err() {}
     }
 
     #[test]
@@ -449,8 +447,6 @@ mod tests {
             opt.compare_and_store_raw(Box::into_raw(Box::new(2)), ptr::null_mut(), atomic::Ordering::Relaxed).unwrap_err();
 
             assert!(opt.load(atomic::Ordering::Relaxed).is_none());
-
-            while ::try_gc().is_err() {}
         }
     }
 
@@ -470,7 +466,6 @@ mod tests {
             }))
         }
 
-        ::gc();
         ::gc();
 
         for i in j {
@@ -590,7 +585,7 @@ mod tests {
         }
 
         drop(d);
-        while ::try_gc().is_err() {}
+        ::gc();
 
         assert_eq!(drops.load(atomic::Ordering::Relaxed), 16 * 6);
     }
