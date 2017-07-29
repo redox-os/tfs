@@ -17,10 +17,21 @@
 //!
 //! ## Usage
 //!
-//! While the low-level API is available, it is generally sufficient to use the `conc::Option`
+//! While the low-level API is available, it is generally sufficient to use the `conc::Atomic`
 //! abstraction. This acts much like familiar Rust APIs. It allows the programmer to concurrently
 //! access a value through references, as well as update it, and more. Refer to the respective docs
 //! for more information.
+//!
+//! If you are interested in implementing your own structures with `conc`, you must learn how to
+//! use `Guard` and `add_garbage`. In short,
+//!
+//! - `conc::add_garbage()` adds a destructor with a pointer, which will be run eventually, when no
+//!   one is reading the data anymore. In other words, it acts as a concurrent counterpart to
+//!   `Drop::drop()`.
+//! - `Guard` "protects" a pointer from being destroyed. That is, it delays destruction (which is
+//!   planned by `conc::add_garbage()`) until the guard is gone.
+//!
+//! See their respective API docs for details on usage and behavior.
 //!
 //! ## Why not crossbeam/epochs?
 //!
