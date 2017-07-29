@@ -7,7 +7,6 @@ extern crate rand;
 extern crate speck;
 
 use rand::Rng;
-
 use rand::OsRng;
 
 use speck::Key;
