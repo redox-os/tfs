@@ -23,14 +23,14 @@ impl<T> Drop for Treiber<T> {
         // structure. They're all gone, thus we can safely mess with the inner structure.
 
         unsafe {
-            let ptr = self.head.get_mut();
+            let ptr = *self.head.get_mut();
 
             if !ptr.is_null() {
                 // Call destructors on the stack.
-                (**ptr).destroy();
+                (*ptr).destroy();
                 // Finally deallocate the pointer itself.
                 // TODO: Figure out if it is sound if this destructor panics.
-                drop(Box::from_raw(*ptr));
+                drop(Box::from_raw(ptr));
             }
         }
     }
@@ -74,6 +74,9 @@ impl<T> Treiber<T> {
                     // Map the guard to refer the item.
                     return Some(old.map(|x| &x.item));
                 }
+            } else {
+                // Short-circuit.
+                break;
             }
         }
 
@@ -111,8 +114,10 @@ impl<T> Treiber<T> {
                 // method.
                 self.head.compare_and_swap(next, node, atomic::Ordering::Release).as_ref()
             }) {
-                // If it succeeds, the item has been pushed.
+                // If it succeeds (that is, the pointers matched and the CAS ran), the item has
+                // been pushed.
                 Some(ref new) if new.as_ptr() == next => break,
+                None if next.is_null() => break,
                 // If it fails, we will retry the CAS with updated values.
                 new => snapshot = new,
             }
@@ -374,7 +379,7 @@ mod tests {
         assert_eq!(drops.load(atomic::Ordering::Relaxed), 32 + 16);
 
         // Drop the last arc.
-        let _ = stack;
+        drop(stack);
         ::gc();
 
         assert_eq!(drops.load(atomic::Ordering::Relaxed), 200 + 16);
