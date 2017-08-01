@@ -3,11 +3,11 @@
 //! SPECK is a really simple block cipher designed by the NSA. It is famous for its simple
 //! structure and code size, which can fit in just a couple of lines, while still preserving
 //! security.
-
 #![feature(i128_type)]
-
 #![no_std]
 #![forbid(unsafe_code)]
+
+use core::fmt;
 
 /// The number of rounds.
 const ROUNDS: u64 = 32;
@@ -67,12 +67,19 @@ pub fn encrypt_block(m: u128, k: u128) -> u128 {
 ///
 /// This precomputes a key schedule, which can then be used for both encrypting and decrypting
 /// messages.
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Key {
     /// The computed schedule.
     ///
     /// Each of these subkeys are used in a round of the cipher. The first subkey is used in the
     /// first round of the cipher and so on.
     schedule: [u64; ROUNDS as usize],
+}
+
+impl fmt::Debug for Key {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "[REDACTED]")
+    }
 }
 
 impl Key {

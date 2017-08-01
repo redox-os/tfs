@@ -9,3 +9,6 @@ license = "MIT"
 keywords = ["crypto", "cipher", "speck", "block", "simple"]
 categories = ["cryptography", "no-std"]
 exclude = ["target", "Cargo.lock"]
+
+[dev-dependencies]
+rand = { version = "0.3.16", features = ["i128_support"] }
