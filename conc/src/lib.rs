@@ -228,6 +228,6 @@ pub fn add_garbage<T>(ptr: &'static T, dtor: fn(&'static T)) {
 /// long as there are hazard protecting it.
 pub fn add_garbage_box<T>(ptr: *const T) {
     local::add_garbage(unsafe {
-        Garbage::new_box(ptr as *mut u8)
+        Garbage::new_box(ptr)
     });
 }

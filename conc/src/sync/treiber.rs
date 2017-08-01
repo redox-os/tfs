@@ -148,6 +148,10 @@ impl<T> Node<T> {
 
         // Recursively drop the next node, if it exists.
         if !self.next.is_null() {
+            // Recurse to the next node.
+            (*self.next).destroy();
+            // Now that all of the children of the next node has been dropped, drop the node
+            // itself.
             drop(Box::from_raw(self.next as *mut Node<T>));
         }
     }
@@ -263,7 +267,7 @@ mod tests {
         for _ in 0..16 {
             let s = stack.clone();
             j.push(thread::spawn(move || {
-                for _ in 0..10_000_000 {
+                for _ in 0..1_000_000 {
                     s.push(23);
                     assert_eq!(*s.pop().unwrap(), 23);
                 }
@@ -382,7 +386,7 @@ mod tests {
         drop(stack);
         ::gc();
 
-        assert_eq!(drops.load(atomic::Ordering::Relaxed), 200 + 16);
+        assert_eq!(drops.load(atomic::Ordering::Relaxed), 20 * 16 + 16);
     }
 
     #[test]
