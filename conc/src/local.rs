@@ -2,7 +2,7 @@
 
 use std::{mem, thread};
 use std::cell::RefCell;
-use {global, hazard, guard};
+use {global, hazard, guard, debug};
 use garbage::Garbage;
 
 thread_local! {
@@ -15,6 +15,8 @@ thread_local! {
 /// This garbage is pushed to a thread-local queue. When enough garbage is accumulated in the
 /// thread, it is exported to the global state.
 pub fn add_garbage(garbage: Garbage) {
+    // Print message in debug mode.
+    debug::exec(|| println!("Adding garbage: {:?}", garbage));
     // Since this function can trigger a GC, it must not be called inside a guard constructor.
     guard::debug_assert_no_create();
 
@@ -63,6 +65,8 @@ pub fn get_hazard() -> hazard::Writer {
 /// infinite garbage collection cycle, or if the hazard is in dead state, as that means that it may
 /// not be reusable (it could be destroyed).
 pub fn free_hazard(hazard: hazard::Writer) {
+    // Print message in debug mode.
+    debug::exec(|| println!("Freeing hazard: {:?}", hazard));
     // Since this function can trigger a GC, it must not be called inside a guard constructor.
     guard::debug_assert_no_create();
 
@@ -191,6 +195,9 @@ impl State {
 
     /// See `export_garbage()` for more information.
     fn export_garbage(&mut self) {
+        // Print message in debug mode.
+        debug::exec(|| println!("Exporting garbage."));
+
         // Clear the vector and export the garbage.
         global::export_garbage(mem::replace(&mut self.garbage, Vec::new()));
     }

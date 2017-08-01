@@ -16,7 +16,7 @@
 use std::sync::atomic::{self, AtomicPtr};
 use std::{mem, thread};
 
-use local;
+use {debug, local};
 
 /// Pointers to this represents the blocked state.
 static BLOCKED: u8 = 0;
@@ -188,6 +188,8 @@ impl Writer {
     /// This sets the state to `State::Protect(ptr)` where `ptr` is the provided argument. Note
     /// that `ptr` can't be any of the internal reserved special-state pointer.
     pub fn protect(&self, ptr: *const u8) {
+        debug::exec(|| println!("Protecting: 0x{:x}", ptr as usize));
+
         self.ptr.store(ptr as *mut u8, atomic::Ordering::Release);
     }
 

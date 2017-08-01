@@ -3,7 +3,7 @@
 use spin::Mutex;
 use std::collections::HashSet;
 use std::{mem, panic};
-use {rand, hazard, mpsc};
+use {rand, hazard, mpsc, debug};
 use garbage::Garbage;
 
 lazy_static! {
@@ -175,6 +175,9 @@ impl Garbo {
     ///
     /// If a destructor panics, this will panic as well.
     fn gc(&mut self) {
+        // Print message in debug mode.
+        debug::exec(|| println!("Collecting garbage."));
+
         // Handle all the messages sent.
         for msg in self.chan.recv_all() {
             self.handle(msg);

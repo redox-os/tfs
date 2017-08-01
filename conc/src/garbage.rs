@@ -1,5 +1,7 @@
 //! Literal garbage.
 
+use debug;
+
 /// An object to be deleted eventually.
 ///
 /// Garbage refers to objects which are waiting to be destroyed, at some point after all references
@@ -8,6 +10,7 @@
 /// When it's dropped, the destructor of the garbage runs.
 ///
 /// See also: ideology.
+#[derive(Debug)]
 pub struct Garbage {
     /// The pointer to the object.
     ptr: *const u8,
@@ -64,6 +67,9 @@ impl Garbage {
 
 impl Drop for Garbage {
     fn drop(&mut self) {
+        // Print message in debug mode.
+        debug::exec(|| println!("Destroying garbage: {:?}", self));
+
         unsafe { (self.dtor)(self.ptr); }
     }
 }

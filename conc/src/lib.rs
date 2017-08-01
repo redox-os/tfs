@@ -33,6 +33,10 @@
 //!
 //! See their respective API docs for details on usage and behavior.
 //!
+//! ### Debugging
+//!
+//! Set `CONC_DEBUG_MODE`. For example, `CONC_DEBUG_MODE=1 cargo test`.
+//!
 //! ## Why not crossbeam/epochs?
 //!
 //! Epochs and classical hazard pointers are generally faster than this crate, but it doesn't
@@ -97,6 +101,7 @@ extern crate rand;
 extern crate spin;
 
 mod atomic;
+mod debug;
 mod garbage;
 mod global;
 mod guard;
