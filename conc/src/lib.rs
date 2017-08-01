@@ -35,7 +35,9 @@
 //!
 //! ### Debugging
 //!
-//! Set `CONC_DEBUG_MODE`. For example, `CONC_DEBUG_MODE=1 cargo test`.
+//! Enable feature `debug-tools` and set environment variable `CONC_DEBUG_MODE`. For example,
+//! `CONC_DEBUG_MODE=1 cargo test --features debug-tools`. To get stacktraces after each message,
+//! set environment variable `CONC_DEBUG_STACKTRACE`.
 //!
 //! ## Why not crossbeam/epochs?
 //!

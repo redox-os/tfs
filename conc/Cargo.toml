@@ -13,3 +13,10 @@ exclude = ["target", "Cargo.lock"]
 lazy_static = "0.2"
 rand = "0.3"
 spin = "0.4"
+
+[dependencies.backtrace]
+version = "0.3"
+optional = true
+
+[features]
+debug-tools = ["backtrace"]
