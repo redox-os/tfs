@@ -28,14 +28,14 @@ impl<T> Stm<T> {
     {
         loop {
             // Read a snapshot of the current data.
-            let snapshot = self.inner.load(atomic::Ordering::Relaxed);
+            let snapshot = self.inner.load(atomic::Ordering::Acquire);
             // Construct a pointer from this guard.
             let snapshot_ptr = snapshot.as_ref().map(Guard::as_ptr);
             // Evaluate the closure on the snapshot.
             let ret = f(snapshot);
 
             // If the snapshot pointer is still the same, update the data to the closure output.
-            if self.inner.compare_and_store(snapshot_ptr, ret, atomic::Ordering::Relaxed).is_ok() {
+            if self.inner.compare_and_store(snapshot_ptr, ret, atomic::Ordering::Release).is_ok() {
                 break;
             }
         }

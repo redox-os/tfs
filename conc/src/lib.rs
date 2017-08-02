@@ -82,7 +82,7 @@
 //! ¹If you want a super fast memory reclamation system, you should try NOP™, and not calling
 //!  destructors.
 //!
-//! ## Internals
+//! ## Design & internals
 //!
 //! It based on hazard pointers, although there are several differences. The idea is essentially
 //! that the system keeps track of some number of "hazards". As long as a hazard protects some
@@ -94,6 +94,9 @@
 //! To improve performance, we use a layered approach: Both garbage (objects to be deleted
 //! eventually) and hazards are cached thread locally. This reduces the amount of atomic operations
 //! and cache misses.
+//!
+//! For more details, see [this blog
+//! post](https://ticki.github.io/blog/fearless-concurrency-with-hazard-pointers/).
 //!
 //! ## Garbage collection
 //!
