@@ -22,7 +22,7 @@ pub struct Atomic<T> {
 }
 
 impl<T> Atomic<T> {
-    /// Create a new concurrent option.
+    /// Create a new `Atomic<T>` with given contents.
     pub fn new(init: Option<Box<T>>) -> Atomic<T> {
         Atomic {
             // Convert the box to a raw pointer.

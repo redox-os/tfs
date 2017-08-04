@@ -2,7 +2,7 @@
 
 use std::{mem, thread};
 use std::cell::RefCell;
-use {global, hazard, guard, debug};
+use {global, hazard, guard, debug, settings};
 use garbage::Garbage;
 
 thread_local! {
@@ -145,12 +145,6 @@ impl State {
 
     /// See `free_hazard()`.
     fn free_hazard(&mut self, hazard: hazard::Writer) {
-        /// The maximal amount of hazards before cleaning up.
-        ///
-        /// With "cleaning up" we mean setting the state of the hazards to "free" in order to allow
-        /// garbage collection of the object it is currently protecting.
-        const MAX_NON_FREE_HAZARDS: usize = 16;
-
         // FIXME: This can lead to some subtle bugs, since the dtor is unpredictable as there is no
         //        way of predicting when the hazard is cleared.
 
@@ -158,7 +152,7 @@ impl State {
         self.available_hazards.push(hazard);
 
         // Check if we exceeded the limit.
-        if self.non_free_hazards() > MAX_NON_FREE_HAZARDS {
+        if self.non_free_hazards() > settings::get().max_non_free_hazards {
             // We did; we must now set the non-free hazards to "free".
             for i in &self.available_hazards[self.available_hazards_free_before..] {
                 i.free();
@@ -179,15 +173,12 @@ impl State {
     /// When this happens (i.e. the global state gets the garbage), it returns `true`. Otherwise,
     /// it returns `false`.
     fn add_garbage(&mut self, garbage: Garbage) -> bool {
-        /// The maximal amount of garbage before exportation to the global state.
-        const MAX_GARBAGE: usize = 128;
-
         // Push the garbage to the cache of garbage.
         self.garbage.push(garbage);
 
         // Export the garbage if it exceeds the limit.
         // TODO: use memory instead of items as a metric.
-        if self.garbage.len() > MAX_GARBAGE {
+        if self.garbage.len() > settings::get().max_garbage_before_export {
             self.export_garbage();
             true
         } else { false }

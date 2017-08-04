@@ -26,7 +26,7 @@ impl Garbage {
     /// This takes the pointer and destructor (which takes pointer as argument) and construct the
     /// corresponding garbage item.
     pub fn new(ptr: *const u8, dtor: fn(*const u8)) -> Garbage {
-        debug_assert!(ptr as usize > 1, "Creating garbage with invalid pointer.");
+        debug_assert!(ptr as usize > 0, "Creating garbage with invalid pointer.");
 
         Garbage {
             ptr: ptr,

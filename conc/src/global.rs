@@ -3,7 +3,7 @@
 use spin::Mutex;
 use std::collections::HashSet;
 use std::{mem, panic};
-use {rand, hazard, mpsc, debug};
+use {rand, hazard, mpsc, debug, settings};
 use garbage::Garbage;
 
 lazy_static! {
@@ -45,13 +45,8 @@ pub fn try_gc() -> Result<(), ()> {
 ///
 /// This shall be called when new garbage is added, as it will trigger a GC by some probability.
 pub fn tick() {
-    /// The probability of triggering a GC.
-    ///
-    /// This probability is given such that `0` corresponds to 0 and `!0` corresponds to `1`.
-    const GC_PROBABILITY: usize = (!0) / 64;
-
     // Generate a random number and compare it against the probability.
-    if rand::random::<usize>() <= GC_PROBABILITY {
+    if rand::random::<usize>() <= settings::get().gc_probability {
         // The outfall was to (attempt at) GC.
         let _ = try_gc();
     }

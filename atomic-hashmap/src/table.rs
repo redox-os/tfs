@@ -203,9 +203,9 @@ impl<K: Hash + Eq, V> Table<K, V> {
                 None => return None,
                 // There is a branch, so we must remove the key in the sub-table.
                 Some(Node::Branch(table)) => return table.remove(key, sponge),
-                // There was a node with the key, which we will try to remove. We use CAS in order to
-                // make sure that it is the same node as the one we read (`bucket`), otherwise we might
-                // remove a wrong node.
+                // There was a node with the key, which we will try to remove. We use CAS in order
+                // to make sure that it is the same node as the one we read (`bucket`), otherwise
+                // we might remove a wrong node.
                 Some(Node::Leaf(Pair { key: ref found_key, val })) if found_key == key
                     => match bucket.compare_and_swap(Some(bucket), None, atomic::Ordering::Release) {
                     // Removing the node succeeded: It wasn't changed in the meantime.

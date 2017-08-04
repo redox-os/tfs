@@ -16,6 +16,7 @@
 //!     * `Guard<T>` for blocking destruction.
 //! - **Runtime control**
 //!     * `gc()` for collecting garbage to reduce memory.
+//!     * `settings` for reconfiguring the system on-the-go.
 //!
 //! ## Why?
 //!
@@ -112,8 +113,12 @@
 //! It is worth noting that atomic reads through this library usually requires three atomic CPU
 //! instruction, this means that if you are traversing a list or something like that, this library
 //! might not be for you.
+//!
+//! # Settings
+//!
+//! You can reconfigure the system on-the-go through the `settings` module.
 
-#![feature(thread_local_state)]
+#![feature(thread_local_state, const_fn)]
 #![deny(missing_docs)]
 
 #[macro_use]
@@ -129,6 +134,7 @@ mod guard;
 mod hazard;
 mod local;
 mod mpsc;
+pub mod settings;
 pub mod sync;
 
 pub use atomic::Atomic;
