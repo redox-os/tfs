@@ -24,7 +24,6 @@ mod sponge;
 mod table;
 
 use std::hash::Hash;
-use crossbeam::mem::epoch::{self, Atomic};
 use sponge::Sponge;
 
 /// A lock-free, concurrent hash map.

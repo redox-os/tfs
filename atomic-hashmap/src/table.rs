@@ -3,6 +3,7 @@
 use std::sync::atomic;
 use std::hash::Hash;
 use sponge::Sponge;
+use conc;
 
 /// A key-value pair.
 pub struct Pair<K, V> {
@@ -27,7 +28,7 @@ enum Node<K, V> {
 #[derive(Default)]
 pub struct Table<K, V>  {
     /// The buckets in the table.
-    buckets: [conc::Option<Node<K, V>>; 256],
+    buckets: [conc::Atomic<Node<K, V>>; 256],
 }
 
 impl<K: Hash + Eq, V> Table<K, V> {
@@ -51,11 +52,11 @@ impl<K: Hash + Eq, V> Table<K, V> {
         if pos_a != pos_b {
             // The two position did not collide, so we can insert the two pairs at the respective
             // positions
-            table[pos_a as usize] = conc::Option::new(Some(Box::new(Node::Leaf(pair_a))));
-            table[pos_b as usize] = conc::Option::new(Some(Box::new(Node::Leaf(pair_b))));
+            table[pos_a as usize] = conc::Atomic::new(Some(Box::new(Node::Leaf(pair_a))));
+            table[pos_b as usize] = conc::Atomic::new(Some(Box::new(Node::Leaf(pair_b))));
         } else {
             // The two positions from the sponge matched, so we must place another branch.
-            table[pos_a as usize] = conc::Option::new(Some(Box::new(Node::Branch(
+            table[pos_a as usize] = conc::Atomic::new(Some(Box::new(Node::Branch(
                 Table::two_entries(pair_a, sponge_a, pair_b, sponge_b)
             ))));
         }
@@ -85,51 +86,46 @@ impl<K: Hash + Eq, V> Table<K, V> {
         // key-value pair.
         let bucket = self.buckets[sponge.squeeze() as usize];
 
+        // We use CAS to place the leaf if and only if the bucket is empty. Otherwise, we must
+        // handle the respective cases.
+        let mut node = match bucket.compare_and_swap(
+            None,
+            Some(Box::new(Node::Leaf(pair))),
+            atomic::Ordering::Release
+        ) {
+            // The CAS succeeded, meaning that the key wasn't already in the structure, hence we
+            // return `None`.
+            Ok(()) => return None,
+            // The CAS failed, so we handle the actual node in the loop below.
+            Err(actual, _) => actual,
+        };
+
         // To avoid the ABA problem, this loop is unfortunately necessary, but keep in mind that it
-        // will rarely (if ever) run more than one iteration, nor is it mutually exclusive in any
-        // way, it just ensures that the bucket doesn't change in the meantime in certain specific
-        // cases.
-        'aba: loop {
-            // We use CAS to place the leaf if and only if the bucket is empty. Otherwise, we must
-            // handle the respective cases.
-            return match bucket.compare_and_swap(
-                None,
-                Some(Box::new(Node::Leaf(pair))),
-                atomic::Ordering::Release
-            ) {
-                // We successfully set an empty bucket to the new key-value pair. This of course
-                // implies that the key didn't exist at the time.
-                Ok(()) => None,
+        // will rarely run more than one iteration, nor is it mutually exclusive in any way, it
+        // just ensures that the bucket doesn't change in the meantime in certain specific cases.
+        loop {
+            // Handle the cases of the read snapshot.
+            match node {
                 // There is a branch table. Insert the key-value pair into it.
-                Err(Some(Node::Branch(table))) => table.insert(pair, sponge),
+                Some(Node::Branch(table)) => return table.insert(pair, sponge),
                 // The key exists, so we can simply update the value.
-                Err(Some(Node::Leaf(found_pair))) if found_pair.key == pair.key
+                Some(Node::Leaf(found_pair)) if found_pair.key == pair.key
                     // The reason we use CAS here is that the key could have been removed or
                     // updated after we read it initially. If so, we won't update it for the reason
-                    // that it was logically inserted (`insert` was called) before it being removed
-                    // or updated.  Hence the other version is used, and we don't touch it.
+                    // that it potentially would invalidate unrelated keys.
                     => match bucket.compare_and_swap(
                         Some(Node::Leaf(found_pair)),
                         Some(Node::Leaf(pair)),
                         atomic::Ordering::Release
                     ) {
                         // Everything went well and the leaf was updated.
-                        Ok(()) => Some(found_pair.val),
-                        // Another node was inserted here, meaning that the table is simply
-                        // extended, and the insertion is still potentially valid, so we try to
-                        // insert in the inner table.
-                        Err(Some(Node::Branch(table))) => table.insert(pair, sponge),
-                        // The node was either modified or removed (and maybe replaced by another
-                        // node). The insertion was hence invalidated, and we simply pretend we
-                        // replaced the leaf we read earlier (even though that was another thread's
-                        // work), which we did "logically" (at the point the leaf was read, it had
-                        // matching keys).
-                        // FIXME: This could be a duplicate.
-                        _ => Some(found_pair.val),
+                        Ok(()) => return Some(found_pair.val),
+                        // The CAS failed, so we handle the actual node in the next loop iteration.
+                        Err((actual, _)) => node = actual,
                     },
                 // Another key exists at the position, so we need to extend the table with a
                 // branch, containing both entries.
-                Err(Some(Node::Leaf(mut old_pair))) => {
+                Some(Node::Leaf(mut old_pair)) => {
                     // Create a table that contains both the key-value pair we're inserting and the
                     // one on the place, where we want to insert.
                     let new_table = Table::two_entries(pair, sponge, old_pair, {
@@ -144,41 +140,42 @@ impl<K: Hash + Eq, V> Table<K, V> {
                     // We try to update the current bucket to our table. The reason we use CAS is
                     // that we want to ensure that the bucket was not changed in the meantime, so
                     // we compare to `old_pair`, which must be a leaf with the old key-value pair,
-                    // as the epoch system ensures that it doesn't change while we have the
-                    // reference (therefore there is no ABA problem here). So in essence, we check
-                    // that our value is still the same as the original, and if it is we update it.
-                    // If not, we must handle the new value, which could be anything else (e.g.
-                    // another thread could have extended the leaf too because it is inserting the
-                    // same pair).
+                    // as the CMR system ensures that it doesn't change while we have the reference
+                    // (therefore there is no ABA problem here). So in essence, we check that our
+                    // value is still the same as the original, and if it is we update it. If not,
+                    // we must handle the new value, which could be anything else (e.g. another
+                    // thread could have extended the leaf too because it is inserting the same
+                    // pair).
                     match bucket.compare_and_swap(
                         old_pair,
                         Some(Box::new(Node::Branch(new_table))),
                         atomic::Ordering::Release
                     ) {
-                        // Our update went smooth, and we have extended the leaf to a branch,
-                        // meaning that there now is a sub-table containing the two key-value
-                        // pairs.
-                        Ok(()) => None,
-                        // The update failed. Another thread extended the table, so we will simply
-                        // use the table from the new leaf that the other thread created.
-                        Err(Some(Node::Branch(table))) => table.insert(pair, sponge),
-                        // The node was either updated or removed in the meantime (i.e. before we
-                        // logically inserted/`insert` was called), hence we assume this has
-                        // affected the logical insertion, which therefore means that it shouldn't
-                        // be written as it was overwritten. As a result, we simply return `None`,
-                        // marking that no value was replaced.
-                        // FIXME: This is wrong. The leaf isn't even of matching key.
-                        Err(Some(Node::Leaf(new_pair))) if new_pair.key == pair.key => None,
-                        // As something clearly changed between the initial CAS (which attempted to
-                        // swap an empty bucket) and the most recent CAS, we must re-do the thing
-                        // in order to ensure correctness. Otherwise, the insertion might end up
-                        // lost.
-                        _ => continue 'aba,
-                    }
+                        // The CAS succeeded, meaning that the old non-matching pair was replaced
+                        // by a branch, and given that the old pair wasn't matching, the key wasn't
+                        // already in the structure, so we return `None` to mark this.
+                        Ok(()) => return None,
+                        // The CAS failed, so we handle the actual node in the next loop iteration.
+                        Err((actual, _)) => node = actual,
+                    };
                 },
-                // It is not possible to get `Err(None)` as that was the value we are CAS-ing
-                // against.
-                Err(None) => unreachable!(),
+                // As something clearly changed between the initial CAS (which attempted to swap an
+                // empty bucket) and the most recent CAS, we must re-do the thing in order to
+                // ensure correctness (so we re-do the CAS which was done in the start of the
+                // function). Otherwise, the insertion might end up lost.
+                None => {
+                    match bucket.compare_and_swap(
+                        None,
+                        Some(Box::new(Node::Leaf(pair))),
+                        atomic::Ordering::Release
+                    ) {
+                        // The CAS succeeded, meaning that the key wasn't already in the structure,
+                        // hence we return `None`.
+                        Ok(()) => return None,
+                        // The CAS failed, so we handle the actual node in the next loop iteration.
+                        Err(actual, _) => node = actual,
+                    };
+                },
             };
         }
     }
@@ -188,36 +185,39 @@ impl<K: Hash + Eq, V> Table<K, V> {
         &self,
         key: &K,
         sponge: Sponge,
-    ) -> Option<conc::Guard<K, V>> {
+    ) -> Option<conc::Guard<V>> {
         // We squeeze the sponge to get the right bucket of our table, in which we will potentially
         // remove the key.
         let bucket = self.buckets[sponge.squeeze() as usize];
 
-        // Load the node (if any) and handle its cases.
-        bucket.load(atomic::Ordering::Acquire).and_then(|node| node.map(|node| match node {
-            // There is a branch, so we must remove the key in the sub-table.
-            Node::Branch(table) => table.remove(key, sponge),
-            // There was a node with the key, which we will try to remove. We use CAS in order to
-            // make sure that it is the same node as the one we read (`bucket`), otherwise we might
-            // remove a wrong node.
-            Node::Leaf(Pair { key: found_key, val }) if found_key == key
-                => match bucket.compare_and_swap(Some(bucket), None, atomic::Ordering::Release) {
-                // Removing the node succeeded: It wasn't changed in the meantime.
-                Ok(()) => Some(val),
-                // The table was extended with a new branch in the meantime, so we will forward the
-                // remove call to the respective sub-table.
-                Err(Some(Node::Branch(table))) => table.remove(key, sponge),
-                // The node was removed or updated by another thread, so our removal is "logically"
-                // done, as it was overruled by another thread in the meantime, either by insertion
-                // or removal of the same node. We return the value it had at time of the logical
-                // removal (i.e. when `remove` was called), as the function acts as if it removed
-                // the node.
-                // FIXME: This could be a duplicate.
-                _ => Some(val),
-            },
-            // A node with a non-matching key was found. Hence, we have nothing to remove.
-            Node::Leaf(..) => None,
-        }))
+        // Load the node.
+        let mut node = bucket.load(atomic::Ordering::Acquire);
+
+        // To avoid the ABA problem, this loop is unfortunately necessary, but keep in mind that it
+        // will rarely run more than one iteration, nor is it mutually exclusive in any way, it
+        // just ensures that the bucket doesn't change in the meantime in certain specific cases.
+        loop {
+            // Handle the respective cases.
+            match node {
+                // The read node was empty, so there's nothing to remove.
+                None => return None,
+                // There is a branch, so we must remove the key in the sub-table.
+                Some(Node::Branch(table)) => return table.remove(key, sponge),
+                // There was a node with the key, which we will try to remove. We use CAS in order to
+                // make sure that it is the same node as the one we read (`bucket`), otherwise we might
+                // remove a wrong node.
+                Some(Node::Leaf(Pair { key: ref found_key, val })) if found_key == key
+                    => match bucket.compare_and_swap(Some(bucket), None, atomic::Ordering::Release) {
+                    // Removing the node succeeded: It wasn't changed in the meantime.
+                    Ok(()) => return Some(val),
+                    // The CAS failed, meaning that in the meantime, the node was changed, so we
+                    // update the node variable and redo the loop to handle the new case.
+                    Err(actual, _) => node = actual,
+                },
+                // A node with a non-matching key was found. Hence, we have nothing to remove.
+                Some(Node::Leaf(..)) => return None,
+            }
+        }
     }
 
     /// Run a closure on every key-value pair in the table.
