@@ -53,6 +53,10 @@
 //! `CONC_DEBUG_MODE=1 cargo test --features debug-tools`. To get stacktraces after each message,
 //! set environment variable `CONC_DEBUG_STACKTRACE`.
 //!
+//! ### Examples
+//!
+//! See the [`sync` source code](https://github.com/redox-os/tfs/tree/master/conc/src/sync).
+//!
 //! ## Tradeoffs - Why not crossbeam/epochs?
 //!
 //! Epochs (EBR) are generally faster than this crate, however the major advantage this has over
@@ -73,15 +77,31 @@
 //! It reminds of the MongoDB debate. It might very well be the fastest solution¹, but if it can't
 //! even ensure consistency in these cases, what is the point?
 //!
-//! A second advantage is that the API of `conc` is - by design - more lightweight interface-wise,
-//! as it doesn't require the call side to pin epochs or similar. This is particularly nice when
-//! you design more complicated use structures.
-//!
 //! That being said, there are cases where the other libraries are perfectly fine (e.g. if you have
 //! a bounded number of thread and a medium-long interval between accesses) and also faster.
 //!
 //! ¹If you want a super fast memory reclamation system, you should try NOP™, and not calling
 //!  destructors.
+//!
+//! ### Other advantages
+//!
+//! - The API of `conc` is - by design - more lightweight interface-wise, as it doesn't require the
+//!   call side to pin epochs or similar. This is particularly nice when you design more
+//!   complicated structures.
+//! - `conc` objects (`Guard<T>`) is not bound to a lifetime or similar, meaning that it is
+//!   `future-rs` compatible among other.
+//! - In `conc`, threads can export garbage while there are active objects, meaning that memory
+//!   won't accumulate on non-stopping usage.
+//! - `conc` is runtime configurable through the `settings` module.
+//! - Better debugging tools.
+//! - More-well tested and well-documented.
+//! - More fine-grained control over the runtime.
+//! - Access to low-level API.
+//!
+//! ### Disadvantages
+//!
+//! - In many cases, it is slower.
+//! - Fewer pre-implemented data structures (for now).
 //!
 //! ## Design & internals
 //!
@@ -114,9 +134,15 @@
 //! instruction, this means that if you are traversing a list or something like that, this library
 //! might not be for you.
 //!
-//! # Settings
+//! ## Settings
 //!
 //! You can reconfigure the system on-the-go through the `settings` module.
+//!
+//! There are also presets. For example, if you experience high memory usage, you can do:
+//!
+//! ```rust
+//! conc::settings::set_local(conc::settings::Settings::low_memory());
+//! ```
 
 #![feature(thread_local_state, const_fn)]
 #![deny(missing_docs)]
