@@ -46,7 +46,7 @@ pub fn try_gc() -> Result<(), ()> {
 /// This shall be called when new garbage is added, as it will trigger a GC by some probability.
 pub fn tick() {
     // Generate a random number and compare it against the probability.
-    if rand::random::<usize>() <= settings::get().gc_probability {
+    if rand::random::<usize>() < settings::get().gc_probability {
         // The outfall was to (attempt at) GC.
         let _ = try_gc();
     }

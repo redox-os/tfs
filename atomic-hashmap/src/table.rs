@@ -157,7 +157,7 @@ impl<K: Hash + Eq, V> Table<K, V> {
                         Ok(()) => return None,
                         // The CAS failed, so we handle the actual node in the next loop iteration.
                         Err((actual, _)) => node = actual,
-                    };
+                    }
                 },
                 // As something clearly changed between the initial CAS (which attempted to swap an
                 // empty bucket) and the most recent CAS, we must re-do the thing in order to
@@ -174,9 +174,9 @@ impl<K: Hash + Eq, V> Table<K, V> {
                         Ok(()) => return None,
                         // The CAS failed, so we handle the actual node in the next loop iteration.
                         Err(actual, _) => node = actual,
-                    };
+                    }
                 },
-            };
+            }
         }
     }
 
