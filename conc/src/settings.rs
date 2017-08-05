@@ -1,4 +1,4 @@
-//! Settings.
+//! Settings and presets.
 
 use std::cell::Cell;
 
@@ -15,7 +15,8 @@ pub struct Settings {
     /// Whenever the system "ticks" it generates a random number. If the number is below this
     /// setting, it will try to collect the garbage.
     ///
-    /// So, this probability is given such that `0` corresponds to 0 and `!0` corresponds to `1`.
+    /// So, this probability is given such that `0` corresponds to never and `!0` corresponds to
+    /// nearly always.
     pub gc_probability: usize,
     /// The maximal amount of garbage before exportation to the global state.
     ///
@@ -30,7 +31,35 @@ pub struct Settings {
     pub max_non_free_hazards: usize,
 }
 
+impl Default for Settings {
+    fn default() -> Settings {
+        Settings {
+            gc_probability: (!0) / 128,
+            max_garbage_before_export: 64,
+            max_non_free_hazards: 16,
+        }
+    }
+}
+
 impl Settings {
+    /// Preset for low memory, high CPU usage.
+    pub fn low_memory() -> Settings {
+        Settings {
+            gc_probability: (!0) / 32,
+            max_garbage_before_export: 16,
+            max_non_free_hazards: 4,
+        }
+    }
+
+    /// Preset for high memory, low CPU usage.
+    pub fn low_cpu() -> Settings {
+        Settings {
+            gc_probability: (!0) / 256,
+            max_garbage_before_export: 128,
+            max_non_free_hazards: 32,
+        }
+    }
+
     /// Disable GC for this settings instance.
     ///
     /// This ensures that the current thread will not be blocked to collect garbage. The garbage
@@ -48,16 +77,6 @@ impl Settings {
         // than one byte) queue would have to fill more than the whole memory space, which is
         // obviously impossible.
         self.max_garbage_before_export = !0;
-    }
-}
-
-impl Default for Settings {
-    fn default() -> Settings {
-        Settings {
-            gc_probability: (!0) / 64,
-            max_garbage_before_export: 128,
-            max_non_free_hazards: 16,
-        }
     }
 }
 
@@ -142,5 +161,15 @@ mod tests {
 
         // Avoid messing with other tests.
         set_local(Settings::default());
+    }
+
+    #[test]
+    fn compare_presets() {
+        let low = Settings::low_memory();
+        let high = Settings::low_cpu();
+
+        assert!(low.gc_probability > high.gc_probability);
+        assert!(high.max_garbage_before_export > low.max_garbage_before_export);
+        assert!(high.max_non_free_hazards > low.max_non_free_hazards);
     }
 }

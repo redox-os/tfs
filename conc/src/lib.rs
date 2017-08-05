@@ -230,11 +230,16 @@ pub fn gc() {
 /// `ptr` from now on, as such thing can mean that new guards can be created after it is dropped
 /// causing use-after-free.
 ///
+/// # Constraints
+///
+/// The `T: Sync` constraint is added to account for the fact that `dtor` might be called in
+/// another thread, meaning that it could cause thread-insafety if the pointer couldn't be shared.
+///
 /// # Destruction
 ///
 /// If the destructor provided panics under execution, it will cause panic in the garbage
 /// collection, and the destructor won't run again.
-pub fn add_garbage<T>(ptr: &'static T, dtor: fn(&'static T)) {
+pub fn add_garbage<T: Sync>(ptr: &'static T, dtor: fn(&'static T)) {
     local::add_garbage(unsafe {
         Garbage::new(ptr as *const T as *const u8 as *mut u8, mem::transmute(dtor))
     });
@@ -251,8 +256,8 @@ pub fn add_garbage<T>(ptr: &'static T, dtor: fn(&'static T)) {
 /// This is unsafe as the pointer could be aliased or invalid. To satisfy invariants, the pointer
 /// shall be a valid object, allocated through `Box::new(x)` or alike, and shall only be used as
 /// long as there are hazard protecting it.
-pub fn add_garbage_box<T>(ptr: *const T) {
-    local::add_garbage(unsafe {
+pub unsafe fn add_garbage_box<T>(ptr: *const T) {
+    local::add_garbage(
         Garbage::new_box(ptr)
-    });
+    );
 }

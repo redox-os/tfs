@@ -47,6 +47,11 @@ impl Garbage {
     /// to secure against double-drops and other issues arising from the fact that we're passing a
     /// pointer.
     // TODO: Find a way to do this safely.
+    // FIXME: This might actually be unsound, as it takes `T` and runs its destructor potentially
+    //        in another thread. In other words, an (unaliased) `&mut T` is available in another
+    //        thread through the destructor, meaning that it should be `Sync`, I think. I can't
+    //        however think of any cases where this would lead to safety issues, but I think it is
+    //        theoretically unsound. Investigate further.
     pub unsafe fn new_box<T>(item: *const T) -> Garbage {
         unsafe fn dtor<T>(ptr: *const u8)  {
             // Drop the box represented by `ptr`.
@@ -100,14 +105,7 @@ mod tests {
     #[cfg(debug_assertions)]
     #[test]
     #[should_panic]
-    fn debug_invalid_pointer_1() {
+    fn debug_invalid_pointer() {
         Garbage::new(ptr::null(), nop);
-    }
-
-    #[cfg(debug_assertions)]
-    #[test]
-    #[should_panic]
-    fn debug_invalid_pointer_2() {
-        Garbage::new(0x1 as *const u8, nop);
     }
 }

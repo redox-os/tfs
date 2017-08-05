@@ -2,9 +2,9 @@
 
 use std::{mem, ptr};
 use std::sync::atomic::{self, AtomicPtr};
+use std::marker::PhantomData;
 
-use local;
-use garbage::Garbage;
+use add_garbage_box;
 use guard::Guard;
 
 /// A concurrently accessible and updatable optional pointer.
@@ -19,6 +19,17 @@ use guard::Guard;
 pub struct Atomic<T> {
     /// The inner atomic pointer.
     inner: AtomicPtr<T>,
+    /// Make the `Sync` and `Send` (and other OIBITs) transitive.
+    ///
+    /// `Sync` is a transitive property of `Atomic<T>` as it shares references through `Guard<T>`.
+    ///
+    /// To avoid illegal interior mutability, we have to ensure that references to `T` can indeed
+    /// be shared cross-thread boundary `Atomic<T>` can. If this restriction was not imposed, one
+    /// could share references to `Atomic<Cell<T>>` across multiple threads and have multiple
+    /// readers of `Cell<T>`.
+    ///
+    /// `Send` is transitive for future-proofing.
+    _marker: PhantomData<T>,
 }
 
 impl<T> Atomic<T> {
@@ -27,6 +38,7 @@ impl<T> Atomic<T> {
         Atomic {
             // Convert the box to a raw pointer.
             inner: AtomicPtr::new(init.map_or(ptr::null_mut(), Box::into_raw)),
+            _marker: PhantomData,
         }
     }
 
@@ -111,7 +123,7 @@ impl<T> Atomic<T> {
         let ptr = self.inner.swap(new, ordering);
         if !ptr.is_null() {
             // Queue the deletion of the content.
-            local::add_garbage(unsafe { Garbage::new_box(ptr) });
+            unsafe { add_garbage_box(ptr); }
         }
     }
 
@@ -140,7 +152,7 @@ impl<T> Atomic<T> {
         }).map(|guard| {
             // Since the pointer is now unreachable from the option, it can safely be queued for
             // deletion.
-            local::add_garbage(unsafe { Garbage::new_box(&*guard) });
+            unsafe { add_garbage_box(&*guard); }
 
             guard
         })
@@ -173,7 +185,7 @@ impl<T> Atomic<T> {
 
             // Queue the deletion of now-unreachable `old` (unless it's `None`).
             if !old.is_null() {
-                local::add_garbage(Garbage::new_box(old));
+                add_garbage_box(old);
             }
 
             Ok(())
@@ -255,7 +267,7 @@ impl<T> Atomic<T> {
 
             // Queue the deletion of now-unreachable `old` (unless it's `None`).
             if !old.is_null() {
-                local::add_garbage(Garbage::new_box(old));
+                add_garbage_box(old);
             }
 
             Ok(guard)
@@ -316,9 +328,7 @@ impl<T> Drop for Atomic<T> {
 
         if !ptr.is_null() {
             // As the read pointer was not null, we can safely call its destructor.
-            unsafe {
-                local::add_garbage(Garbage::new_box(*ptr));
-            }
+            unsafe { add_garbage_box(*ptr); }
         }
     }
 }

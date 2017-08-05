@@ -1,8 +1,9 @@
 //! Treiber stacks.
 
 use std::sync::atomic::{self, AtomicPtr};
+use std::marker::PhantomData;
 use std::ptr;
-use Guard;
+use {Guard, add_garbage_box};
 
 /// A Treiber stack.
 ///
@@ -15,25 +16,8 @@ use Guard;
 pub struct Treiber<T> {
     /// The head node.
     head: AtomicPtr<Node<T>>,
-}
-
-impl<T> Drop for Treiber<T> {
-    fn drop(&mut self) {
-        // Due to the nature of Treiber stacks, there are no active guards of things within the
-        // structure. They're all gone, thus we can safely mess with the inner structure.
-
-        unsafe {
-            let ptr = *self.head.get_mut();
-
-            if !ptr.is_null() {
-                // Call destructors on the stack.
-                (*ptr).destroy();
-                // Finally deallocate the pointer itself.
-                // TODO: Figure out if it is sound if this destructor panics.
-                drop(Box::from_raw(ptr));
-            }
-        }
-    }
+    /// Make the `Sync` and `Send` (and other OIBITs) transitive.
+    _marker: PhantomData<T>,
 }
 
 impl<T> Treiber<T> {
@@ -41,6 +25,7 @@ impl<T> Treiber<T> {
     pub fn new() -> Treiber<T> {
         Treiber {
             head: AtomicPtr::default(),
+            _marker: PhantomData,
         }
     }
 
@@ -70,7 +55,7 @@ impl<T> Treiber<T> {
                 if new == &old {
                     // As we overwrote the old head (the CAS was successful), we must queue its
                     // deletion.
-                    ::add_garbage_box(old.as_ptr());
+                    unsafe { add_garbage_box(old.as_ptr()); }
                     // Map the guard to refer the item.
                     return Some(old.map(|x| &x.item));
                 }
@@ -120,6 +105,25 @@ impl<T> Treiber<T> {
                 None if next.is_null() => break,
                 // If it fails, we will retry the CAS with updated values.
                 new => snapshot = new,
+            }
+        }
+    }
+}
+
+impl<T> Drop for Treiber<T> {
+    fn drop(&mut self) {
+        // Due to the nature of Treiber stacks, there are no active guards of things within the
+        // structure. They're all gone, thus we can safely mess with the inner structure.
+
+        unsafe {
+            let ptr = *self.head.get_mut();
+
+            if !ptr.is_null() {
+                // Call destructors on the stack.
+                (*ptr).destroy();
+                // Finally deallocate the pointer itself.
+                // TODO: Figure out if it is sound if this destructor panics.
+                drop(Box::from_raw(ptr));
             }
         }
     }
