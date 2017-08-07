@@ -106,7 +106,8 @@ impl<T: ?Sized> Guard<T> {
     /// It is very important that this closure does not contain anything which might cause a
     /// garbage collection, as garbage collecting inside this closure will cause the current thread
     /// to be blocked infinitely (because the hazard is blocked) and stop all other threads from
-    /// collecting garbage, leading to memory leaks in those.
+    /// collecting garbage, leading to memory leaks in those — unless it is compiled in debug mode,
+    /// in which case it will likely panic.
     pub fn new<F>(ptr: F) -> Guard<T>
     where F: FnOnce() -> &'static T {
         Guard::try_new::<_, ()>(|| Ok(ptr())).unwrap()
