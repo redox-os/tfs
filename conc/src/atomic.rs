@@ -15,7 +15,7 @@ use guard::Guard;
 /// `std::sync::AtomicPtr` in that it allows references to the inner data without the ABA problem
 /// or any variant thereof.
 ///
-/// It conveniently wraps this crate's API in a seemless manner.
+/// It conveniently wraps this crate's API in a seamless manner.
 pub struct Atomic<T> {
     /// The inner atomic pointer.
     inner: AtomicPtr<T>,
