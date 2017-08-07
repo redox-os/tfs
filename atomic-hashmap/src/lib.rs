@@ -34,7 +34,14 @@ pub struct HashMap<K, V> {
 }
 
 impl<K: Hash + Eq, V> HashMap<K, V> {
+    /// Get a value from the map.
+    pub fn get(&self, key: &K) -> Option<conc::Guard<V>> {
+        self.table.get(key, Sponge::new(&key))
+    }
+
     /// Insert a key with a certain value into the map.
+    ///
+    /// If it already exists, the value is replaced and the old value is returned.
     pub fn insert(&self, key: K, val: V) -> Option<conc::Guard<V>> {
         self.table.insert(table::Pair {
             key: key,
@@ -43,6 +50,8 @@ impl<K: Hash + Eq, V> HashMap<K, V> {
     }
 
     /// Remove a key from the hash map.
+    ///
+    /// If any, the removed value is returned.
     pub fn remove(&self, key: K) -> Option<conc::Guard<V>> {
         self.table.remove(key, Sponge::new(&key))
     }

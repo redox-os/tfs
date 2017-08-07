@@ -181,11 +181,7 @@ impl<K: Hash + Eq, V> Table<K, V> {
     }
 
     /// Remove a key from the table, given its sponge.
-    pub fn remove(
-        &self,
-        key: &K,
-        sponge: Sponge,
-    ) -> Option<conc::Guard<V>> {
+    pub fn remove(&self, key: &K, sponge: Sponge) -> Option<conc::Guard<V>> {
         // We squeeze the sponge to get the right bucket of our table, in which we will potentially
         // remove the key.
         let bucket = self.buckets[sponge.squeeze() as usize];

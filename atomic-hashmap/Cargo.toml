@@ -2,6 +2,7 @@
 name = "atomic-hashmap"
 version = "0.1.0"
 authors = ["ticki <ticki@users.noreply.github.com>"]
+keywords = ["conc", "concurrent", "hashmap", "map", "table"]
 
 [dependencies]
 conc = "0.2"
