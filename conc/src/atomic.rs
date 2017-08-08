@@ -314,7 +314,7 @@ impl<T> Atomic<T> {
     }
 }
 
-// TODO: This isn't possibile to do with `derive(Default)` yet as it adds a hidden `T: Default`.
+// TODO: Use derive when https://github.com/rust-lang/rust/issues/26925 is fixed.
 impl<T> Default for Atomic<T> {
     fn default() -> Atomic<T> {
         Atomic::new(None)

@@ -149,7 +149,9 @@ impl Sponge {
     /// This does length padding, thus ensuring bijectivity.
     fn begin_squeeze(&mut self) {
         // Pad with the length.
-        self.write_usize(self.buffer.len());
+        // TODO: When non-lexical lifetimes land, merge the two following lines.
+        let len = self.buffer.len();
+        self.write_usize(len);
         // Zero the state.
         self.state = 0;
     }
