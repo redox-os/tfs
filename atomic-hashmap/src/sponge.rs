@@ -97,7 +97,7 @@ fn sigma(mut x: u8) -> u8 {
 /// When we start squeezing, we set the state to `0` again. Then we pop the highest byte from the
 /// internal buffer, which is then XOR'd with the state and permuted by σ. This gives the new state
 /// and the extracted byte.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Sponge {
     /// The state of the sponge.
     ///

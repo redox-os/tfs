@@ -7,7 +7,6 @@ use sponge::Sponge;
 use conc;
 
 /// A key-value pair.
-#[derive(Clone)]
 pub struct Pair<K, V> {
     // The key.
     pub key: K,
@@ -32,16 +31,16 @@ pub struct Table<K, V> {
     buckets: [conc::Atomic<Node<K, V>>; 256],
 }
 
-impl<K: Hash + Eq + 'static + Clone, V: Clone> Table<K, V> {
+impl<K: Hash + Eq + 'static, V> Table<K, V> {
     /// Create a table containing two particular entries.
     ///
     /// This takes two key-value pairs, `pair_a` and `pair_b`, and their respective sponges, and
     /// creates a table containing both pairs.
     fn two_entries(
         pair_a: Pair<K, V>,
-        mut sponge_a: Sponge,
+        sponge_a: Sponge,
         pair_b: Pair<K, V>,
-        mut sponge_b: Sponge,
+        sponge_b: Sponge,
     ) -> Table<K, V> {
         // Start with an empty table.
         let mut table = Table::default();
@@ -66,17 +65,16 @@ impl<K: Hash + Eq + 'static + Clone, V: Clone> Table<K, V> {
     }
 
     /// Get the value associated with some key, given its sponge.
-    pub fn get(&self, key: &K, mut sponge: Sponge) -> Option<conc::Guard<V>> {
+    pub fn get(&self, key: &K, sponge: Sponge) -> Option<conc::Guard<V>> {
         // Load the bucket and handle the respective cases.
         self.buckets[sponge.squeeze() as usize]
             .load(atomic::Ordering::Acquire)
             .and_then(|node| match *node {
             // The bucket was a leaf and the keys match, so we can return the bucket's value.
-            Node::Leaf(Pair { key: ref found_key, val: ref found_val }) if key == found_key
-                => Some(node.map(|_| found_val)),
+            Node::Leaf(Pair { key: ref found_key, val: ref found_val }) if key == found_key => Some(node.map(|_| found_val)),
             // The bucket is a branch with another table, so we recurse and look up in said
             // sub-table.
-            Node::Branch(ref table) => table.get(key, sponge),
+            Node::Branch(table) => table.get(key, sponge),
             // The bucket is either a leaf but doesn't match, or is a null pointer, meaning there
             // is no bucket with the key.
             Node::Leaf(_) => None,
@@ -84,10 +82,10 @@ impl<K: Hash + Eq + 'static + Clone, V: Clone> Table<K, V> {
     }
 
     /// Insert a key-value pair into the table, given its sponge.
-    pub fn insert(&self, mut pair: Pair<K, V>, mut sponge: Sponge) -> Option<conc::Guard<V>> {
+    pub fn insert(&self, mut pair: Pair<K, V>, sponge: Sponge) -> Option<conc::Guard<V>> {
         // We squeeze the sponge to get the right bucket of our table, in which we will insert our
         // key-value pair.
-        let bucket = &self.buckets[sponge.squeeze() as usize];
+        let bucket = self.buckets[sponge.squeeze() as usize];
 
         let mut node;
         // We use CAS to place the leaf if and only if the bucket is empty. Otherwise, we must
@@ -119,7 +117,7 @@ impl<K: Hash + Eq + 'static + Clone, V: Clone> Table<K, V> {
             //       lands, this can be simplified to a single `match` statement.
             if let Some(some_node) = node { match *some_node {
                 // There is a branch table. Insert the key-value pair into it.
-                Node::Branch(ref table) => return table.insert(pair, sponge),
+                Node::Branch(table) => return table.insert(pair, sponge),
                 // The key exists, so we can simply update the value.
                 Node::Leaf(ref found_pair) if found_pair.key == pair.key
                     // The reason we use CAS here is that the key could have been removed or
@@ -154,9 +152,7 @@ impl<K: Hash + Eq + 'static + Clone, V: Clone> Table<K, V> {
 
                     // Create a table that contains both the key-value pair we're inserting and the
                     // one on the place, where we want to insert.
-                    // TODO: Eliminate this clone, it is unnecessary (the pairs can be recovered
-                    //       from the table), because they're simply moves into a particular entry.
-                    let new_table = Table::two_entries(pair.clone(), sponge.clone(), old_pair.clone(), old_sponge.clone());
+                    let new_table = Table::two_entries(pair, sponge, old_pair, old_sponge);
 
                     // We try to update the current bucket to our table. The reason we use CAS is
                     // that we want to ensure that the bucket was not changed in the meantime, so

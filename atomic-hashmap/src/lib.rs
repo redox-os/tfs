@@ -35,7 +35,7 @@ pub struct HashMap<K, V> {
     table: table::Table<K, V>,
 }
 
-impl<K: Hash + Eq + 'static, V> HashMap<K, V> {
+impl<K: Hash + Eq + 'static + Clone, V: Clone> HashMap<K, V> {
     /// Get a value from the map.
     pub fn get(&self, key: &K) -> Option<conc::Guard<V>> {
         self.table.get(key, Sponge::new(&key))
@@ -45,10 +45,11 @@ impl<K: Hash + Eq + 'static, V> HashMap<K, V> {
     ///
     /// If it already exists, the value is replaced and the old value is returned.
     pub fn insert(&self, key: K, val: V) -> Option<conc::Guard<V>> {
+        let sponge = Sponge::new(&key);
         self.table.insert(table::Pair {
             key: key,
             val: val,
-        }, Sponge::new(&key))
+        }, sponge)
     }
 
     /// Remove a key from the hash map.
