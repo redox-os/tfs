@@ -1,6 +1,6 @@
 //! RAII guards for hazards.
 
-use std::{cmp, ops};
+use std::ops;
 use std::sync::atomic;
 use {hazard, local};
 
@@ -43,7 +43,7 @@ pub struct Guard<T: 'static + ?Sized> {
 }
 
 impl<T: ?Sized> Guard<T> {
-    /// (Failably) create a new guard.
+    /// Failably create a new guard.
     ///
     /// This has all the same restrictions and properties as `Guard::new()` (please read its
     /// documentation before using), with the exception of being failable.
@@ -113,7 +113,7 @@ impl<T: ?Sized> Guard<T> {
         Guard::try_new::<_, ()>(|| Ok(ptr())).unwrap()
     }
 
-    /// Conditionally create a guard.
+    /// Conditionally create a new guard.
     ///
     /// This acts `try_new`, but with `Option` instead of `Result`.
     pub fn maybe_new<F>(ptr: F) -> Option<Guard<T>>
@@ -126,12 +126,36 @@ impl<T: ?Sized> Guard<T> {
     /// This allows one to map a pointer to a pointer e.g. to an object referenced by the old. It
     /// is very convenient for creating APIs without the need for creating a wrapper type.
     // TODO: Is this sound?
-    pub fn map<U, F>(self, f: F) -> Guard<U>
+    pub fn map<U: ?Sized, F>(self, f: F) -> Guard<U>
     where F: FnOnce(&T) -> &U {
         Guard {
             hazard: self.hazard,
             pointer: f(self.pointer),
         }
+    }
+
+    /// (Failably) map the pointer to another.
+    ///
+    /// This corresponds to `map`, but when the closure returns `Err`, this does as well. In other
+    /// words, the closure can fail.
+    pub fn try_map<U: ?Sized, E, F>(self, f: F) -> Result<Guard<U>, E>
+    where F: FnOnce(&T) -> Result<&U, E> {
+        Ok(Guard {
+            hazard: self.hazard,
+            pointer: f(self.pointer)?,
+        })
+    }
+
+    /// Conditionally map the pointer to another.
+    ///
+    /// This acts `try_map`, but with `Option` instead of `Result`.
+    pub fn maybe_map<U: ?Sized, F>(self, f: F) -> Option<Guard<U>>
+    where F: FnOnce(&T) -> Option<&U> {
+        let hazard = self.hazard;
+        f(self.pointer).map(|res| Guard {
+            hazard: hazard,
+            pointer: res,
+        })
     }
 
     /// Get the raw pointer of this guard.
@@ -140,15 +164,7 @@ impl<T: ?Sized> Guard<T> {
     }
 }
 
-impl<T> cmp::PartialEq for Guard<T> {
-    fn eq(&self, other: &Guard<T>) -> bool {
-        self.as_ptr() == other.as_ptr()
-    }
-}
-
-impl<T> cmp::Eq for Guard<T> {}
-
-impl<T> ops::Deref for Guard<T> {
+impl<T: ?Sized> ops::Deref for Guard<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
@@ -160,6 +176,68 @@ impl<T> ops::Deref for Guard<T> {
 mod tests {
     use super::*;
     use std::mem;
+
+    use Atomic;
+    use std::sync::atomic;
+
+    #[test]
+    fn new() {
+        assert_eq!(&*Guard::new(|| "blah"), "blah");
+    }
+
+    #[test]
+    fn maybe_new() {
+        assert_eq!(&*Guard::maybe_new(|| Some("blah")).unwrap(), "blah");
+        assert!(Guard::<u8>::maybe_new(|| None).is_none());
+    }
+
+    #[test]
+    fn try_new() {
+        assert_eq!(&*Guard::try_new::<_, u8>(|| Ok("blah")).unwrap(), "blah");
+        assert_eq!(Guard::<u8>::try_new(|| Err(2)).unwrap_err(), 2);
+    }
+
+    #[test]
+    fn map() {
+        let g = Guard::new(|| "blah");
+        assert_eq!(&*g.map(|x| {
+            assert_eq!(x, "blah");
+            "blah2"
+        }), "blah2");
+    }
+
+    #[test]
+    fn maybe_map() {
+        let g = Guard::new(|| "blah");
+        assert_eq!(&*g.maybe_map(|x| {
+            assert_eq!(x, "blah");
+            Some("blah2")
+        }).unwrap(), "blah2");
+        let g = Guard::new(|| "blah");
+        assert_eq!(&*g, "blah");
+        assert!(g.maybe_map::<u8, _>(|_| None).is_none());
+    }
+
+    #[test]
+    fn try_map() {
+        let g = Guard::new(|| "blah");
+        assert_eq!(&*g.try_map::<_, u8, _>(|x| {
+            assert_eq!(x, "blah");
+            Ok("blah2")
+        }).unwrap(), "blah2");
+        let g = Guard::new(|| "blah");
+        assert_eq!(&*g, "blah");
+        assert_eq!(g.try_map::<u8, _, _>(|_| Err(2)).unwrap_err(), 2);
+    }
+
+    #[test]
+    fn map_field() {
+        let a = Atomic::new(Some(Box::new((7, 13))));
+        let g = a.load(atomic::Ordering::Relaxed).unwrap().map(|&(_, ref b)| b);
+        drop(a);
+        ::gc();
+        assert_eq!(*g, 13);
+    }
 
     #[test]
     #[should_panic]

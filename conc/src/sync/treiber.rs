@@ -52,7 +52,7 @@ impl<T> Treiber<T> {
             // If it match, we are done as the previous head node was replaced by the tail, popping
             // the top element. The element we return is the one carried by the previous head.
             if let Some(ref new) = snapshot {
-                if new == &old {
+                if new.as_ptr() == old.as_ptr() {
                     // As we overwrote the old head (the CAS was successful), we must queue its
                     // deletion.
                     unsafe { add_garbage_box(old.as_ptr()); }
