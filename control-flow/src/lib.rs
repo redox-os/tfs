@@ -55,6 +55,7 @@ macro_rules! defer {
     (break) => { $crate::Command::Break };
     (continue) => { $crate::Command::Continue };
     ($val:expr) => { $crate::Command::Give($val) };
+    () => { defer!(()) }
 }
 
 /// Run a deferred control-flow command (outside a loop).
@@ -114,7 +115,7 @@ mod tests {
     #[test]
     #[allow(unused_assignments)]
     fn return_early() {
-        let mut x = false;
+        let x = false;
         run!(defer!(return));
         assert!(x);
     }
@@ -135,5 +136,6 @@ mod tests {
     #[test]
     fn direct_value() {
         assert!(run!(defer!(true)));
+        assert_eq!(run!(defer!()), ());
     }
 }

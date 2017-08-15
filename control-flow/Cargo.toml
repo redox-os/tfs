@@ -1,6 +1,6 @@
 [package]
 name = "control-flow"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["ticki <Ticki@users.noreply.github.com>"]
 description = "A hack to control control-flow outside closures."
 repository = "https://github.com/ticki/tfs"
