@@ -1,6 +1,6 @@
 [package]
 name = "conc"
-version = "0.5.0"
+version = "0.5.1"
 authors = ["ticki <Ticki@users.noreply.github.com>"]
 description = "Hazard-pointer-based concurrent memory reclamation."
 repository = "https://github.com/ticki/tfs"
@@ -12,7 +12,7 @@ exclude = ["target", "Cargo.lock"]
 [dependencies]
 lazy_static = "0.2"
 rand = "0.3"
-spin = "0.4"
+parking_lot = "0.4"
 
 [dependencies.backtrace]
 version = "0.3"

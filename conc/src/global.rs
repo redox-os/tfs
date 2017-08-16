@@ -1,6 +1,6 @@
 //! The global state.
 
-use spin::Mutex;
+use parking_lot::Mutex;
 use std::collections::HashSet;
 use std::{mem, panic};
 use {rand, hazard, mpsc, debug, settings};

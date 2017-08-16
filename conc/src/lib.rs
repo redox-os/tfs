@@ -150,7 +150,7 @@
 #[macro_use]
 extern crate lazy_static;
 extern crate rand;
-extern crate spin;
+extern crate parking_lot;
 
 mod atomic;
 mod debug;

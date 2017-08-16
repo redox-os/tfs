@@ -8,7 +8,7 @@
 //! although this is reasonably fast as the lock is only held for very short time, it is
 //! sub-optimal, and blocking.
 
-use spin::Mutex;
+use parking_lot::Mutex;
 use std::sync::Arc;
 use std::mem;
 
