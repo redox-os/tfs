@@ -69,7 +69,7 @@ macro_rules! run {
             $crate::Command::Return(x) => return x,
             _ => panic!("\
                 Using loop-dependent `Command` variants without loop mode enabled. Consider using \
-                `control_loop` instead.
+                `control_loop` instead.\
             "),
         }
     }

@@ -73,7 +73,9 @@ impl<K: Hash + Eq + 'static + Clone, V: Clone> Table<K, V> {
             .and_then(|node| match *node {
             // The bucket was a leaf and the keys match, so we can return the bucket's value.
             Node::Leaf(Pair { key: ref found_key, val: ref found_val }) if key == found_key
-                => Some(node.map(|_| found_val)),
+                // TODO: I spent waaaay too long at trying to make this work without `unsafe`, but
+                //       it doesn't allow me to. Try to remove the `mem::transmute` to see why.
+                => Some(node.map(|_| unsafe { mem::transmute(found_val) })),
             // The bucket is a branch with another table, so we recurse and look up in said
             // sub-table.
             Node::Branch(ref table) => table.get(key, sponge),
@@ -131,7 +133,10 @@ impl<K: Hash + Eq + 'static + Clone, V: Clone> Table<K, V> {
                         atomic::Ordering::Release
                     ) {
                         // Everything went well and the leaf was updated.
-                        Ok(_) => return Some(some_node.map(|_| &found_pair.val)),
+                        // TODO: I spent waaaay too long at trying to make this work without
+                        //       `unsafe`, but it doesn't allow me to. Try to remove the
+                        //       `mem::transmute` to see why.
+                        Ok(_) => return Some(some_node.map(|_| unsafe { mem::transmute(&found_pair.val) })),
                         // The CAS failed, so we handle the actual node in the next loop iteration.
                         Err((actual, Some(box Node::Leaf(pair2)))) => {
                             // Update the node to the newly read snapshot.
@@ -145,7 +150,7 @@ impl<K: Hash + Eq + 'static + Clone, V: Clone> Table<K, V> {
                     },
                 // Another key exists at the position, so we need to extend the table with a
                 // branch, containing both entries.
-                Node::Leaf(mut old_pair) => {
+                Node::Leaf(ref old_pair) => {
                     // Generate the sponge of the old pair's key.
                     let mut old_sponge = Sponge::new(&old_pair.key);
                     // Truncate the sponge, so it is at the point, where we are right now, and
@@ -232,7 +237,10 @@ impl<K: Hash + Eq + 'static + Clone, V: Clone> Table<K, V> {
                 Node::Leaf(Pair { key: ref found_key, ref val }) if found_key == key
                     => match bucket.compare_and_swap(Some(&*some_node), None, atomic::Ordering::Release) {
                     // Removing the node succeeded: It wasn't changed in the meantime.
-                    Ok(_) => return Some(some_node.map(|_| val)),
+                    // TODO: I spent waaaay too long at trying to make this work without `unsafe`,
+                    //       but it doesn't allow me to. Try to remove the `mem::transmute` to see
+                    //       why.
+                    Ok(_) => return Some(some_node.map(|_| unsafe { mem::transmute(val) })),
                     // The CAS failed, meaning that in the meantime, the node was changed, so we
                     // update the node variable and redo the loop to handle the new case.
                     Err((actual, _)) => node = actual,
