@@ -1,7 +1,7 @@
 //! The internal table structure.
 
 use std::hash::Hash;
-use std::mem;
+use std::{mem, ptr};
 use std::sync::atomic;
 use sponge::Sponge;
 use conc;
@@ -74,8 +74,9 @@ impl<K: Hash + Eq + 'static + Clone, V: Clone> Table<K, V> {
             // The bucket was a leaf and the keys match, so we can return the bucket's value.
             Node::Leaf(Pair { key: ref found_key, val: ref found_val }) if key == found_key
                 // TODO: I spent waaaay too long at trying to make this work without `unsafe`, but
-                //       it doesn't allow me to. Try to remove the `mem::transmute` to see why.
-                => Some(node.map(|_| unsafe { mem::transmute(found_val) })),
+                //       it doesn't allow me to. Try to remove the `mem::transmute` and `ptr::read`
+                //       to see why.
+                => Some(unsafe { ptr::read(&node) }.map(|_| unsafe { mem::transmute(found_val) })),
             // The bucket is a branch with another table, so we recurse and look up in said
             // sub-table.
             Node::Branch(ref table) => table.get(key, sponge),
@@ -135,8 +136,8 @@ impl<K: Hash + Eq + 'static + Clone, V: Clone> Table<K, V> {
                         // Everything went well and the leaf was updated.
                         // TODO: I spent waaaay too long at trying to make this work without
                         //       `unsafe`, but it doesn't allow me to. Try to remove the
-                        //       `mem::transmute` to see why.
-                        Ok(_) => return Some(some_node.map(|_| unsafe { mem::transmute(&found_pair.val) })),
+                        //       `mem::transmute` and `ptr::read` to see why.
+                        Ok(_) => return Some(unsafe { ptr::read(&some_node) }.map(|_| unsafe { mem::transmute(&found_pair.val) })),
                         // The CAS failed, so we handle the actual node in the next loop iteration.
                         Err((actual, Some(box Node::Leaf(pair2)))) => {
                             // Update the node to the newly read snapshot.
@@ -238,9 +239,9 @@ impl<K: Hash + Eq + 'static + Clone, V: Clone> Table<K, V> {
                     => match bucket.compare_and_swap(Some(&*some_node), None, atomic::Ordering::Release) {
                     // Removing the node succeeded: It wasn't changed in the meantime.
                     // TODO: I spent waaaay too long at trying to make this work without `unsafe`,
-                    //       but it doesn't allow me to. Try to remove the `mem::transmute` to see
-                    //       why.
-                    Ok(_) => return Some(some_node.map(|_| unsafe { mem::transmute(val) })),
+                    //       but it doesn't allow me to. Try to remove the `mem::transmute` and
+                    //      `ptr::read` to see why.
+                    Ok(_) => return Some(unsafe { ptr::read(&some_node) }.map(|_| unsafe { mem::transmute(val) })),
                     // The CAS failed, meaning that in the meantime, the node was changed, so we
                     // update the node variable and redo the loop to handle the new case.
                     Err((actual, _)) => node = actual,
