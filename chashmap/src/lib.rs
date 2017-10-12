@@ -51,6 +51,7 @@ use std::collections::hash_map;
 use std::hash::{Hash, Hasher, BuildHasher};
 use std::sync::atomic::{self, AtomicUsize};
 use std::{mem, ops, cmp, fmt, iter};
+use std::borrow::Borrow;
 
 /// The atomic ordering used throughout the code.
 const ORDERING: atomic::Ordering = atomic::Ordering::Relaxed;
@@ -209,7 +210,7 @@ impl<K, V> Table<K, V> {
 
 impl<K: PartialEq + Hash, V> Table<K, V> {
     /// Hash some key through the internal hash function.
-    fn hash(&self, key: &K) -> usize {
+    fn hash<T: ?Sized>(&self, key: &T)  -> usize where T:  Hash {
         // Build the initial hash function state.
         let mut hasher = self.hash_builder.build_hasher();
         // Hash the key.
@@ -225,8 +226,8 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
     /// found (will wrap on end), i.e. `matches` returns `true` with the bucket as argument.
     ///
     /// The read guard from the RW-lock of the bucket is returned.
-    fn scan<F>(&self, key: &K, matches: F) -> RwLockReadGuard<Bucket<K, V>>
-    where F: Fn(&Bucket<K, V>) -> bool {
+    fn scan<F, Q: ?Sized>(&self, key: &Q, matches: F) -> RwLockReadGuard<Bucket<K, V>>
+    where F: Fn(&Bucket<K, V>) -> bool,  K: Borrow<Q>, Q: Hash  {
         // Hash the key.
         let hash = self.hash(key);
 
@@ -249,8 +250,8 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
     ///
     /// This is similar to `scan`, but instead of an immutable lock guard, a mutable lock guard is
     /// returned.
-    fn scan_mut<F>(&self, key: &K, matches: F) -> RwLockWriteGuard<Bucket<K, V>>
-    where F: Fn(&Bucket<K, V>) -> bool {
+    fn scan_mut<F, Q: ?Sized>(&self, key: &Q, matches: F) -> RwLockWriteGuard<Bucket<K, V>>
+    where F: Fn(&Bucket<K, V>) -> bool,  K: Borrow<Q>, Q: Hash {
         // Hash the key.
         let hash = self.hash(key);
 
@@ -336,11 +337,14 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
     ///
     /// This searches some key `key`, and returns a immutable lock guard to its bucket. If the key
     /// couldn't be found, the returned value will be an `Empty` cluster.
-    fn lookup(&self, key: &K) -> RwLockReadGuard<Bucket<K, V>> {
+    fn lookup<Q: ?Sized>(&self, key: &Q) -> RwLockReadGuard<Bucket<K, V>> 
+        where 
+            K: Borrow<Q>, 
+            Q: PartialEq + Hash {
         self.scan(key, |x| match *x {
             // We'll check that the keys does indeed match, as the chance of hash collisions
             // happening is inevitable
-            Bucket::Contains(ref candidate_key, _) if key == candidate_key => true,
+            Bucket::Contains(ref candidate_key, _) if key.eq(candidate_key.borrow()) => true,
             // We reached an empty bucket, meaning that there are no more buckets, not even removed
             // ones, to search.
             Bucket::Empty => true,
@@ -354,11 +358,14 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
     ///
     /// Replacing at this bucket is safe as the bucket will be in the same cluster of buckets as
     /// the first priority cluster.
-    fn lookup_mut(&self, key: &K) -> RwLockWriteGuard<Bucket<K, V>> {
+    fn lookup_mut<Q: ?Sized>(&self, key: &Q) -> RwLockWriteGuard<Bucket<K, V>> 
+        where 
+            K: Borrow<Q>, 
+            Q: PartialEq + Hash {
         self.scan_mut(key, |x| match *x {
             // We'll check that the keys does indeed match, as the chance of hash collisions
             // happening is inevitable
-            Bucket::Contains(ref candidate_key, _) if key == candidate_key => true,
+            Bucket::Contains(ref candidate_key, _) if key.eq(candidate_key.borrow()) => true,
             // We reached an empty bucket, meaning that there are no more buckets, not even removed
             // ones, to search.
             Bucket::Empty => true,
@@ -670,14 +677,16 @@ impl<K, V> CHashMap<K, V> {
         }
     }
 }
-
+  
 impl<K: PartialEq + Hash, V> CHashMap<K, V> {
     /// Get the value of some key.
     ///
     /// This will lookup the entry of some key `key`, and acquire the read-only lock. This means
     /// that all other parties are blocked from _writing_ (not reading) this value while the guard
     /// is held.
-    pub fn get(&self, key: &K) -> Option<ReadGuard<K, V>> {
+    pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<ReadGuard<K, V>>
+        where K: Borrow<Q>,
+              Q: Hash + PartialEq {
         // Acquire the read lock and lookup in the table.
         if let Ok(inner) = OwningRef::new(
             OwningHandle::new_with_fn(self.table.read(), |x| unsafe { &*x }.lookup(key))
@@ -692,12 +701,15 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
         }
     }
 
+
     /// Get the (mutable) value of some key.
     ///
     /// This will lookup the entry of some key `key`, and acquire the writable lock. This means
     /// that all other parties are blocked from both reading and writing this value while the guard
     /// is held.
-    pub fn get_mut(&self, key: &K) -> Option<WriteGuard<K, V>> {
+    pub fn get_mut<Q: ?Sized>(&self, key: &Q) -> Option<WriteGuard<K, V>> 
+        where K: Borrow<Q>,
+              Q: Hash + PartialEq {
         // Acquire the write lock and lookup in the table.
         if let Ok(inner) = OwningHandle::try_new(OwningHandle::new_with_fn(
             self.table.read(),
@@ -721,7 +733,9 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
     }
 
     /// Does the hash map contain this key?
-    pub fn contains_key(&self, key: &K) -> bool {
+    pub fn contains_key<Q: ?Sized>(&self, key: &Q) -> bool 
+        where K: Borrow<Q>,
+              Q: Hash + PartialEq{
         // Acquire the lock.
         let lock = self.table.read();
         // Look the key up in the table
@@ -872,7 +886,10 @@ impl<K: PartialEq + Hash, V> CHashMap<K, V> {
     ///
     /// This removes and returns the entry with key `key`. If no entry with said key exists, it
     /// will simply return `None`.
-    pub fn remove(&self, key: &K) -> Option<V> {
+    pub fn remove<Q: ?Sized>(&self, key: &Q) -> Option<V> 
+        where 
+            K: Borrow<Q>, 
+            Q: PartialEq + Hash {
         // Acquire the read lock of the table.
         let lock = self.table.read();
 
