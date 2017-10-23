@@ -6,15 +6,15 @@
 TFS: Next-generation file system
 ================================
 
-TFS is a modular, fast, and feature rich next-gen file system, employing
-modern techniques for high performance, high space efficiency, and high
-scalability.
+**TFS** is a *modular*, *fast*, and *feature rich* **next-gen file system**, employing
+modern techniques for **high performance**, **high space efficiency**, and **high
+scalability**.
 
-TFS was created out of the need for a modern file system for Redox OS, as a
-replacement for ZFS, which proved to be slow to implement because of its
+**TFS** was created out of the need for a **modern file system for Redox OS**, as a
+replacement for *ZFS*, which proved to be slow to implement because of its
 monolithic design.
 
-TFS is inspired by the ideas behind ZFS, but at the same time it aims to be
+**TFS** is inspired by the ideas behind *ZFS*, but at the same time it aims to be
 modular and easier to implement.
 
 TFS is not related to the file system of the same name by *terminalcloud*.
@@ -30,7 +30,7 @@ TFS is not related to the file system of the same name by *terminalcloud*.
 Design goals
 ------------
 
-TFS is designed with the following goals in mind:
+**TFS** is designed with the following goals in mind:
 
 Concurrent
     TFS contains very few locks and aims to be as suitable for multithreaded
