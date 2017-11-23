@@ -198,20 +198,15 @@ impl State {
     pub fn pop(&mut self, last: u64) {
         // Decrese the written bytes counter.
         self.written -= 8;
+        
+        // Undo rotation
+        let a = self.d;
+        self.d = self.c;
+        self.c = self.b;
+        self.b = self.a;
 
         // Remove the recently written data.
-        self.d = helper::undiffuse(self.d) ^ last;
-
-        let mut a = self.a;
-
-        //  Rotate back.
-        //  _______________________
-        // v                       |
-        // a ----> b ----> c ----> d
-        self.a = self.d;
-        self.b = a;
-        self.c = self.b;
-        self.d = self.c;
+        self.a = helper::undiffuse(a) ^ last;
     }
 
     /// Finalize the state.
