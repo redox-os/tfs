@@ -229,6 +229,45 @@ impl State {
         // changes in the output).
         helper::diffuse(a)
     }
+    
+    /// Finalize the state with 128-bit output.
+    /// 
+    /// Note that the output is essentially two 64-bit hashes taken on different parts of the input
+    /// with no mixing between these two hashes. In particular, if there is no more than 8 bytes of
+    /// input, a subset of the output will simply be a copy of the input key (XORed together).
+    /// 
+    /// **This is not a cryptographic hash function.** The only uses over 64-bit output are to
+    /// reduce collisions (likely insignificant) and to preserve more entropy (when used to produce
+    /// a key, in cases where *both* input and output of the hash function is secret).
+    pub fn finalize128(self) -> (u64, u64) {
+        let State { written, mut a, mut b, c, d } = self;
+
+        a ^= c;
+        b ^= d;
+        
+        // As in finalize(), XOR with number of bytes written. We don't need this to affect all
+        // parts of output. The final diffuse(a) is simply to diffuse small changes in `written`.
+        a ^= written;
+        (helper::diffuse(a), b)
+    }
+    
+    /// Finalize the state with 256-bit output.
+    /// 
+    /// Note that the output is essentially four 64-bit hashes taken on different parts of the
+    /// nput with no mixing between these two hashes. In particular, if there are less than 25
+    /// bytes of input, a subset of output will simply be a copy of the input key.
+    /// 
+    /// **This is not a cryptographic hash function.** The only uses over 64-bit output are to
+    /// reduce collisions (likely insignificant) and to preserve more entropy (when used to produce
+    /// a key, in cases where *both* input and output of the hash function is secret).
+    pub fn finalize256(self) -> (u64, u64, u64, u64) {
+        let State { written, mut a, b, c, d } = self;
+
+        // As in finalize(), XOR with number of bytes written. We don't need this to affect all
+        // parts of output. The final diffuse(a) is simply to diffuse small changes in `written`.
+        a ^= written;
+        (helper::diffuse(a), b, c, d)
+    }
 }
 
 /// Hash some buffer.
@@ -323,6 +362,27 @@ mod tests {
     fn shakespear() {
         hash_match(b"to be or not to be");
         hash_match(b"love is a wonderful terrible thing");
+    }
+    
+    #[test]
+    fn fixed() {
+        let text1 = "to be or not to be";
+        let text2 = "To say the truth, reason and love keep little company together now-a-days.";
+        let key = (1, 2, 3, 4);
+        
+        assert_eq!(State::hash(text1.as_bytes(), key).finalize(),
+            17668174308057396010);
+        assert_eq!(State::hash(text1.as_bytes(), key).finalize128(),
+            (5668955536430251100, 580969811955034951));
+        assert_eq!(State::hash(text1.as_bytes(), key).finalize256(),
+            (15539999726964083260, 580969811955034947, 12487322460008013292, 4));
+        
+        assert_eq!(State::hash(text2.as_bytes(), key).finalize(),
+            9612626706651696580);
+        assert_eq!(State::hash(text2.as_bytes(), key).finalize128(),
+            (98617549140793774, 13535749936723083946));
+        assert_eq!(State::hash(text2.as_bytes(), key).finalize256(),
+            (15714174257805948427, 7681793730966948527, 5582628158086256701, 15079056956347828229));
     }
 
     #[test]
