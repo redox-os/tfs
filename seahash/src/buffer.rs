@@ -65,7 +65,7 @@ impl State {
 
             // Calculate the number of excessive bytes. These are bytes that could not be handled
             // in the loop above.
-            let mut excessive = buf.len() as usize + buf.as_ptr() as usize - end_ptr as usize;
+            let mut excessive = buf.len() % 32;
             // Handle the excessive bytes.
             match excessive {
                 0 => {},
@@ -73,7 +73,7 @@ impl State {
                     // 1 or more excessive.
 
                     // Write the last excessive bytes (<8 bytes).
-                    a ^= helper::read_int(slice::from_raw_parts(ptr as *const u8, excessive));
+                    a ^= helper::read_int(slice::from_raw_parts(ptr, excessive));
 
                     // Diffuse.
                     a = helper::diffuse(a);

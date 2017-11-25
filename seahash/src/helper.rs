@@ -60,7 +60,7 @@ pub unsafe fn read_u64(ptr: *const u8) -> u64 {
     {
         // We cannot be sure about the memory layout of a potentially emulated 64-bit integer, so
         // we read it manually. If possible, the compiler should emit proper instructions.
-        (*(ptr as *const u32)).to_le() as u64 | ((*(ptr as *const u32)).to_le() as u64) << 32
+        (*(ptr as *const u32)).to_le() as u64 | ((*(ptr as *const u32).offset(1)).to_le() as u64) << 32
     }
 
     #[cfg(target_pointer_width = "64")]
