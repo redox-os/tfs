@@ -15,3 +15,4 @@ mod tests;
 
 pub use decompress::decompress;
 pub use compress::compress;
+pub use decompress::Error;
