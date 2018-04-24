@@ -13,5 +13,5 @@ mod compress;
 #[cfg(test)]
 mod tests;
 
-pub use decompress::decompress;
+pub use decompress::{decompress, Error};
 pub use compress::compress;
