@@ -168,12 +168,12 @@ impl<K, V> Bucket<K, V> {
 /// 1. It is not wrapped in a lock, meaning that resizing and reallocation is not possible.
 /// 2. It does not track the number of occupied buckets, making it expensive to obtain the load
 ///    factor.
-struct Table<K, V> {
+struct Table<K, V, H: BuildHasher = hash_map::RandomState> {
     /// The hash function builder.
     ///
     /// This randomly picks a hash function from some family of functions in libstd. This
     /// effectively eliminates the issue of hash flooding.
-    hash_builder: hash_map::RandomState,
+    hash_builder: H,
     /// The bucket array.
     ///
     /// This vector stores the buckets. The order in which they're stored is far from arbitrary: A
@@ -184,8 +184,9 @@ struct Table<K, V> {
 }
 
 impl<K, V> Table<K, V> {
-    /// Create a table with a certain number of buckets.
-    fn new(buckets: usize) -> Table<K, V> {
+    /// Create a table with a certain number of buckets and a specified BuildHasher.
+    fn with_hasher<H>(buckets: usize, hash_builder: H) -> Table<K, V, H>
+    where H: BuildHasher {
         // TODO: For some obscure reason `RwLock` doesn't implement `Clone`.
 
         // Fill a vector with `buckets` of `Empty` buckets.
@@ -195,19 +196,30 @@ impl<K, V> Table<K, V> {
         }
 
         Table {
-            // Generate a hash function.
-            hash_builder: hash_map::RandomState::new(),
+            hash_builder: hash_builder,
             buckets: vec,
         }
     }
 
+    /// Create a table with at least some capacity and a specified BuildHasher.
+    fn with_capacity_and_hasher<H>(cap: usize, hash_builder: H) -> Table<K, V, H>
+    where H: BuildHasher {
+        Table::with_hasher(cmp::max(MINIMUM_CAPACITY, cap * LENGTH_MULTIPLIER), hash_builder)
+    }
+
+    /// Create a table with a certain number of buckets.
+    fn new(buckets: usize) -> Table<K, V, hash_map::RandomState> {
+        // Generate a hash function.
+        Table::with_hasher(buckets, hash_map::RandomState::new())
+    }
+
     /// Create a table with at least some capacity.
-    fn with_capacity(cap: usize) -> Table<K, V> {
-        Table::new(cmp::max(MINIMUM_CAPACITY, cap * LENGTH_MULTIPLIER))
+    fn with_capacity(cap: usize) -> Table<K, V, hash_map::RandomState> {
+        Table::with_capacity_and_hasher(cap, hash_map::RandomState::new())
     }
 }
 
-impl<K: PartialEq + Hash, V> Table<K, V> {
+impl<K: PartialEq + Hash, V, H: BuildHasher> Table<K, V, H> {
     /// Hash some key through the internal hash function.
     fn hash(&self, key: &K) -> usize {
         // Build the initial hash function state.
@@ -552,9 +564,9 @@ impl<'a, K: fmt::Debug, V: fmt::Debug> fmt::Debug for WriteGuard<'a, K, V> {
 ///
 /// It is not an atomic or lockless hash table, since such construction is only useful in very few
 /// cases, due to limitations on in-place operations on values.
-pub struct CHashMap<K, V> {
+pub struct CHashMap<K, V, H: BuildHasher = hash_map::RandomState> {
     /// The inner table.
-    table: RwLock<Table<K, V>>,
+    table: RwLock<Table<K, V, H>>,
     /// The total number of KV pairs in the table.
     ///
     /// This is used to calculate the load factor.
@@ -562,6 +574,20 @@ pub struct CHashMap<K, V> {
 }
 
 impl<K, V> CHashMap<K, V> {
+    /// Create a new hash map with a certain capacity and a specified hash builder.
+    ///
+    /// "Capacity" means the amount of entries the hash map can hold before reallocating. This
+    /// function allocates a hash map with at least the capacity of `cap`.
+    pub fn with_capacity_and_hasher<H>(cap: usize, hash_builder: H) -> CHashMap<K, V, H>
+    where H: BuildHasher {
+        CHashMap {
+            // Start at 0 KV pairs.
+            len: AtomicUsize::new(0),
+            // Make a new empty table. We will make sure that it is at least one.
+            table: RwLock::new(Table::with_capacity_and_hasher(cap, hash_builder)),
+        }
+    }
+
     /// Create a new hash map with a certain capacity.
     ///
     /// "Capacity" means the amount of entries the hash map can hold before reallocating. This
@@ -573,6 +599,12 @@ impl<K, V> CHashMap<K, V> {
             // Make a new empty table. We will make sure that it is at least one.
             table: RwLock::new(Table::with_capacity(cap)),
         }
+    }
+
+    /// Create a new hash map with the specified hash builder.
+    pub fn with_hasher<H>(hash_builder: H) -> CHashMap<K, V, H>
+    where H: BuildHasher {
+        CHashMap::with_capacity_and_hasher(DEFAULT_INITIAL_CAPACITY, hash_builder)
     }
 
     /// Create a new hash map.
