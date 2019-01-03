@@ -702,3 +702,10 @@ fn insert_into_map_full_of_free_buckets() {
         m.remove(&i);
     }
 }
+
+#[test]
+fn lookup_borrowed() {
+    let m = CHashMap::with_capacity(1);
+    m.insert("v".to_owned(), "value");
+    m.get("v").unwrap();
+}
