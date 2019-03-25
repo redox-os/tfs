@@ -21,8 +21,8 @@ pub struct State {
 
 impl State {
     /// Create a new state vector with some initial values.
-    pub fn new(a: u64, b: u64, c: u64, d: u64) -> State {
-        State {
+    pub fn new(a: u64, b: u64, c: u64, d: u64) -> Self {
+        Self {
             a: a,
             b: b,
             c: c,
@@ -32,7 +32,7 @@ impl State {
     }
 
     /// Hash a buffer with some seed.
-    pub fn hash(buf: &[u8], (mut a, mut b, mut c, mut d): (u64, u64, u64, u64)) -> State {
+    pub fn hash(buf: &[u8], (mut a, mut b, mut c, mut d): (u64, u64, u64, u64)) -> Self {
         unsafe {
             // We use 4 different registers to store seperate hash states, because this allows us
             // to update them seperately, and consequently exploiting ILP to update the states in
@@ -163,7 +163,7 @@ impl State {
             }
         }
 
-        State {
+        Self {
             a: a,
             b: b,
             c: c,
@@ -174,10 +174,8 @@ impl State {
 
     /// Write another 64-bit integer into the state.
     pub fn push(&mut self, x: u64) {
-        let mut a = self.a;
-
         // Mix `x` into `a`.
-        a = helper::diffuse(a ^ x);
+        let a = helper::diffuse(self.a ^ x);
 
         //  Rotate around.
         //  _______________________
@@ -202,14 +200,12 @@ impl State {
         // Remove the recently written data.
         self.d = helper::undiffuse(self.d) ^ last;
 
-        let mut a = self.a;
-
         //  Rotate back.
         //  _______________________
         // v                       |
         // a ----> b ----> c ----> d
         self.a = self.d;
-        self.b = a;
+        self.b = self.a;
         self.c = self.b;
         self.d = self.c;
     }
