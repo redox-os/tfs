@@ -42,9 +42,9 @@ impl<K: Hash + Eq + 'static + Clone, V: Clone> Table<K, V> {
         mut sponge_a: Sponge,
         pair_b: Pair<K, V>,
         mut sponge_b: Sponge,
-    ) -> Table<K, V> {
+    ) -> Self {
         // Start with an empty table.
-        let mut table = Table::default();
+        let mut table = Self::default();
 
         // Squeeze the two sponges.
         let pos_a = sponge_a.squeeze();
@@ -287,8 +287,8 @@ impl<K: Hash + Eq + 'static + Clone, V: Clone> Table<K, V> {
 
 // TODO: Use derive when https://github.com/rust-lang/rust/issues/26925 is fixed.
 impl<K, V> Default for Table<K, V> {
-    fn default() -> Table<K, V> {
-        Table {
+    fn default() -> Self {
+        Self {
             // FIXME: This is a really bad idea as it relies on layout in `conc`, but it is
             //        necessary until https://github.com/rust-lang/rfcs/issues/1109 is fixed.
             buckets: unsafe { mem::zeroed() },

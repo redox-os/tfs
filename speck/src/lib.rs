@@ -83,11 +83,11 @@ impl fmt::Debug for Key {
 
 impl Key {
     /// Generate a new key from some seed.
-    pub fn new(k: u128) -> Key {
+    pub fn new(k: u128) -> Self {
         let mut k1 = (k >> 64) as u64;
         let mut k2 = k as u64;
 
-        let mut ret = Key {
+        let mut ret = Self {
             schedule: [0; ROUNDS as usize],
         };
 
