@@ -195,8 +195,8 @@ impl DiskHeader {
     ///
     /// The state flag is initialized to `Open` state and must be manually set, if another value is
     /// prefered.
-    fn new(options: Options) -> DiskHeader {
-        DiskHeader {
+    fn new(options: Options) -> Self {
+        Self {
             // This implementation has full compatibility.
             magic_number: MagicNumber::TOTAL_COMPATIBILITY_MAGIC_NUMBER,
             // We simply use the current version.
@@ -215,7 +215,7 @@ impl DiskHeader {
     ///
     /// This will construct it into memory while performing error checks on the header to ensure
     /// correctness.
-    fn decode(buf: &disk::SectorBuf) -> Result<DiskHeader, Error> {
+    fn decode(buf: &disk::SectorBuf) -> Result<Self, Error> {
         // # Introducer Section
         //
         // This section has the purpose of defining the implementation, version, and type of the
@@ -300,7 +300,7 @@ impl DiskHeader {
                                          {:x}, found {:x}", expected, found));
         }
 
-        DiskHeader {
+        Self {
             magic_number: magic_number,
             version_number: version_number,
             uid: uid,

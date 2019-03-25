@@ -49,7 +49,7 @@ impl<T: ?Sized> Guard<T> {
     /// documentation before using), with the exception of being failable.
     ///
     /// This means that the closure can return and error and abort the creation of the guard.
-    pub fn try_new<F, E>(ptr: F) -> Result<Guard<T>, E>
+    pub fn try_new<F, E>(ptr: F) -> Result<Self, E>
     where F: FnOnce() -> Result<&'static T, E> {
         // Increment the number of guards currently being created.
         #[cfg(debug_assertions)]
@@ -108,7 +108,7 @@ impl<T: ?Sized> Guard<T> {
     /// to be blocked infinitely (because the hazard is blocked) and stop all other threads from
     /// collecting garbage, leading to memory leaks in those — unless it is compiled in debug mode,
     /// in which case it will likely panic.
-    pub fn new<F>(ptr: F) -> Guard<T>
+    pub fn new<F>(ptr: F) -> Self
     where F: FnOnce() -> &'static T {
         Guard::try_new::<_, ()>(|| Ok(ptr())).unwrap()
     }
@@ -116,7 +116,7 @@ impl<T: ?Sized> Guard<T> {
     /// Conditionally create a new guard.
     ///
     /// This acts `try_new`, but with `Option` instead of `Result`.
-    pub fn maybe_new<F>(ptr: F) -> Option<Guard<T>>
+    pub fn maybe_new<F>(ptr: F) -> Option<Self>
     where F: FnOnce() -> Option<&'static T> {
         Guard::try_new(|| ptr().ok_or(())).ok()
     }

@@ -11,8 +11,8 @@ pub struct Stm<T> {
 
 impl<T> Stm<T> {
     /// Create a new STM container.
-    pub fn new(data: Option<Box<T>>) -> Stm<T> {
-        Stm {
+    pub fn new(data: Option<Box<T>>) -> Self {
+        Self {
             inner: Atomic::new(data),
         }
     }

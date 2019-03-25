@@ -34,8 +34,8 @@ pub struct Atomic<T> {
 
 impl<T> Atomic<T> {
     /// Create a new `Atomic<T>` with given contents.
-    pub fn new(init: Option<Box<T>>) -> Atomic<T> {
-        Atomic {
+    pub fn new(init: Option<Box<T>>) -> Self {
+        Self {
             // Convert the box to a raw pointer.
             inner: AtomicPtr::new(init.map_or(ptr::null_mut(), Box::into_raw)),
             _marker: PhantomData,
@@ -316,8 +316,8 @@ impl<T> Atomic<T> {
 
 // TODO: Use derive when https://github.com/rust-lang/rust/issues/26925 is fixed.
 impl<T> Default for Atomic<T> {
-    fn default() -> Atomic<T> {
-        Atomic::new(None)
+    fn default() -> Self {
+        Self::new(None)
     }
 }
 

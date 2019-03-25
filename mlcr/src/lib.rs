@@ -70,7 +70,7 @@ struct Prediction {
 }
 
 impl cmp::Ord for Prediction {
-    fn cmp(&self, other: &Prediction) -> cmp::Ordering {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
         if self.prediction < other.prediction {
             cmp::Ordering::Less
         } else {
@@ -80,7 +80,7 @@ impl cmp::Ord for Prediction {
 }
 
 impl cmp::PartialOrd for Prediction {
-    fn partial_cmp(&self, other: &Prediction) -> Option<cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
@@ -141,8 +141,8 @@ impl Cache {
     }
 
     /// Create a new cache tracker.
-    pub fn new() -> Cache {
-        Cache {
+    pub fn new() -> Self {
+        Self {
             blocks: HashMap::new(),
             nn: NN::new(&[5, 6, 1]),
             clock: 0,
@@ -246,8 +246,8 @@ pub struct ConcurrentCache {
 
 impl ConcurrentCache {
     /// Create a new concurrent cache tracker.
-    pub fn new() -> ConcurrentCache {
-        ConcurrentCache {
+    pub fn new() -> Self {
+        Self {
             inner: Mutex::new(Cache::new()),
             queue: SegQueue::new(),
         }

@@ -26,8 +26,8 @@ pub struct Cached<D> {
 
 impl<D: Disk> Cached<D> {
     /// Create a cache from a backing disk.
-    fn new(disk: D) -> Cached<D> {
-        Cached {
+    fn new(disk: D) -> Self {
+        Self {
             disk: disk,
             tracker: mlcr::ConcurrentCache::new(),
             sectors: AtomicHashMap::with_capacity(INITIAL_CAPACITY),

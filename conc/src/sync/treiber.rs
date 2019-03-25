@@ -22,8 +22,8 @@ pub struct Treiber<T> {
 
 impl<T> Treiber<T> {
     /// Create a new, empty Treiber stack.
-    pub fn new() -> Treiber<T> {
-        Treiber {
+    pub fn new() -> Self {
+        Self {
             head: AtomicPtr::default(),
             _marker: PhantomData,
         }

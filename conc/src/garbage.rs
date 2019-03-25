@@ -25,10 +25,10 @@ impl Garbage {
     ///
     /// This takes the pointer and destructor (which takes pointer as argument) and construct the
     /// corresponding garbage item.
-    pub fn new(ptr: *const u8, dtor: fn(*const u8)) -> Garbage {
+    pub fn new(ptr: *const u8, dtor: fn(*const u8)) -> Self {
         debug_assert!(ptr as usize > 0, "Creating garbage with invalid pointer.");
 
-        Garbage {
+        Self {
             ptr: ptr,
             dtor: dtor,
         }
@@ -52,13 +52,13 @@ impl Garbage {
     //        thread through the destructor, meaning that it should be `Sync`, I think. I can't
     //        however think of any cases where this would lead to safety issues, but I think it is
     //        theoretically unsound. Investigate further.
-    pub unsafe fn new_box<T>(item: *const T) -> Garbage {
+    pub unsafe fn new_box<T>(item: *const T) -> Self {
         unsafe fn dtor<T>(ptr: *const u8)  {
             // Drop the box represented by `ptr`.
             Box::from_raw(ptr as *mut u8 as *mut T);
         }
 
-        Garbage {
+        Self {
             ptr: item as *const u8,
             dtor: dtor::<T>,
         }

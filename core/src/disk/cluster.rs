@@ -24,7 +24,7 @@ impl little_endian::Encode for Pointer {
 }
 
 impl little_endian::Decode for Option<Pointer> {
-    fn read_le(from: &[u8]) -> Option<Pointer> {
+    fn read_le(from: &[u8]) -> Self {
         if &from[..POINTER_SIZE] == &[0; POINTER_SIZE] {
             // The pointer was null, so we return `None`.
             None

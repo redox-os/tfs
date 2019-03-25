@@ -186,7 +186,7 @@ struct Table<K, V> {
 
 impl<K, V> Table<K, V> {
     /// Create a table with a certain number of buckets.
-    fn new(buckets: usize) -> Table<K, V> {
+    fn new(buckets: usize) -> Self {
         // TODO: For some obscure reason `RwLock` doesn't implement `Clone`.
 
         // Fill a vector with `buckets` of `Empty` buckets.
@@ -195,7 +195,7 @@ impl<K, V> Table<K, V> {
             vec.push(RwLock::new(Bucket::Empty));
         }
 
-        Table {
+        Self {
             // Generate a hash function.
             hash_builder: hash_map::RandomState::new(),
             buckets: vec,
@@ -203,14 +203,14 @@ impl<K, V> Table<K, V> {
     }
 
     /// Create a table with at least some capacity.
-    fn with_capacity(cap: usize) -> Table<K, V> {
-        Table::new(cmp::max(MINIMUM_CAPACITY, cap * LENGTH_MULTIPLIER))
+    fn with_capacity(cap: usize) -> Self {
+        Self::new(cmp::max(MINIMUM_CAPACITY, cap * LENGTH_MULTIPLIER))
     }
 }
 
 impl<K: PartialEq + Hash, V> Table<K, V> {
     /// Hash some key through the internal hash function.
-    fn hash<T: ?Sized>(&self, key: &T)  -> usize where T:  Hash {
+    fn hash<T: ?Sized>(&self, key: &T) -> usize where T: Hash {
         // Build the initial hash function state.
         let mut hasher = self.hash_builder.build_hasher();
         // Hash the key.
@@ -396,7 +396,7 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
     /// # Important
     ///
     /// The table should be empty for this to work correctly/logically.
-    fn fill(&mut self, table: Table<K, V>) {
+    fn fill(&mut self, table: Self) {
         // Run over all the buckets.
         for i in table.buckets {
             // We'll only transfer the bucket if it is a KV pair.
@@ -418,8 +418,8 @@ impl<K: PartialEq + Hash, V> Table<K, V> {
 }
 
 impl<K: Clone, V: Clone> Clone for Table<K, V> {
-    fn clone(&self) -> Table<K, V> {
-        Table {
+    fn clone(&self) -> Self {
+        Self {
             // Since we copy plainly without rehashing etc., it is important that we keep the same
             // hash function.
             hash_builder: self.hash_builder.clone(),
@@ -476,8 +476,8 @@ impl<K, V> IntoIterator for Table<K, V> {
     type Item = (K, V);
     type IntoIter = IntoIter<K, V>;
 
-    fn into_iter(self) -> IntoIter<K, V> {
-        IntoIter {
+    fn into_iter(self) -> Self::IntoIter {
+        Self::IntoIter {
             table: self,
         }
     }
@@ -501,7 +501,7 @@ impl<'a, K, V> ops::Deref for ReadGuard<'a, K, V> {
 }
 
 impl<'a, K, V: PartialEq> cmp::PartialEq for ReadGuard<'a, K, V> {
-    fn eq(&self, other: &ReadGuard<'a, K, V>) -> bool {
+    fn eq(&self, other: &Self) -> bool {
         self == other
     }
 }
