@@ -10,5 +10,5 @@ keywords = ["compression", "lz4", "compress", "decompression", "decompress"]
 exclude = ["target", "Cargo.lock"]
 
 [dependencies]
-byteorder = "0.5"
+byteorder = "1"
 quick-error = "1"
