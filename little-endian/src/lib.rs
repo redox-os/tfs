@@ -175,6 +175,8 @@ mod tests {
 
     #[test]
     fn u8() {
+        test_int(255u8);
+        test_int(130u8);
         test_int(12u8);
         test_int(1u8);
         test_int(0u8);
@@ -182,6 +184,8 @@ mod tests {
 
     #[test]
     fn u16() {
+        test_int::<u16>(0xFFFF);
+        test_int::<u16>(0xABCD);
         test_int::<u16>(0xAB);
         test_int::<u16>(0xBA);
         test_int::<u16>(0);
@@ -189,6 +193,8 @@ mod tests {
 
     #[test]
     fn u32() {
+        test_int::<u32>(0xFFFFFFFF);
+        test_int::<u32>(0xABCDEF01);
         test_int::<u32>(0xABCD);
         test_int::<u32>(0xDCBA);
         test_int::<u32>(0);
@@ -196,6 +202,8 @@ mod tests {
 
     #[test]
     fn u64() {
+        test_int::<u64>(0xFFFFFFFFFFFFFFFF);
+        test_int::<u64>(0xABCDEF0123456789);
         test_int::<u64>(0xABCDEF0);
         test_int::<u64>(0x0FEDCBA);
         test_int::<u64>(0);
@@ -203,6 +211,8 @@ mod tests {
 
     #[test]
     fn u128() {
+        test_int::<u128>(0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF);
+        test_int::<u128>(0xABCDEF0123456789ABCDEF0123456789);
         test_int::<u128>(0xABCDEF012345678);
         test_int::<u128>(0x876543210FEDCBA);
         test_int::<u128>(0);
