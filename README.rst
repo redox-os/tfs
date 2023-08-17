@@ -132,7 +132,7 @@ I've written a number of pieces on the design of TFS:
 
 - `SeaHash: Explained <http://ticki.github.io/blog/seahash-explained/>`_. This
   describes the default checksum algorithm designed for TFS.
-- `On Random-Access Compression <http://ticki.github.io/blog/on-random-access-compression/>`_.
+- `On Random-Access Compression <https://web.archive.org/web/20200718124907/https://ticki.github.io/blog/on-random-access-compression/>`_.
   This post describes the algorithm used for random-access compression.
 - `Ternary as a prediction residue code <http://ticki.github.io/blog/ternary-as-a-prediction-residue-code/>`_. The
   use of this is related to creating a good adaptive (headerless) entropy
