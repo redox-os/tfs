@@ -1,3 +1,8 @@
+
+=========================================================================================================================================================================
+TFS was replaced by `RedoxFS <https://gitlab.redox-os.org/redox-os/redoxfs>` and is no longer maintained, most of the features of TFS have been incorporated into RedoxFS
+=========================================================================================================================================================================
+
 .. image:: https://rawgit.com/ticki/tfs/master/icon.svg
     :alt: The TFS icon.
     :align: center
